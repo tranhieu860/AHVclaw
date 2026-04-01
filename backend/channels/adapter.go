@@ -70,5 +70,6 @@ type InboundFile struct {
 	URL      string `json:"url,omitempty"`
 	Filename string `json:"filename,omitempty"`
 	MimeType string `json:"mime_type,omitempty"`
-	Size     int64  `json:"size,omitempty"`
+	Size       int64  `json:"size,omitempty"`
+	Base64Data string `json:"base64_data,omitempty"`
 }

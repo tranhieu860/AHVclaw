@@ -76,9 +76,13 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 
 	// 5. Build message text with file references
 	msgText := msg.Text
+	var imageBase64Files []InboundFile
 	if len(msg.Files) > 0 {
 		for _, f := range msg.Files {
-			if f.Filename != "" {
+			if f.Base64Data != "" && strings.HasPrefix(f.MimeType, "image/") {
+				// Image with base64 data - will be sent as multimodal content
+				imageBase64Files = append(imageBase64Files, f)
+			} else if f.Filename != "" {
 				msgText += "\n[File received: " + f.Filename + " (" + f.MimeType + "), file_id: " + f.FileID + "]"
 			} else {
 				msgText += "\n[Photo received from Telegram, file_id: " + f.FileID + "]"
@@ -89,6 +93,11 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 	// Save inbound message
 	r.saveChannelMessage(ctx, conv.ID, "inbound", "contact", &msg.ChannelUserID,
 		msgText, nil, &msg.MessageID, nil)
+
+	// 5b. Send typing indicator
+	if err := adapter.SendTyping(msg.ChatID); err != nil {
+		log.Printf("[router] typing indicator error: %v", err)
+	}
 
 	// 6. Load agent config
 	agentID := defaultAgentID
@@ -122,6 +131,25 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 		}
 	}
 
+	// Load memories for context
+	var memoryContext strings.Builder
+	memRows, memErr := db.Pool.Query(ctx,
+		`SELECT type, key, content FROM memories WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 10`,
+		botUserID)
+	if memErr == nil && memRows != nil {
+		defer memRows.Close()
+		for memRows.Next() {
+			var mType, mKey, mContent string
+			if memRows.Scan(&mType, &mKey, &mContent) == nil {
+				memoryContext.WriteString(fmt.Sprintf("- [%s] %s: %s\n", mType, mKey, mContent))
+			}
+		}
+	}
+	if memoryContext.Len() > 0 {
+		systemPrompt += "\n\n## Your memories about this user:\n" + memoryContext.String()
+	}
+	systemPrompt += "\n\nIMPORTANT: When you learn something about the user (name, preferences, etc.), use the memory_save tool to remember it. When asked about past conversations, use memory_search."
+
 	// Parse response settings
 	maxLength := 4096
 	if responseSettingsRaw != nil {
@@ -135,6 +163,29 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 
 	// 7. Build message history
 	messages := r.buildMessageHistory(ctx, conv.ID, systemPrompt)
+
+	// 7b. If there are image files, make the last user message multimodal
+	if len(imageBase64Files) > 0 && len(messages) > 0 {
+		// Find the last user message and make it multimodal
+		for i := len(messages) - 1; i >= 0; i-- {
+			if messages[i].Role == "user" {
+				// Build multimodal content parts
+				contentParts := []map[string]interface{}{
+					{"type": "text", "text": fmt.Sprintf("%v", messages[i].Content)},
+				}
+				for _, imgFile := range imageBase64Files {
+					contentParts = append(contentParts, map[string]interface{}{
+						"type": "image_url",
+						"image_url": map[string]string{
+							"url": "data:" + imgFile.MimeType + ";base64," + imgFile.Base64Data,
+						},
+					})
+				}
+				messages[i].Content = contentParts
+				break
+			}
+		}
+	}
 
 	// 8. Call AI with tool loop
 	toolDefs := tools.AllTools
@@ -218,6 +269,11 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 			Content:   assistantContent,
 			ToolCalls: mergedToolCallsJSON,
 		})
+
+		// Send typing indicator before tool execution
+		if err := adapter.SendTyping(msg.ChatID); err != nil {
+			log.Printf("[router] typing indicator error: %v", err)
+		}
 
 		// Execute each tool call
 		for _, tc := range toolCalls {

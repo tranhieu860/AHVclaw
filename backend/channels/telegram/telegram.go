@@ -1,9 +1,12 @@
 package telegram
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"strconv"
 
 	"github.com/ahvholding/ahvclaw/channels"
@@ -193,15 +196,22 @@ func (a *Adapter) processUpdate(update tgbotapi.Update) {
 		inbound.Text = msg.Caption
 	}
 
-	// Handle photos
+	// Handle photos - download and base64 encode for AI vision
 	if msg.Photo != nil && len(msg.Photo) > 0 {
 		// Use largest photo
 		largest := msg.Photo[len(msg.Photo)-1]
-		inbound.Files = append(inbound.Files, channels.InboundFile{
+		file := channels.InboundFile{
 			FileID:   largest.FileID,
 			MimeType: "image/jpeg",
 			Size:     int64(largest.FileSize),
-		})
+		}
+		// Download photo data and base64 encode
+		if b64, err := a.downloadFileBase64(largest.FileID); err == nil {
+			file.Base64Data = b64
+		} else {
+			log.Printf("[telegram] failed to download photo %s: %v", largest.FileID, err)
+		}
+		inbound.Files = append(inbound.Files, file)
 	}
 
 	// Handle documents
@@ -226,4 +236,25 @@ func (a *Adapter) processUpdate(update tgbotapi.Update) {
 
 	// Route to handler
 	go a.router.HandleInbound(inbound, a)
+}
+
+// downloadFileBase64 downloads a Telegram file and returns its base64-encoded content.
+func (a *Adapter) downloadFileBase64(fileID string) (string, error) {
+	fileURL, err := a.api.GetFileDirectURL(fileID)
+	if err != nil {
+		return "", fmt.Errorf("get file URL: %w", err)
+	}
+
+	resp, err := http.Get(fileURL)
+	if err != nil {
+		return "", fmt.Errorf("download file: %w", err)
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read file: %w", err)
+	}
+
+	return base64.StdEncoding.EncodeToString(data), nil
 }
