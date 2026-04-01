@@ -24,6 +24,7 @@ interface Message {
   tool_calls?: unknown;
   created_at: string;
   source?: string;
+  attachments?: Array<{ id: string; filename: string; mime_type: string; url: string }>;
 }
 
 interface AppStore {

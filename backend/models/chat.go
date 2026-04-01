@@ -31,6 +31,7 @@ type Message struct {
 	Model          *string          `json:"model"`
 	CreatedAt      time.Time        `json:"created_at"`
 	Source         *string          `json:"source,omitempty"`
+	Attachments    *json.RawMessage `json:"attachments,omitempty"`
 }
 
 // WebSocket message types
@@ -44,6 +45,7 @@ type ChatRequest struct {
 	Content        string     `json:"content"`
 	Model          string     `json:"model"`
 	AgentID        *uuid.UUID `json:"agent_id"`
+	Attachments    []string   `json:"attachments"`
 }
 
 type StreamDelta struct {

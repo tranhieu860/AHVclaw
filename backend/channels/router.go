@@ -74,9 +74,21 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 		return
 	}
 
-	// 5. Save inbound message
+	// 5. Build message text with file references
+	msgText := msg.Text
+	if len(msg.Files) > 0 {
+		for _, f := range msg.Files {
+			if f.Filename != "" {
+				msgText += "\n[File received: " + f.Filename + " (" + f.MimeType + "), file_id: " + f.FileID + "]"
+			} else {
+				msgText += "\n[Photo received from Telegram, file_id: " + f.FileID + "]"
+			}
+		}
+	}
+
+	// Save inbound message
 	r.saveChannelMessage(ctx, conv.ID, "inbound", "contact", &msg.ChannelUserID,
-		msg.Text, nil, &msg.MessageID, nil)
+		msgText, nil, &msg.MessageID, nil)
 
 	// 6. Load agent config
 	agentID := defaultAgentID

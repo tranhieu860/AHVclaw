@@ -107,6 +107,8 @@ func (a *Adapter) SendMessage(chatID string, text string) error {
 	return nil
 }
 
+func (a *Adapter) SendTyping(chatID string) error { return nil }
+
 func (a *Adapter) SendFile(chatID string, file channels.FileRef) error {
 	// Zalo OA file sending requires attachment upload first
 	// For now, send the URL as text

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -88,6 +89,45 @@ func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
 	}
 
 	ctx := context.Background()
+
+	// Process attachments
+	userContent := req.Content
+	var attachmentsJSON []byte
+	if len(req.Attachments) > 0 {
+		var atts []map[string]interface{}
+		for _, attID := range req.Attachments {
+			var mimeType string
+			var extractedText *string
+			var storagePath string
+			var originalName string
+			err := db.Pool.QueryRow(ctx,
+				"SELECT mime_type, extracted_text, storage_path, original_name FROM attachments WHERE id = $1 AND user_id = $2",
+				attID, userID).Scan(&mimeType, &extractedText, &storagePath, &originalName)
+			if err != nil {
+				continue
+			}
+			if extractedText != nil && *extractedText != "" {
+				userContent += "\n\n[Attached file: " + originalName + "]\n" + *extractedText
+			} else if strings.HasPrefix(mimeType, "image/") {
+				// Read file and base64 encode for AI vision
+				fileData, err := os.ReadFile(storagePath)
+				if err == nil {
+					b64 := base64.StdEncoding.EncodeToString(fileData)
+					userContent += "\n\n[Image attached: " + originalName + ", base64_data: data:" + mimeType + ";base64," + b64 + "]"
+				} else {
+					userContent += "\n\n[Image attached: " + originalName + " (could not read file)]"
+				}
+			}
+			atts = append(atts, map[string]interface{}{
+				"id": attID, "filename": originalName, "mime_type": mimeType,
+				"url": "/api/uploads/" + attID,
+			})
+		}
+		if len(atts) > 0 {
+			attachmentsJSON, _ = json.Marshal(atts)
+		}
+	}
+
 	convID := req.ConversationID
 
 	// Create conversation if new
@@ -114,10 +154,14 @@ func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
 		}
 	}
 
-	// Save user message
+	// Save user message with attachments
+	var attJSONForDB interface{} = nil
+	if len(attachmentsJSON) > 0 {
+		attJSONForDB = attachmentsJSON
+	}
 	_, _ = db.Pool.Exec(ctx,
-		"INSERT INTO messages (conversation_id, role, content, model, source) VALUES ($1, 'user', $2, $3, 'web')",
-		*convID, req.Content, req.Model)
+		"INSERT INTO messages (conversation_id, role, content, model, source, attachments) VALUES ($1, 'user', $2, $3, 'web', $4)",
+		*convID, userContent, req.Model, attJSONForDB)
 
 	// Load conversation history
 	rows, err := db.Pool.Query(ctx,

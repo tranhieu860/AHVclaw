@@ -44,7 +44,7 @@ func GetConversation(c *fiber.Ctx) error {
 
 	rows, err := db.Pool.Query(context.Background(),
 		`SELECT id, conversation_id, role, content, tool_calls, tool_results,
-		        tokens_in, tokens_out, model, created_at, source
+		        tokens_in, tokens_out, model, created_at, source, attachments
 		 FROM messages WHERE conversation_id = $1
 		 AND conversation_id IN (SELECT id FROM conversations WHERE user_id = $2)
 		 ORDER BY created_at ASC`, convID, userID)
@@ -58,7 +58,7 @@ func GetConversation(c *fiber.Ctx) error {
 		var msg models.Message
 		if err := rows.Scan(&msg.ID, &msg.ConversationID, &msg.Role, &msg.Content,
 			&msg.ToolCalls, &msg.ToolResults, &msg.TokensIn, &msg.TokensOut,
-			&msg.Model, &msg.CreatedAt, &msg.Source); err != nil {
+			&msg.Model, &msg.CreatedAt, &msg.Source, &msg.Attachments); err != nil {
 			continue
 		}
 		messages = append(messages, msg)

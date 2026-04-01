@@ -14,6 +14,8 @@ type ChannelAdapter interface {
 	GetProfile(channelUserID string) (*ContactProfile, error)
 	// ValidateConfig checks whether the adapter config is valid.
 	ValidateConfig() error
+	// SendTyping sends a typing indicator to the chat.
+	SendTyping(chatID string) error
 	// Name returns the channel name (e.g. "telegram", "zalo", "discord").
 	Name() string
 }

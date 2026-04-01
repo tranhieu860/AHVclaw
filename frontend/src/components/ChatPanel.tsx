@@ -38,7 +38,7 @@ export function ChatPanel() {
     loadConversations();
   }, []);
 
-  const sendMessage = useCallback(async (content: string) => {
+  const sendMessage = useCallback(async (content: string, attachmentIds?: string[]) => {
     if (isStreaming) return;
 
     // Add user message to UI immediately
@@ -47,6 +47,7 @@ export function ChatPanel() {
       role: 'user',
       content,
       created_at: new Date().toISOString(),
+      attachments: attachmentIds?.map(id => ({ id, filename: '', mime_type: '', url: '' })),
     });
 
     // Add empty assistant message for streaming
@@ -71,6 +72,7 @@ export function ChatPanel() {
             conversation_id: activeConversationId,
             content,
             model: selectedModel,
+            attachments: attachmentIds || [],
           },
         }));
       };

@@ -96,6 +96,13 @@ func (a *Adapter) SendMessage(chatID string, text string) error {
 	return nil
 }
 
+func (a *Adapter) SendTyping(chatID string) error {
+	if a.session != nil {
+		a.session.ChannelTyping(chatID)
+	}
+	return nil
+}
+
 func (a *Adapter) SendFile(chatID string, file channels.FileRef) error {
 	if a.session == nil {
 		return fmt.Errorf("discord session not connected")

@@ -329,6 +329,9 @@ var migrations = []string{
 	`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS takeover_by UUID`,
 	`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS current_agent_id UUID`,
 	`CREATE INDEX IF NOT EXISTS idx_conv_channel_chat ON conversations(channel_chat_id) WHERE channel_chat_id IS NOT NULL`,
+
+	// 030: Add attachments column to messages
+	`ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachments JSONB`,
 }
 
 func RunMigrations() error {

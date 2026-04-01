@@ -105,6 +105,16 @@ func (a *Adapter) SendMessage(chatID string, text string) error {
 	return err
 }
 
+func (a *Adapter) SendTyping(chatID string) error {
+	id, err := strconv.ParseInt(chatID, 10, 64)
+	if err != nil {
+		return err
+	}
+	action := tgbotapi.NewChatAction(id, tgbotapi.ChatTyping)
+	_, err = a.api.Send(action)
+	return err
+}
+
 func (a *Adapter) SendFile(chatID string, file channels.FileRef) error {
 	id, err := strconv.ParseInt(chatID, 10, 64)
 	if err != nil {
