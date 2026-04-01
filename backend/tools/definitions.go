@@ -21,6 +21,7 @@ var AllTools = []ToolDef{
 	serverStatusDef(),
 	browserNavigateDef(), browserScreenshotDef(), browserClickDef(), browserTypeDef(), browserExtractDef(),
 	knowledgeSearchDef(),
+	delegateAgentDef(),
 }
 
 func fileReadDef() ToolDef {
@@ -173,5 +174,15 @@ func knowledgeSearchDef() ToolDef {
 			"query":{"type":"string","description":"Search query keywords"},
 			"limit":{"type":"integer","description":"Max results to return","default":5}
 		},"required":["query"]
+	}`)
+}
+
+func delegateAgentDef() ToolDef {
+	return makeTool("delegate_agent", "Hand off the current conversation to a different AI agent by name. Use when the user's request is better handled by a specialized agent.", `{
+		"type":"object","properties":{
+			"agent_name":{"type":"string","description":"Name of the agent to delegate to"},
+			"reason":{"type":"string","description":"Reason for delegation"},
+			"conversation_id":{"type":"string","description":"Channel conversation ID to delegate"}
+		},"required":["agent_name"]
 	}`)
 }
