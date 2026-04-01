@@ -318,6 +318,17 @@ var migrations = []string{
 	`ALTER TABLE user_skills ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT true`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS storage_quota BIGINT DEFAULT 1073741824`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS storage_used BIGINT DEFAULT 0`,
+
+	// 029: Unified conversations - add channel fields to conversations and source to messages
+	`ALTER TABLE messages ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'web'`,
+	`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS channel_chat_id VARCHAR(255)`,
+	`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS channel VARCHAR(20)`,
+	`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS contact_id UUID`,
+	`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS bot_id UUID`,
+	`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active'`,
+	`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS takeover_by UUID`,
+	`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS current_agent_id UUID`,
+	`CREATE INDEX IF NOT EXISTS idx_conv_channel_chat ON conversations(channel_chat_id) WHERE channel_chat_id IS NOT NULL`,
 }
 
 func RunMigrations() error {

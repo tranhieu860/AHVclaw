@@ -16,6 +16,7 @@ type Conversation struct {
 	Pinned    bool       `json:"pinned"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
+	Channel   *string    `json:"channel,omitempty"`
 }
 
 type Message struct {
@@ -29,6 +30,7 @@ type Message struct {
 	TokensOut      int              `json:"tokens_out"`
 	Model          *string          `json:"model"`
 	CreatedAt      time.Time        `json:"created_at"`
+	Source         *string          `json:"source,omitempty"`
 }
 
 // WebSocket message types

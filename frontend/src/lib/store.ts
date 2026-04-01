@@ -14,6 +14,7 @@ interface Conversation {
   model?: string | null;
   pinned?: boolean;
   updated_at: string;
+  channel?: string | null;
 }
 
 interface Message {
@@ -22,6 +23,7 @@ interface Message {
   content: string | null;
   tool_calls?: unknown;
   created_at: string;
+  source?: string;
 }
 
 interface AppStore {

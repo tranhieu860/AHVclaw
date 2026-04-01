@@ -116,7 +116,7 @@ func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
 
 	// Save user message
 	_, _ = db.Pool.Exec(ctx,
-		"INSERT INTO messages (conversation_id, role, content, model) VALUES ($1, 'user', $2, $3)",
+		"INSERT INTO messages (conversation_id, role, content, model, source) VALUES ($1, 'user', $2, $3, 'web')",
 		*convID, req.Content, req.Model)
 
 	// Load conversation history
@@ -204,7 +204,7 @@ func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
 			// Save assistant message
 			content := fullContent.String()
 			_, _ = db.Pool.Exec(ctx,
-				"INSERT INTO messages (conversation_id, role, content, tokens_in, tokens_out, model) VALUES ($1, 'assistant', $2, $3, $4, $5)",
+				"INSERT INTO messages (conversation_id, role, content, tokens_in, tokens_out, model, source) VALUES ($1, 'assistant', $2, $3, $4, $5, 'web')",
 				*convID, content, tokensIn, tokensOut, req.Model)
 
 			// Auto-title if first exchange
@@ -253,7 +253,7 @@ func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
 		// Save assistant message with tool calls
 		assistantContent := fullContent.String()
 		_, _ = db.Pool.Exec(ctx,
-			"INSERT INTO messages (conversation_id, role, content, tool_calls, tokens_in, tokens_out, model) VALUES ($1, 'assistant', $2, $3, $4, $5, $6)",
+			"INSERT INTO messages (conversation_id, role, content, tool_calls, tokens_in, tokens_out, model, source) VALUES ($1, 'assistant', $2, $3, $4, $5, $6, 'web')",
 			*convID, assistantContent, mergedToolCallsJSON, tokensIn, tokensOut, req.Model)
 
 		// Add assistant message to history
@@ -297,7 +297,7 @@ func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
 			// Save tool result to DB
 			trJSON, _ := json.Marshal(result)
 			_, _ = db.Pool.Exec(ctx,
-				"INSERT INTO messages (conversation_id, role, content, tool_results, tool_call_id) VALUES ($1, 'tool', $2, $3, $4)",
+				"INSERT INTO messages (conversation_id, role, content, tool_results, tool_call_id, source) VALUES ($1, 'tool', $2, $3, $4, 'web')",
 				*convID, toolContent, trJSON, tc.ID)
 		}
 

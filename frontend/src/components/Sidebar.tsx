@@ -77,6 +77,11 @@ export function Sidebar({ onNavigate }: SidebarProps) {
           >
             <MessageSquare size={14} className="shrink-0" />
             <span className="truncate">{conv.title || 'New Chat'}</span>
+            {conv.channel && (
+              <span className="text-[9px] px-1 rounded bg-zinc-700 text-zinc-400 ml-1 shrink-0">
+                {conv.channel === 'telegram' ? 'TG' : conv.channel === 'zalo' ? 'ZL' : 'DC'}
+              </span>
+            )}
           </button>
         ))}
       </nav>

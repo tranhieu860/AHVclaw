@@ -8,6 +8,7 @@ interface Message {
   id: string;
   role: string;
   content: string | null;
+  source?: string;
 }
 
 export function MessageBubble({ message }: { message: Message }) {
@@ -34,6 +35,13 @@ export function MessageBubble({ message }: { message: Message }) {
           <div className="prose prose-invert prose-sm max-w-none prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-700 prose-code:text-green-400">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
           </div>
+        )}
+        {message.source && message.source !== 'web' && (
+          <span className="text-[10px] text-zinc-500 mt-1 flex items-center gap-0.5">
+            {message.source === 'telegram' && 'via Telegram'}
+            {message.source === 'zalo' && 'via Zalo'}
+            {message.source === 'discord' && 'via Discord'}
+          </span>
         )}
       </div>
       {isUser && (

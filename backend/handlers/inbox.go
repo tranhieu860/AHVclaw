@@ -59,12 +59,12 @@ func ListInboxConversations(c *fiber.Ctx) error {
 	query := `SELECT cc.id, cc.bot_id, cc.contact_id, cc.channel, cc.channel_chat_id,
 		cc.current_agent_id, cc.status, cc.takeover_by, cc.created_at, cc.updated_at,
 		ct.name AS contact_name, b.name AS bot_name,
-		(SELECT content FROM channel_messages WHERE conversation_id = cc.id ORDER BY created_at DESC LIMIT 1) AS last_message,
-		(SELECT created_at FROM channel_messages WHERE conversation_id = cc.id ORDER BY created_at DESC LIMIT 1) AS last_message_at
-	FROM channel_conversations cc
+		(SELECT content FROM messages WHERE conversation_id = cc.id ORDER BY created_at DESC LIMIT 1) AS last_message,
+		(SELECT created_at FROM messages WHERE conversation_id = cc.id ORDER BY created_at DESC LIMIT 1) AS last_message_at
+	FROM conversations cc
 	JOIN bots b ON b.id = cc.bot_id
 	LEFT JOIN contacts ct ON ct.id = cc.contact_id
-	WHERE b.user_id = $1`
+	WHERE b.user_id = $1 AND cc.channel IS NOT NULL`
 
 	args := []interface{}{userID}
 	argIdx := 2
@@ -123,13 +123,13 @@ func GetInboxConversation(c *fiber.Ctx) error {
 
 	var botUserID uuid.UUID
 	err = db.Pool.QueryRow(ctx,
-		"SELECT b.user_id FROM channel_conversations cc JOIN bots b ON b.id = cc.bot_id WHERE cc.id = $1", convID).Scan(&botUserID)
+		"SELECT b.user_id FROM conversations cc JOIN bots b ON b.id = cc.bot_id WHERE cc.id = $1", convID).Scan(&botUserID)
 	if err != nil || botUserID != userID {
 		return c.Status(404).JSON(fiber.Map{"error": "conversation not found"})
 	}
 
 	rows, err := db.Pool.Query(ctx,
-		"SELECT id, conversation_id, direction, sender_type, sender_id, content, attachments, channel_message_id, agent_id, tool_calls, tool_results, tokens_in, tokens_out, created_at FROM channel_messages WHERE conversation_id = $1 ORDER BY created_at ASC",
+		"SELECT id, conversation_id, role, role, NULL, content, NULL, NULL, NULL, tool_calls, tool_results, tokens_in, tokens_out, created_at FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC",
 		convID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed to fetch messages"})
@@ -171,7 +171,7 @@ func ReplyToConversation(c *fiber.Ctx) error {
 
 	var botUserID uuid.UUID
 	err = db.Pool.QueryRow(ctx,
-		"SELECT b.user_id FROM channel_conversations cc JOIN bots b ON b.id = cc.bot_id WHERE cc.id = $1",
+		"SELECT b.user_id FROM conversations cc JOIN bots b ON b.id = cc.bot_id WHERE cc.id = $1",
 		convID).Scan(&botUserID)
 	if err != nil || botUserID != userID {
 		return c.Status(404).JSON(fiber.Map{"error": "conversation not found"})
@@ -179,18 +179,17 @@ func ReplyToConversation(c *fiber.Ctx) error {
 
 	// Set status to takeover
 	_, err = db.Pool.Exec(ctx,
-		"UPDATE channel_conversations SET status = 'takeover', takeover_by = $2, updated_at = now() WHERE id = $1",
+		"UPDATE conversations SET status = 'takeover', takeover_by = $2, updated_at = now() WHERE id = $1",
 		convID, userID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed to update conversation status"})
 	}
 
 	// Insert message as human reply
-	userIDStr := userID.String()
 	var msgID uuid.UUID
 	err = db.Pool.QueryRow(ctx,
-		"INSERT INTO channel_messages (conversation_id, direction, sender_type, sender_id, content) VALUES ($1, 'outgoing', 'human', $2, $3) RETURNING id",
-		convID, userIDStr, req.Content).Scan(&msgID)
+		"INSERT INTO messages (conversation_id, role, content, source) VALUES ($1, 'assistant', $2, 'web') RETURNING id",
+		convID, req.Content).Scan(&msgID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed to save message"})
 	}
@@ -208,13 +207,13 @@ func TakeoverConversation(c *fiber.Ctx) error {
 
 	var botUserID uuid.UUID
 	err = db.Pool.QueryRow(ctx,
-		"SELECT b.user_id FROM channel_conversations cc JOIN bots b ON b.id = cc.bot_id WHERE cc.id = $1", convID).Scan(&botUserID)
+		"SELECT b.user_id FROM conversations cc JOIN bots b ON b.id = cc.bot_id WHERE cc.id = $1", convID).Scan(&botUserID)
 	if err != nil || botUserID != userID {
 		return c.Status(404).JSON(fiber.Map{"error": "conversation not found"})
 	}
 
 	_, err = db.Pool.Exec(ctx,
-		"UPDATE channel_conversations SET status = 'takeover', takeover_by = $2, updated_at = now() WHERE id = $1",
+		"UPDATE conversations SET status = 'takeover', takeover_by = $2, updated_at = now() WHERE id = $1",
 		convID, userID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed to takeover"})
@@ -232,13 +231,13 @@ func ReleaseConversation(c *fiber.Ctx) error {
 
 	var botUserID uuid.UUID
 	err = db.Pool.QueryRow(ctx,
-		"SELECT b.user_id FROM channel_conversations cc JOIN bots b ON b.id = cc.bot_id WHERE cc.id = $1", convID).Scan(&botUserID)
+		"SELECT b.user_id FROM conversations cc JOIN bots b ON b.id = cc.bot_id WHERE cc.id = $1", convID).Scan(&botUserID)
 	if err != nil || botUserID != userID {
 		return c.Status(404).JSON(fiber.Map{"error": "conversation not found"})
 	}
 
 	_, err = db.Pool.Exec(ctx,
-		"UPDATE channel_conversations SET status = 'active', takeover_by = NULL, updated_at = now() WHERE id = $1",
+		"UPDATE conversations SET status = 'active', takeover_by = NULL, updated_at = now() WHERE id = $1",
 		convID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed to release"})
@@ -265,13 +264,13 @@ func AssignAgent(c *fiber.Ctx) error {
 
 	var botUserID uuid.UUID
 	err = db.Pool.QueryRow(ctx,
-		"SELECT b.user_id FROM channel_conversations cc JOIN bots b ON b.id = cc.bot_id WHERE cc.id = $1", convID).Scan(&botUserID)
+		"SELECT b.user_id FROM conversations cc JOIN bots b ON b.id = cc.bot_id WHERE cc.id = $1", convID).Scan(&botUserID)
 	if err != nil || botUserID != userID {
 		return c.Status(404).JSON(fiber.Map{"error": "conversation not found"})
 	}
 
 	_, err = db.Pool.Exec(ctx,
-		"UPDATE channel_conversations SET current_agent_id = $2, updated_at = now() WHERE id = $1",
+		"UPDATE conversations SET current_agent_id = $2, updated_at = now() WHERE id = $1",
 		convID, req.AgentID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed to assign agent"})
@@ -289,13 +288,13 @@ func ArchiveConversation(c *fiber.Ctx) error {
 
 	var botUserID uuid.UUID
 	err = db.Pool.QueryRow(ctx,
-		"SELECT b.user_id FROM channel_conversations cc JOIN bots b ON b.id = cc.bot_id WHERE cc.id = $1", convID).Scan(&botUserID)
+		"SELECT b.user_id FROM conversations cc JOIN bots b ON b.id = cc.bot_id WHERE cc.id = $1", convID).Scan(&botUserID)
 	if err != nil || botUserID != userID {
 		return c.Status(404).JSON(fiber.Map{"error": "conversation not found"})
 	}
 
 	_, err = db.Pool.Exec(ctx,
-		"UPDATE channel_conversations SET status = 'archived', updated_at = now() WHERE id = $1", convID)
+		"UPDATE conversations SET status = 'archived', updated_at = now() WHERE id = $1", convID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed to archive"})
 	}

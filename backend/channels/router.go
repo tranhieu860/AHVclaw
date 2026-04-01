@@ -239,7 +239,7 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 	r.sendResponse(adapter, msg.ChatID, responseText, maxLength)
 
 	// Update conversation timestamp
-	db.Pool.Exec(ctx, "UPDATE channel_conversations SET updated_at = now() WHERE id = $1", conv.ID)
+	db.Pool.Exec(ctx, "UPDATE conversations SET updated_at = now() WHERE id = $1", conv.ID)
 }
 
 // findOrCreateContact finds an existing contact by channel identity or creates a new one.
@@ -301,11 +301,12 @@ type convResult struct {
 }
 
 // findOrCreateConversation finds an active conversation or creates a new one.
+// Uses unified conversations table instead of channel_conversations.
 func (r *Router) findOrCreateConversation(ctx context.Context, botID, contactID uuid.UUID, msg InboundMessage) (*convResult, error) {
-	// Try to find active conversation
+	// Try to find active conversation in unified table
 	var conv convResult
 	err := db.Pool.QueryRow(ctx,
-		`SELECT id, current_agent_id, takeover_by FROM channel_conversations
+		`SELECT id, current_agent_id, takeover_by FROM conversations
 		 WHERE bot_id = $1 AND contact_id = $2 AND status = 'active'
 		 ORDER BY updated_at DESC LIMIT 1`,
 		botID, contactID,
@@ -315,12 +316,12 @@ func (r *Router) findOrCreateConversation(ctx context.Context, botID, contactID 
 		return &conv, nil
 	}
 
-	// Create new conversation
+	// Create new conversation in unified table
 	conv.ID = uuid.New()
 	chatID := msg.ChatID
 	_, err = db.Pool.Exec(ctx,
-		`INSERT INTO channel_conversations (id, bot_id, contact_id, channel, channel_chat_id, status)
-		 VALUES ($1, $2, $3, $4, $5, 'active')`,
+		`INSERT INTO conversations (id, user_id, bot_id, contact_id, channel, channel_chat_id, status)
+		 VALUES ($1, (SELECT user_id FROM bots WHERE id = $2), $2, $3, $4, $5, 'active')`,
 		conv.ID, botID, contactID, msg.Channel, chatID)
 	if err != nil {
 		return nil, fmt.Errorf("create conversation: %w", err)
@@ -329,28 +330,48 @@ func (r *Router) findOrCreateConversation(ctx context.Context, botID, contactID 
 	return &conv, nil
 }
 
-// saveChannelMessage saves a message in the channel_messages table.
+// saveChannelMessage saves a message in the unified messages table with source indicator.
 func (r *Router) saveChannelMessage(ctx context.Context, convID uuid.UUID, direction, senderType string,
 	senderID *string, content string, toolData *json.RawMessage, channelMsgID *string, agentID *uuid.UUID) {
 
+	// Map direction/senderType to role for unified messages table
+	role := "user"
+	if direction == "outbound" {
+		if senderType == "ai" {
+			role = "assistant"
+		} else if senderType == "tool" {
+			role = "tool"
+		} else {
+			role = "assistant" // human takeover replies
+		}
+	}
+
+	// Determine source from conversation channel
+	source := "web"
+	var ch *string
+	_ = db.Pool.QueryRow(ctx, "SELECT channel FROM conversations WHERE id = $1", convID).Scan(&ch)
+	if ch != nil && *ch != "" {
+		source = *ch
+	}
+
 	_, err := db.Pool.Exec(ctx,
-		`INSERT INTO channel_messages (conversation_id, direction, sender_type, sender_id, content, channel_message_id, agent_id, tool_calls)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		convID, direction, senderType, senderID, content, channelMsgID, agentID, toolData)
+		`INSERT INTO messages (conversation_id, role, content, tool_calls, source)
+		 VALUES ($1, $2, $3, $4, $5)`,
+		convID, role, content, toolData, source)
 	if err != nil {
 		log.Printf("[router] failed to save message: %v", err)
 	}
 }
 
-// buildMessageHistory loads past messages from the conversation and builds the AI message array.
+// buildMessageHistory loads past messages from the unified messages table.
 func (r *Router) buildMessageHistory(ctx context.Context, convID uuid.UUID, systemPrompt string) []ai.ChatMessage {
 	messages := []ai.ChatMessage{
 		{Role: "system", Content: systemPrompt},
 	}
 
 	rows, err := db.Pool.Query(ctx,
-		`SELECT direction, sender_type, content, tool_calls
-		 FROM channel_messages
+		`SELECT role, content, tool_calls
+		 FROM messages
 		 WHERE conversation_id = $1
 		 ORDER BY created_at ASC
 		 LIMIT 50`,
@@ -361,11 +382,11 @@ func (r *Router) buildMessageHistory(ctx context.Context, convID uuid.UUID, syst
 	defer rows.Close()
 
 	for rows.Next() {
-		var direction, senderType string
+		var role string
 		var content *string
 		var toolCallsRaw *json.RawMessage
 
-		if err := rows.Scan(&direction, &senderType, &content, &toolCallsRaw); err != nil {
+		if err := rows.Scan(&role, &content, &toolCallsRaw); err != nil {
 			continue
 		}
 
@@ -374,16 +395,15 @@ func (r *Router) buildMessageHistory(ctx context.Context, convID uuid.UUID, syst
 			text = *content
 		}
 
-		if direction == "inbound" {
+		if role == "user" {
 			messages = append(messages, ai.ChatMessage{Role: "user", Content: text})
-		} else if senderType == "ai" {
+		} else if role == "assistant" {
 			msg := ai.ChatMessage{Role: "assistant", Content: text}
 			if toolCallsRaw != nil {
 				msg.ToolCalls = *toolCallsRaw
 			}
 			messages = append(messages, msg)
 		}
-		// tool results are loaded via the tool loop, skip them in history rebuild
 	}
 
 	return messages
