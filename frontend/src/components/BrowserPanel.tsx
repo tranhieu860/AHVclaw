@@ -21,7 +21,7 @@ export function BrowserPanel({ onClose }: BrowserPanelProps) {
   };
 
   return (
-    <div className="w-96 border-l border-zinc-800 bg-zinc-950 flex flex-col h-full">
+    <div className="flex-1 bg-zinc-950 flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 bg-zinc-900">
         <Globe size={14} className="text-zinc-400 shrink-0" />

@@ -1,12 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { MessageSquare, Code, TerminalSquare } from 'lucide-react';
+import { MessageSquare, Code, TerminalSquare, Globe } from 'lucide-react';
 import { ChatPanel } from './ChatPanel';
 import { CodeEditor, EditorTab, getLanguage } from './CodeEditor';
 import { TerminalPanel } from './Terminal';
+import { BrowserPanel } from './BrowserPanel';
 
-type TabType = 'chat' | 'editor' | 'terminal';
+type TabType = 'chat' | 'editor' | 'terminal' | 'browser';
 
 export function WorkspacePanel() {
   const [activeTab, setActiveTab] = useState<TabType>('chat');
@@ -52,6 +53,7 @@ export function WorkspacePanel() {
     { type: 'chat', label: 'Chat', icon: MessageSquare },
     { type: 'editor', label: 'Editor', icon: Code },
     { type: 'terminal', label: 'Terminal', icon: TerminalSquare },
+    { type: 'browser', label: 'Browser', icon: Globe },
   ];
 
   return (
@@ -88,6 +90,7 @@ export function WorkspacePanel() {
           />
         )}
         {activeTab === 'terminal' && <TerminalPanel />}
+        {activeTab === 'browser' && <BrowserPanel onClose={() => setActiveTab('chat')} />}
       </div>
     </div>
   );
