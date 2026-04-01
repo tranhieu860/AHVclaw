@@ -47,8 +47,8 @@ export default function BotsPage() {
         body: JSON.stringify({
           name: formName,
           channel: formChannel,
-          token: formToken,
-          agent_id: formAgentId || undefined,
+          channel_config: { bot_token: formToken },
+          default_agent_id: formAgentId || undefined,
         }),
       });
       setShowAdd(false);
