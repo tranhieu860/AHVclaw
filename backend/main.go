@@ -6,17 +6,21 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/ahvholding/ahvclaw/ai"
 	"github.com/ahvholding/ahvclaw/auth"
 	"github.com/ahvholding/ahvclaw/config"
 	"github.com/ahvholding/ahvclaw/crypto"
 	"github.com/ahvholding/ahvclaw/db"
+	"github.com/ahvholding/ahvclaw/embeddings"
 	"github.com/ahvholding/ahvclaw/handlers"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/limiter"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 )
 
@@ -33,15 +37,17 @@ func main() {
 		log.Fatal("Migrations failed:", err)
 	}
 
-	// Init encryption
 	if err := crypto.Init(cfg.EncryptionKey); err != nil {
 		log.Fatal("Crypto init failed:", err)
 	}
 
+	// Init embeddings
+	embeddings.Init(cfg.RouterURL, cfg.RouterAPIKey)
+
 	app := fiber.New(fiber.Config{
 		AppName:      "AHVclaw API",
 		ServerHeader: "AHVclaw",
-		BodyLimit:    50 * 1024 * 1024, // 50MB
+		BodyLimit:    50 * 1024 * 1024,
 	})
 
 	app.Use(recover.New())
@@ -56,25 +62,46 @@ func main() {
 		return c.JSON(fiber.Map{
 			"status":  "ok",
 			"service": "ahvclaw-api",
-			"version": "0.1.0",
+			"version": "0.2.0",
 		})
 	})
 
-	// Init auth
 	auth.Init(cfg.JWTSecret)
-
-	// Init AI router client
 	handlers.Router = ai.NewRouterClient(cfg.RouterURL, cfg.RouterAPIKey)
 
-	// Routes
+	// Rate limiters
+	apiLimiter := limiter.New(limiter.Config{
+		Max:        100,
+		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c *fiber.Ctx) string {
+			if userID, ok := c.Locals("user_id").(uuid.UUID); ok {
+				return userID.String()
+			}
+			return c.IP()
+		},
+		LimitReached: func(c *fiber.Ctx) error {
+			return c.Status(429).JSON(fiber.Map{"error": "rate limit exceeded"})
+		},
+	})
+
+	authLimiter := limiter.New(limiter.Config{
+		Max:        10,
+		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c *fiber.Ctx) string {
+			return c.IP()
+		},
+		LimitReached: func(c *fiber.Ctx) error {
+			return c.Status(429).JSON(fiber.Map{"error": "too many auth attempts"})
+		},
+	})
+
 	api := app.Group("/api")
 
-	// Public routes
-	api.Post("/auth/register", handlers.Register)
-	api.Post("/auth/login", handlers.Login)
-	api.Post("/auth/refresh", handlers.RefreshToken)
+	// Public routes with auth rate limiting
+	api.Post("/auth/register", authLimiter, handlers.Register)
+	api.Post("/auth/login", authLimiter, handlers.Login)
+	api.Post("/auth/refresh", authLimiter, handlers.RefreshToken)
 
-	// Models endpoint (public)
 	api.Get("/models", func(c *fiber.Ctx) error {
 		data, err := handlers.Router.ListModels()
 		if err != nil {
@@ -83,38 +110,23 @@ func main() {
 		return c.Send(data)
 	})
 
-	// Protected routes
-	protected := api.Group("", auth.Middleware())
+	// Protected routes (all authenticated users) with general rate limiting
+	protected := api.Group("", auth.Middleware(), apiLimiter)
 	protected.Get("/auth/me", handlers.GetMe)
 
-	// Conversations
+	// Conversations (all roles)
 	protected.Get("/conversations", handlers.ListConversations)
 	protected.Get("/conversations/:id", handlers.GetConversation)
 	protected.Delete("/conversations/:id", handlers.DeleteConversation)
 
-	// Memories
+	// Memories (all roles)
 	protected.Get("/memories", handlers.ListMemories)
 	protected.Post("/memories", handlers.CreateMemory)
 	protected.Put("/memories/:id", handlers.UpdateMemory)
 	protected.Delete("/memories/:id", handlers.DeleteMemory)
 	protected.Post("/memories/search", handlers.SearchMemories)
 
-	// Server management
-	protected.Get("/servers", handlers.ListServers)
-	protected.Post("/servers", handlers.CreateServer)
-	protected.Delete("/servers/:id", handlers.DeleteServer)
-	protected.Post("/servers/:id/exec", handlers.ServerExec)
-	protected.Get("/servers/:id/status", handlers.ServerStatus)
-
-	// WebSocket ticket endpoint
-	protected.Post("/ws/ticket", handlers.CreateWSTicket)
-	// Terminal exec endpoint
-	protected.Post("/terminal/exec", handlers.TerminalExec)
-
-	// Browser automation
-	protected.Post("/browser/action", handlers.BrowserAction)
-
-	// Knowledge Base
+	// Knowledge Base (all roles)
 	protected.Get("/knowledge-bases", handlers.ListKnowledgeBases)
 	protected.Post("/knowledge-bases", handlers.CreateKnowledgeBase)
 	protected.Delete("/knowledge-bases/:id", handlers.DeleteKnowledgeBase)
@@ -122,21 +134,35 @@ func main() {
 	protected.Post("/knowledge-bases/:id/documents", handlers.CreateDocument)
 	protected.Post("/knowledge-bases/:id/search", handlers.SearchKnowledgeBase)
 
-	// Skills
+	// Skills (all roles)
 	protected.Get("/skills", handlers.ListSkills)
 	protected.Post("/skills", handlers.CreateSkill)
 
-	// Agents
+	// Agents (all roles)
 	protected.Get("/agents", handlers.ListAgents)
 	protected.Post("/agents", handlers.CreateAgent)
 	protected.Get("/agents/:id", handlers.GetAgent)
 
+	// WebSocket ticket (all roles)
+	protected.Post("/ws/ticket", handlers.CreateWSTicket)
+
+	// Dev+ routes (admin and dev only)
+	devRoutes := protected.Group("", auth.RequireRole("admin", "dev"))
+	devRoutes.Post("/terminal/exec", handlers.TerminalExec)
+	devRoutes.Post("/browser/action", handlers.BrowserAction)
+	devRoutes.Get("/servers", handlers.ListServers)
+	devRoutes.Post("/servers", handlers.CreateServer)
+	devRoutes.Delete("/servers/:id", handlers.DeleteServer)
+	devRoutes.Post("/servers/:id/exec", handlers.ServerExec)
+	devRoutes.Get("/servers/:id/status", handlers.ServerStatus)
+
+	// Admin only routes (future: user management, system settings)
+	// adminRoutes := protected.Group("", auth.RequireRole("admin"))
 
 	// WebSocket chat
 	app.Use("/ws", handlers.WSUpgrade())
 	app.Get("/ws/chat", handlers.WSChat())
 
-	// Graceful shutdown
 	go func() {
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)

@@ -22,7 +22,6 @@ func Register(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "email, password, and name are required"})
 	}
 
-	// Input validation
 	if len(req.Email) > 255 || !strings.Contains(req.Email, "@") || !strings.Contains(req.Email, ".") {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid email format"})
 	}
@@ -43,11 +42,18 @@ func Register(c *fiber.Ctx) error {
 
 	apiKey, _ := auth.GenerateAPIKey()
 
+	// First registered user becomes admin
+	var count int
+	db.Pool.QueryRow(context.Background(), "SELECT COUNT(*) FROM users").Scan(&count)
+	role := "user"
+	if count == 0 {
+		role = "admin"
+	}
+
 	var user models.User
 	err = db.Pool.QueryRow(context.Background(),
-		`INSERT INTO users (email, password_hash, name, api_key) VALUES ($1, $2, $3, $4)
-		 RETURNING id, email, name, role, avatar_url, api_key, settings, created_at, updated_at`,
-		req.Email, string(hash), req.Name, apiKey,
+		"INSERT INTO users (email, password_hash, name, role, api_key) VALUES ($1, $2, $3, $4, $5) RETURNING id, email, name, role, avatar_url, api_key, settings, created_at, updated_at",
+		req.Email, string(hash), req.Name, role, apiKey,
 	).Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.AvatarURL,
 		&user.APIKey, &user.Settings, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
@@ -65,8 +71,7 @@ func Login(c *fiber.Ctx) error {
 
 	var user models.User
 	err := db.Pool.QueryRow(context.Background(),
-		`SELECT id, email, password_hash, name, role, avatar_url, api_key, settings, created_at, updated_at
-		 FROM users WHERE email = $1`, req.Email,
+		"SELECT id, email, password_hash, name, role, avatar_url, api_key, settings, created_at, updated_at FROM users WHERE email = $1", req.Email,
 	).Scan(&user.ID, &user.Email, &user.PasswordHash, &user.Name, &user.Role,
 		&user.AvatarURL, &user.APIKey, &user.Settings, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
@@ -99,15 +104,13 @@ func RefreshToken(c *fiber.Ctx) error {
 
 	var user models.User
 	err = db.Pool.QueryRow(context.Background(),
-		`SELECT id, email, name, role, avatar_url, api_key, settings, created_at, updated_at
-		 FROM users WHERE id = $1`, userID,
+		"SELECT id, email, name, role, avatar_url, api_key, settings, created_at, updated_at FROM users WHERE id = $1", userID,
 	).Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.AvatarURL,
 		&user.APIKey, &user.Settings, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		return c.Status(401).JSON(fiber.Map{"error": "user not found"})
 	}
 
-	// Delete old session
 	_, _ = db.Pool.Exec(context.Background(),
 		"DELETE FROM sessions WHERE refresh_token = $1", body.RefreshToken)
 
@@ -118,8 +121,7 @@ func GetMe(c *fiber.Ctx) error {
 	userID := c.Locals("user_id").(uuid.UUID)
 	var user models.User
 	err := db.Pool.QueryRow(context.Background(),
-		`SELECT id, email, name, role, avatar_url, api_key, settings, created_at, updated_at
-		 FROM users WHERE id = $1`, userID,
+		"SELECT id, email, name, role, avatar_url, api_key, settings, created_at, updated_at FROM users WHERE id = $1", userID,
 	).Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.AvatarURL,
 		&user.APIKey, &user.Settings, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
@@ -139,7 +141,6 @@ func respondWithTokens(c *fiber.Ctx, user models.User) error {
 		return c.Status(500).JSON(fiber.Map{"error": "token generation failed"})
 	}
 
-	// Store refresh token
 	_, _ = db.Pool.Exec(context.Background(),
 		"INSERT INTO sessions (user_id, refresh_token, expires_at) VALUES ($1, $2, $3)",
 		user.ID, refreshToken, time.Now().Add(7*24*time.Hour))

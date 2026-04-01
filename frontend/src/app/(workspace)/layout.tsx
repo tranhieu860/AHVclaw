@@ -2,15 +2,19 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Menu, X } from 'lucide-react';
+import { Menu, X, Globe } from 'lucide-react';
 import { Sidebar } from '@/components/Sidebar';
 import { StatusBar } from '@/components/StatusBar';
+import { BrowserPanel } from '@/components/BrowserPanel';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import { useStore } from '@/lib/store';
 import { api } from '@/lib/api';
 
 export default function WorkspaceLayout({ children }: { children: React.ReactNode }) {
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const toggleSidebar = useStore((s) => s.toggleSidebar);
+  const rightPanelOpen = useStore((s) => s.rightPanelOpen);
+  const toggleRightPanel = useStore((s) => s.toggleRightPanel);
   const setUser = useStore((s) => s.setUser);
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -63,7 +67,11 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
         <button onClick={toggleSidebar} className="text-zinc-400 hover:text-white">
           {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
         </button>
-        <span className="text-sm font-semibold">AHVclaw</span>
+        <span className="text-sm font-semibold flex-1">AHVclaw</span>
+        <ThemeToggle />
+        <button onClick={toggleRightPanel} className="text-zinc-400 hover:text-white">
+          <Globe size={20} />
+        </button>
       </div>
 
       <div className="flex flex-1 overflow-hidden relative">
@@ -84,6 +92,10 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
         <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
           {children}
         </main>
+
+        {rightPanelOpen && (
+          <BrowserPanel onClose={() => toggleRightPanel()} />
+        )}
       </div>
 
       <StatusBar />

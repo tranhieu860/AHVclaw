@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { MessageSquare, Plus, Settings, Server, Puzzle, Bot, LogOut } from 'lucide-react';
 import { useStore } from '@/lib/store';
@@ -80,10 +81,10 @@ export function Sidebar({ onNavigate }: SidebarProps) {
       </nav>
 
       <div className="p-2 border-t border-zinc-800 space-y-1">
-        <SidebarLink icon={<Bot size={16} />} label="Agents" />
-        <SidebarLink icon={<Puzzle size={16} />} label="Skills" />
-        <SidebarLink icon={<Server size={16} />} label="Servers" />
-        <SidebarLink icon={<Settings size={16} />} label="Settings" />
+        <SidebarLink icon={<Bot size={16} />} label="Agents" href="/agents" />
+        <SidebarLink icon={<Puzzle size={16} />} label="Skills" href="/skills" />
+        <SidebarLink icon={<Server size={16} />} label="Servers" href="/servers" />
+        <SidebarLink icon={<Settings size={16} />} label="Settings" href="/settings" />
         <button
           onClick={handleLogout}
           className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-red-400 hover:bg-zinc-800/50 transition"
@@ -102,11 +103,11 @@ export function Sidebar({ onNavigate }: SidebarProps) {
   );
 }
 
-function SidebarLink({ icon, label }: { icon: React.ReactNode; label: string }) {
+function SidebarLink({ icon, label, href }: { icon: React.ReactNode; label: string; href: string }) {
   return (
-    <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200 transition">
+    <Link href={href} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200 transition">
       {icon}
       {label}
-    </button>
+    </Link>
   );
 }

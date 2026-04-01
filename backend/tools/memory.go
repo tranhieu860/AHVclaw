@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"github.com/ahvholding/ahvclaw/db"
+	"github.com/ahvholding/ahvclaw/embeddings"
 )
 
 func (e *Executor) memorySave(argsJSON json.RawMessage) *ToolResult {
@@ -26,11 +28,23 @@ func (e *Executor) memorySave(argsJSON json.RawMessage) *ToolResult {
 		return &ToolResult{Name: "memory_save", Error: "type must be one of: profile, preference, knowledge, correction"}
 	}
 
-	_, err := db.Pool.Exec(context.Background(),
-		"INSERT INTO memories (user_id, type, key, content) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
-		e.UserID, args.Type, args.Key, args.Content)
+	var memoryID string
+	err := db.Pool.QueryRow(context.Background(),
+		"INSERT INTO memories (user_id, type, key, content) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING RETURNING id",
+		e.UserID, args.Type, args.Key, args.Content).Scan(&memoryID)
 	if err != nil {
-		return &ToolResult{Name: "memory_save", Error: "failed to save memory: " + err.Error()}
+		_ = db.Pool.QueryRow(context.Background(),
+			"SELECT id FROM memories WHERE user_id = $1 AND type = $2 AND key = $3",
+			e.UserID, args.Type, args.Key).Scan(&memoryID)
+	}
+
+	// Store embedding asynchronously
+	if memoryID != "" {
+		go func() {
+			if err := embeddings.StoreMemoryEmbedding(memoryID, args.Key+" "+args.Content); err != nil {
+				log.Printf("Failed to store memory embedding: %v", err)
+			}
+		}()
 	}
 
 	return &ToolResult{Name: "memory_save", Content: fmt.Sprintf("Saved memory: [%s] %s", args.Type, args.Key)}
@@ -47,7 +61,18 @@ func (e *Executor) memorySearch(argsJSON json.RawMessage) *ToolResult {
 		return &ToolResult{Name: "memory_search", Error: "query is required"}
 	}
 
-	// Use trigram similarity for better fuzzy search + ILIKE fallback
+	// Try vector search first
+	vectorResults, err := embeddings.SearchByEmbedding(e.UserID, args.Query, 10)
+	if err == nil && len(vectorResults) > 0 {
+		content := fmt.Sprintf("Found %d memories (semantic search):\n", len(vectorResults))
+		for _, r := range vectorResults {
+			content += fmt.Sprintf("- [%s] %s: %s (similarity: %.2f)\n",
+				r["type"], r["key"], r["content"], r["similarity"])
+		}
+		return &ToolResult{Name: "memory_search", Content: content}
+	}
+
+	// Fallback to trigram similarity search
 	rows, err := db.Pool.Query(context.Background(),
 		`SELECT type, key, content,
 		 GREATEST(similarity(key, $2), similarity(content, $2)) AS sim
@@ -58,7 +83,6 @@ func (e *Executor) memorySearch(argsJSON json.RawMessage) *ToolResult {
 		 LIMIT 10`,
 		e.UserID, args.Query, "%"+args.Query+"%")
 	if err != nil {
-		// Fallback to simple ILIKE if trigram fails
 		rows, err = db.Pool.Query(context.Background(),
 			`SELECT type, key, content, 0::float AS sim
 			 FROM memories WHERE user_id = $1 AND (key ILIKE $2 OR content ILIKE $2)
