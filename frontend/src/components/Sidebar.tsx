@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { MessageSquare, Plus, Settings, Server, Puzzle, Bot, LogOut } from 'lucide-react';
 import { useStore } from '@/lib/store';
+import { ThemeToggle } from './ThemeToggle';
 import { api } from '@/lib/api';
 
 interface SidebarProps {
@@ -95,8 +96,9 @@ export function Sidebar({ onNavigate }: SidebarProps) {
       </div>
 
       {user && (
-        <div className="border-t border-zinc-800 p-3">
+        <div className="border-t border-zinc-800 p-3 flex items-center justify-between">
           <p className="text-xs text-zinc-400 truncate">{user.email}</p>
+          <ThemeToggle />
         </div>
       )}
     </div>
