@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Settings, User, Palette, HardDrive, Shield, Cpu, Plus, Trash2, Copy, Eye, EyeOff, Check } from 'lucide-react';
+import { ModelSearch } from '@/components/ModelSearch';
 
 interface Provider {
   id: string;
@@ -47,7 +48,7 @@ export default function SettingsPage() {
   // Preferences
   const [defaultModel, setDefaultModel] = useState('');
   const [theme, setTheme] = useState('dark');
-  const [language, setLanguage] = useState('en');
+  const [language, setLanguage] = useState('vi');
 
   const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3101';
   const headers = () => ({

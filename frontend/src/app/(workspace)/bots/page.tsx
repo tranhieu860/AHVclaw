@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { Radio, Plus, Play, Square, Trash2, Pencil, ChevronDown, ChevronUp, X, Check } from 'lucide-react';
+import { ModelSearch } from '@/components/ModelSearch';
+import { ModelFallback } from '@/components/ModelFallback';
 
 interface Bot {
   id: string;
@@ -13,6 +15,7 @@ interface Bot {
   running?: boolean;
   ai_settings?: {
     model?: string;
+    fallback_models?: string;
     allowed_tools?: string[];
     blocked_tools?: string[];
   };
@@ -118,6 +121,7 @@ export default function BotsPage() {
   const [editAgentId, setEditAgentId] = useState('');
   const [editTools, setEditTools] = useState<Set<string>>(new Set());
   const [editModel, setEditModel] = useState('');
+  const [editFallback, setEditFallback] = useState('');
   const [editMaxLength, setEditMaxLength] = useState('');
   const [editLanguage, setEditLanguage] = useState('');
   const [editWelcome, setEditWelcome] = useState('');
@@ -183,6 +187,7 @@ export default function BotsPage() {
     setEditName(bot.name);
     setEditAgentId(bot.default_agent_id || '');
     setEditModel(bot.ai_settings?.model || '');
+    setEditFallback(bot.ai_settings?.fallback_models || '');
     setEditMaxLength(bot.response_settings?.max_length?.toString() || '');
     setEditLanguage(bot.response_settings?.language || '');
     setEditWelcome(bot.response_settings?.welcome_message || '');
@@ -209,6 +214,7 @@ export default function BotsPage() {
           default_agent_id: editAgentId || undefined,
           ai_settings: {
             ...(editModel ? { model: editModel } : {}),
+            ...(editFallback ? { fallback_models: editFallback } : {}),
             ...(isAllSelected ? {} : { allowed_tools: Array.from(editTools) }),
           },
           response_settings: {
@@ -330,10 +336,9 @@ export default function BotsPage() {
               {/* AI Settings */}
               <div className="border-t border-zinc-800 pt-4">
                 <h4 className="text-sm font-medium text-zinc-300 mb-3">AI Settings</h4>
-                <div>
-                  <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1 block">Model</label>
-                  <input value={editModel} onChange={e => setEditModel(e.target.value)} placeholder="Default model"
-                    className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none" />
+                <ModelSearch value={editModel} onChange={setEditModel} label="Model" placeholder="Default model" />
+                <div className="mt-3">
+                  <ModelFallback value={editFallback} onChange={setEditFallback} />
                 </div>
               </div>
 

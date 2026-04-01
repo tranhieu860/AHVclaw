@@ -107,27 +107,36 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 
 	var systemPrompt string
 	var model string
+	var fallbackModels string
 	if agentID != nil {
+		var agentFallback *string
 		err = db.Pool.QueryRow(ctx,
-			`SELECT system_prompt, model FROM agents WHERE id = $1`, *agentID,
-		).Scan(&systemPrompt, &model)
+			`SELECT system_prompt, model, COALESCE(fallback_models, '') FROM agents WHERE id = $1`, *agentID,
+		).Scan(&systemPrompt, &model, &agentFallback)
+		if agentFallback != nil && *agentFallback != "" && fallbackModels == "" {
+			fallbackModels = *agentFallback
+		}
 		if err != nil {
 			log.Printf("[router] agent %s not found: %v", agentID, err)
-			systemPrompt = "You are a helpful assistant."
+			systemPrompt = "Bạn là trợ lý AI thông minh. Luôn trả lời bằng tiếng Việt. Sử dụng công cụ (tools) khi cần thiết thay vì đoán."
 			model = "AHV-Holding-TroLy"
 		}
 	} else {
-		systemPrompt = "You are a helpful assistant."
+		systemPrompt = "Bạn là trợ lý AI thông minh. Luôn trả lời bằng tiếng Việt. Sử dụng công cụ (tools) khi cần thiết thay vì đoán."
 		model = "AHV-Holding-TroLy"
 	}
 
 	// Override model from AI settings if present
 	if aiSettingsRaw != nil {
 		var aiSettings struct {
-			Model string `json:"model"`
+			Model          string `json:"model"`
+			FallbackModels string `json:"fallback_models"`
 		}
-		if json.Unmarshal(*aiSettingsRaw, &aiSettings) == nil && aiSettings.Model != "" {
-			model = aiSettings.Model
+		if json.Unmarshal(*aiSettingsRaw, &aiSettings) == nil {
+			if aiSettings.Model != "" {
+				model = aiSettings.Model
+			}
+			fallbackModels = aiSettings.FallbackModels
 		}
 	}
 
@@ -273,9 +282,43 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 			}
 		})
 
+		if err != nil && fallbackModels != "" {
+			log.Printf("[router] AI stream error with model %s: %v, trying fallbacks", model, err)
+			fallbacks := strings.Split(fallbackModels, ",")
+			for _, fb := range fallbacks {
+				fb = strings.TrimSpace(fb)
+				if fb == "" {
+					continue
+				}
+				log.Printf("[router] Trying fallback model: %s", fb)
+				fullContent.Reset()
+				accumulatedToolCalls = nil
+				finishReason = ""
+				aiReq.Model = fb
+				err = r.aiRouter.StreamChat(aiReq, func(chunk ai.StreamChunk) {
+					if len(chunk.Choices) > 0 {
+						delta := chunk.Choices[0].Delta
+						if delta.Content != "" {
+							fullContent.WriteString(delta.Content)
+						}
+						if delta.ToolCalls != nil {
+							accumulatedToolCalls = append(accumulatedToolCalls, delta.ToolCalls)
+						}
+						if chunk.Choices[0].FinishReason != nil {
+							finishReason = *chunk.Choices[0].FinishReason
+						}
+					}
+				})
+				if err == nil {
+					model = fb
+					break
+				}
+				log.Printf("[router] Fallback model %s also failed: %v", fb, err)
+			}
+		}
 		if err != nil {
 			log.Printf("[router] AI stream error: %v", err)
-			r.sendResponse(adapter, msg.ChatID, "Sorry, I encountered an error processing your message.", maxLength)
+			r.sendResponse(adapter, msg.ChatID, "Xin lỗi, đã xảy ra lỗi khi xử lý tin nhắn. Vui lòng thử lại.", maxLength)
 			return
 		}
 

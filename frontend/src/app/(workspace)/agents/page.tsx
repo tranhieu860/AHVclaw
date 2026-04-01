@@ -2,11 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import { Bot, Plus, Brain, Search, Pencil, Trash2, X, Tag } from 'lucide-react';
+import { ModelSearch } from '@/components/ModelSearch';
+import { ModelFallback } from '@/components/ModelFallback';
 
 interface Agent {
   id: string;
   name: string;
   model: string;
+  fallback_models: string;
   system_prompt: string;
   memory_scope: string;
   is_public: boolean;
@@ -36,6 +39,7 @@ export default function AgentsPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [formName, setFormName] = useState('');
   const [formModel, setFormModel] = useState('AHV-Holding-TroLy');
+  const [formFallback, setFormFallback] = useState('');
   const [formPrompt, setFormPrompt] = useState('');
 
   // Memory state
@@ -101,6 +105,7 @@ export default function AgentsPage() {
         body: JSON.stringify({
           name: formName,
           model: formModel,
+          fallback_models: formFallback || '',
           system_prompt: formPrompt,
           memory_scope: 'shared',
         }),
@@ -194,8 +199,8 @@ export default function AgentsPage() {
             <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 mb-6 space-y-3">
               <input placeholder="Agent Name" value={formName} onChange={e => setFormName(e.target.value)}
                 className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none" />
-              <input placeholder="Model (e.g. AHV-Holding-TroLy)" value={formModel} onChange={e => setFormModel(e.target.value)}
-                className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none" />
+              <ModelSearch value={formModel} onChange={setFormModel} label="Model" placeholder="e.g. AHV-Holding-TroLy" />
+              <ModelFallback value={formFallback} onChange={setFormFallback} />
               <textarea placeholder="System prompt — define this agent's personality and capabilities..." value={formPrompt} onChange={e => setFormPrompt(e.target.value)}
                 rows={6} className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none resize-none" />
               <button onClick={addAgent} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm">Create Agent</button>

@@ -82,6 +82,7 @@ func WSChat() fiber.Handler {
 }
 
 func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
+	log.Printf("[web-chat] handleChat called for user %s", userID)
 	var req models.ChatRequest
 	if err := json.Unmarshal(data, &req); err != nil {
 		sendWSError(conn, "invalid chat request")
@@ -154,6 +155,7 @@ func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
 		}
 	}
 
+	log.Printf("[web-chat] Using conversation %s", *convID)
 	// Save user message with attachments
 	var attJSONForDB interface{} = nil
 	if len(attachmentsJSON) > 0 {
@@ -238,9 +240,58 @@ func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
 		})
 
 		if err != nil {
-			log.Printf("Stream error: %v", err)
-			sendWSError(conn, "AI streaming failed: "+err.Error())
-			break
+			log.Printf("Stream error with model %s: %v", req.Model, err)
+			// Try fallback models from conversation settings
+			var convModel *string
+			db.Pool.QueryRow(ctx, "SELECT model FROM conversations WHERE id = $1", *convID).Scan(&convModel)
+			// Check user settings for fallback
+			var userFallback *string
+			db.Pool.QueryRow(ctx, "SELECT value FROM user_settings WHERE user_id = $1 AND key = 'fallback_models'", userID).Scan(&userFallback)
+			fallbackStr := ""
+			if userFallback != nil && *userFallback != "" {
+				fallbackStr = *userFallback
+			}
+			if fallbackStr != "" {
+				fallbacks := strings.Split(fallbackStr, ",")
+				for _, fb := range fallbacks {
+					fb = strings.TrimSpace(fb)
+					if fb == "" {
+						continue
+					}
+					log.Printf("[chat] Trying fallback model: %s", fb)
+					fullContent.Reset()
+					accumulatedToolCalls = nil
+					finishReason = ""
+					aiReq.Model = fb
+					err = Router.StreamChat(aiReq, func(chunk ai.StreamChunk) {
+						if len(chunk.Choices) > 0 {
+							delta := chunk.Choices[0].Delta
+							if delta.Content != "" {
+								fullContent.WriteString(delta.Content)
+								sendWSJSON(conn, "delta", models.StreamDelta{Content: delta.Content})
+							}
+							if delta.ToolCalls != nil {
+								accumulatedToolCalls = append(accumulatedToolCalls, delta.ToolCalls)
+							}
+							if chunk.Choices[0].FinishReason != nil {
+								finishReason = *chunk.Choices[0].FinishReason
+							}
+						}
+						if chunk.Usage != nil {
+							tokensIn = chunk.Usage.PromptTokens
+							tokensOut = chunk.Usage.CompletionTokens
+						}
+					})
+					if err == nil {
+						break
+					}
+					log.Printf("[chat] Fallback model %s also failed: %v", fb, err)
+				}
+			}
+			if err != nil {
+				sendWSError(conn, "AI streaming failed: "+err.Error())
+				break
+			}
 		}
 
 		// If no tool calls, we're done
