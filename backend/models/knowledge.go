@@ -43,8 +43,9 @@ type Agent struct {
 	UserID       uuid.UUID `json:"user_id"`
 	Name         string    `json:"name"`
 	AvatarURL    *string   `json:"avatar_url"`
-	Model        string    `json:"model"`
-	SystemPrompt string    `json:"system_prompt"`
+	Model          string    `json:"model"`
+	FallbackModels string    `json:"fallback_models"`
+	SystemPrompt   string    `json:"system_prompt"`
 	MemoryScope  string    `json:"memory_scope"`
 	IsPublic     bool      `json:"is_public"`
 	CreatedAt    time.Time `json:"created_at"`
@@ -76,8 +77,9 @@ type SkillCreateRequest struct {
 
 type AgentCreateRequest struct {
 	Name         string `json:"name"`
-	Model        string `json:"model"`
-	SystemPrompt string `json:"system_prompt"`
-	MemoryScope  string `json:"memory_scope"`
+	Model          string `json:"model"`
+	FallbackModels string `json:"fallback_models"`
+	SystemPrompt   string `json:"system_prompt"`
+	MemoryScope    string `json:"memory_scope"`
 	IsPublic     bool   `json:"is_public"`
 }

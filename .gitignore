@@ -3,3 +3,4 @@ backend/ahvclaw-api
 *.log
 backend/.env
 backend/.env.bak
+backend/ahvclaw-backend

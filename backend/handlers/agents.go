@@ -14,7 +14,7 @@ func ListAgents(c *fiber.Ctx) error {
 	ctx := context.Background()
 
 	rows, err := db.Pool.Query(ctx,
-		`SELECT id, user_id, name, avatar_url, model, system_prompt, memory_scope, is_public, created_at, updated_at
+		`SELECT id, user_id, name, avatar_url, model, COALESCE(fallback_models, ''), system_prompt, memory_scope, is_public, created_at, updated_at
 		FROM agents WHERE user_id = $1 OR is_public = true
 		ORDER BY created_at DESC`, userID)
 	if err != nil {
@@ -25,7 +25,7 @@ func ListAgents(c *fiber.Ctx) error {
 	var agents []models.Agent
 	for rows.Next() {
 		var a models.Agent
-		if err := rows.Scan(&a.ID, &a.UserID, &a.Name, &a.AvatarURL, &a.Model, &a.SystemPrompt, &a.MemoryScope, &a.IsPublic, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.UserID, &a.Name, &a.AvatarURL, &a.Model, &a.FallbackModels, &a.SystemPrompt, &a.MemoryScope, &a.IsPublic, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			continue
 		}
 		agents = append(agents, a)
@@ -52,11 +52,11 @@ func CreateAgent(c *fiber.Ctx) error {
 	ctx := context.Background()
 	var a models.Agent
 	err := db.Pool.QueryRow(ctx,
-		`INSERT INTO agents (user_id, name, model, system_prompt, memory_scope, is_public)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, user_id, name, avatar_url, model, system_prompt, memory_scope, is_public, created_at, updated_at`,
-		userID, req.Name, req.Model, req.SystemPrompt, req.MemoryScope, req.IsPublic).Scan(
-		&a.ID, &a.UserID, &a.Name, &a.AvatarURL, &a.Model, &a.SystemPrompt, &a.MemoryScope, &a.IsPublic, &a.CreatedAt, &a.UpdatedAt)
+		`INSERT INTO agents (user_id, name, model, fallback_models, system_prompt, memory_scope, is_public)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id, user_id, name, avatar_url, model, COALESCE(fallback_models, ''), system_prompt, memory_scope, is_public, created_at, updated_at`,
+		userID, req.Name, req.Model, req.FallbackModels, req.SystemPrompt, req.MemoryScope, req.IsPublic).Scan(
+		&a.ID, &a.UserID, &a.Name, &a.AvatarURL, &a.Model, &a.FallbackModels, &a.SystemPrompt, &a.MemoryScope, &a.IsPublic, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed to create agent: " + err.Error()})
 	}
@@ -73,10 +73,10 @@ func GetAgent(c *fiber.Ctx) error {
 	ctx := context.Background()
 	var a models.Agent
 	err = db.Pool.QueryRow(ctx,
-		`SELECT id, user_id, name, avatar_url, model, system_prompt, memory_scope, is_public, created_at, updated_at
+		`SELECT id, user_id, name, avatar_url, model, COALESCE(fallback_models, ''), system_prompt, memory_scope, is_public, created_at, updated_at
 		FROM agents WHERE id = $1 AND (user_id = $2 OR is_public = true)`,
 		agentID, userID).Scan(
-		&a.ID, &a.UserID, &a.Name, &a.AvatarURL, &a.Model, &a.SystemPrompt, &a.MemoryScope, &a.IsPublic, &a.CreatedAt, &a.UpdatedAt)
+		&a.ID, &a.UserID, &a.Name, &a.AvatarURL, &a.Model, &a.FallbackModels, &a.SystemPrompt, &a.MemoryScope, &a.IsPublic, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "agent not found"})
 	}
