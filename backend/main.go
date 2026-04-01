@@ -12,6 +12,8 @@ import (
 	"github.com/ahvholding/ahvclaw/auth"
 	"github.com/ahvholding/ahvclaw/channels"
 	"github.com/ahvholding/ahvclaw/channels/telegram"
+	"github.com/ahvholding/ahvclaw/channels/zalo"
+	"github.com/ahvholding/ahvclaw/channels/discord"
 	"github.com/ahvholding/ahvclaw/config"
 	"github.com/ahvholding/ahvclaw/crypto"
 	"github.com/ahvholding/ahvclaw/db"
@@ -78,6 +80,8 @@ func main() {
 	channelRouter := channels.NewRouter(handlers.Router)
 	channelManager := channels.NewManager(channelRouter)
 	channelManager.RegisterAdapter("telegram", telegram.NewAdapter)
+	channelManager.RegisterAdapter("zalo", zalo.NewAdapter)
+	channelManager.RegisterAdapter("discord", discord.NewAdapter)
 	handlers.ChannelManager = channelManager
 
 	// Rate limiters
@@ -106,6 +110,8 @@ func main() {
 		},
 	})
 
+// Zalo webhook (public, no auth)
+	app.Post("/webhook/zalo/:botID", handlers.ZaloWebhook)
 	api := app.Group("/api")
 
 	// Public routes with auth rate limiting
