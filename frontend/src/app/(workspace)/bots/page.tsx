@@ -7,11 +7,10 @@ interface Bot {
   id: string;
   name: string;
   channel: string;
-  status: string;
-  token?: string;
-  agent_id?: string;
-  last_connected?: string;
+  is_active: boolean;
+  updated_at?: string;
   created_at: string;
+  running?: boolean;
 }
 
 export default function BotsPage() {
@@ -32,7 +31,17 @@ export default function BotsPage() {
   const loadBots = async () => {
     try {
       const res = await fetch(`${baseUrl}/api/bots`, { headers: headers() });
-      if (res.ok) setBots(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        const withStatus = await Promise.all((data || []).map(async (bot: Bot) => {
+          try {
+            const sr = await fetch(baseUrl + "/api/bots/" + bot.id + "/status", { headers: headers() });
+            if (sr.ok) { const s = await sr.json(); return { ...bot, running: !!s.running }; }
+          } catch {}
+          return { ...bot, running: bot.is_active };
+        }));
+        setBots(withStatus);
+      }
     } catch {}
   };
 
@@ -146,16 +155,16 @@ export default function BotsPage() {
                 </div>
               </div>
               <span className={`flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full ${
-                bot.status === 'running' ? 'bg-green-900/30 text-green-400' : 'bg-zinc-800 text-zinc-500'
+                bot.running ? 'bg-green-900/30 text-green-400' : 'bg-zinc-800 text-zinc-500'
               }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${bot.status === 'running' ? 'bg-green-400' : 'bg-zinc-500'}`} />
-                {bot.status === 'running' ? 'Running' : 'Stopped'}
+                <span className={`w-1.5 h-1.5 rounded-full ${bot.running ? 'bg-green-400' : 'bg-zinc-500'}`} />
+                {bot.running ? 'Running' : 'Stopped'}
               </span>
             </div>
             <div className="flex items-center justify-between mt-4">
-              <span className="text-xs text-zinc-500">Last connected: {timeAgo(bot.last_connected)}</span>
+              <span className="text-xs text-zinc-500">Last connected: {timeAgo(bot.updated_at)}</span>
               <div className="flex items-center gap-1">
-                {bot.status !== 'running' ? (
+                {!bot.running ? (
                   <button onClick={() => startBot(bot.id)} className="p-1.5 rounded hover:bg-zinc-800 text-green-400" title="Start">
                     <Play size={14} />
                   </button>
