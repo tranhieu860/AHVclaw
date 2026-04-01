@@ -222,6 +222,22 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 			}
 		}
 	}
+
+	// Add tool instructions to system prompt so AI knows it has tools
+	if len(toolDefs) > 0 {
+		toolNames := make([]string, 0)
+		for _, t := range toolDefs {
+			toolNames = append(toolNames, t.Function.Name)
+		}
+		systemPrompt += "\n\nYou have access to these tools: " + strings.Join(toolNames, ", ") + ". Use them when the user asks you to perform actions like checking servers, browsing the web, reading files, or managing data. Always prefer using tools over guessing."
+		// Update the system message in messages slice
+		if len(messages) > 0 && messages[0].Role == "system" {
+			messages[0].Content = systemPrompt
+		}
+	}
+
+	log.Printf("[router] Sending AI request with %d tools, model=%s", len(toolDefs), model)
+
 	executor := tools.NewExecutor(
 		fmt.Sprintf("/data/ahvclaw/workspaces/%s", botUserID.String()),
 		botUserID.String(),
@@ -276,6 +292,7 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 		}
 
 		// Process tool calls
+		log.Printf("[router] AI requested %d tool call deltas, processing...", len(accumulatedToolCalls))
 		mergedToolCallsJSON := mergeToolCallDeltas(accumulatedToolCalls)
 
 		var toolCalls []struct {
@@ -310,6 +327,7 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 
 		// Execute each tool call
 		for _, tc := range toolCalls {
+			log.Printf("[router] Executing tool: %s", tc.Function.Name)
 			result := executor.Execute(tc.Function.Name, tc.Function.Arguments)
 
 			toolContent := result.Content

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -29,6 +31,59 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// decryptBotConfig decrypts the bot_token field in channel config (mirrors handlers/bots.go).
+func decryptBotConfig(raw *json.RawMessage) ([]byte, error) {
+	if raw == nil {
+		return []byte("{}"), nil
+	}
+	var cfg map[string]interface{}
+	if err := json.Unmarshal(*raw, &cfg); err != nil {
+		return *raw, nil
+	}
+	if token, ok := cfg["bot_token"].(string); ok && token != "" {
+		decrypted, err := crypto.Decrypt(token)
+		if err != nil {
+			return nil, err
+		}
+		cfg["bot_token"] = decrypted
+	}
+	return json.Marshal(cfg)
+}
+
+// SeedDefaultAgent creates the default "Main" agent if it does not exist.
+func SeedDefaultAgent() {
+	ctx := context.Background()
+	var count int
+	db.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM agents WHERE name = 'Main'").Scan(&count)
+	if count > 0 {
+		return
+	}
+	var userID uuid.UUID
+	err := db.Pool.QueryRow(ctx, "SELECT id FROM users WHERE role = 'admin' LIMIT 1").Scan(&userID)
+	if err != nil {
+		log.Println("[seed] no admin user found, skipping default agent")
+		return
+	}
+	prompt := "B\u1ea1n l\u00e0 tr\u1ee3 l\u00fd AI th\u00f4ng minh c\u1ee7a AHV Holding. B\u1ea1n c\u00f3 th\u1ec3:\n" +
+		"- T\u00ecm ki\u1ebfm web, ch\u1ee5p \u1ea3nh trang web\n" +
+		"- \u0110\u1ecdc, vi\u1ebft, qu\u1ea3n l\u00fd file\n" +
+		"- Ch\u1ea1y l\u1ec7nh terminal\n" +
+		"- Qu\u1ea3n l\u00fd m\u00e1y ch\u1ee7 qua SSH\n" +
+		"- Nh\u1edb th\u00f4ng tin v\u1ec1 ng\u01b0\u1eddi d\u00f9ng\n" +
+		"- T\u00ecm ki\u1ebfm trong c\u01a1 s\u1edf ki\u1ebfn th\u1ee9c\n\n" +
+		"H\u00e3y s\u1eed d\u1ee5ng c\u00e1c c\u00f4ng c\u1ee5 (tools) khi c\u1ea7n thi\u1ebft thay v\u00ec \u0111o\u00e1n. Lu\u00f4n tr\u1ea3 l\u1eddi b\u1eb1ng ti\u1ebfng Vi\u1ec7t tr\u1eeb khi ng\u01b0\u1eddi d\u00f9ng d\u00f9ng ti\u1ebfng kh\u00e1c.\n" +
+		"Khi bi\u1ebft th\u00f4ng tin m\u1edbi v\u1ec1 ng\u01b0\u1eddi d\u00f9ng, h\u00e3y d\u00f9ng memory_save \u0111\u1ec3 ghi nh\u1edb."
+	_, err = db.Pool.Exec(ctx,
+		`INSERT INTO agents (user_id, name, model, system_prompt, is_public)
+		 VALUES ($1, 'Main', 'AHV-Holding-TroLy', $2, true)`,
+		userID, prompt)
+	if err != nil {
+		log.Printf("[seed] failed to create default agent: %v", err)
+		return
+	}
+	log.Println("[seed] default Main agent created")
+}
+
 func main() {
 	_ = godotenv.Load()
 	cfg := config.Load()
@@ -50,6 +105,8 @@ func main() {
 	embeddings.Init(cfg.RouterURL, cfg.RouterAPIKey)
 	// Seed built-in skills
 	skills.SeedBuiltinSkills()
+	// Seed default Main agent
+	SeedDefaultAgent()
 
 	app := fiber.New(fiber.Config{
 		AppName:      "AHVclaw API",
@@ -83,6 +140,42 @@ func main() {
 	channelManager.RegisterAdapter("zalo", zalo.NewAdapter)
 	channelManager.RegisterAdapter("discord", discord.NewAdapter)
 	handlers.ChannelManager = channelManager
+
+	// Auto-start active bots after service starts
+	go func() {
+		time.Sleep(2 * time.Second)
+		log.Println("[channels] auto-starting active bots...")
+		rows, err := db.Pool.Query(context.Background(),
+			"SELECT id, channel, channel_config FROM bots WHERE is_active = true")
+		if err != nil {
+			log.Printf("[channels] failed to query active bots: %v", err)
+			return
+		}
+		defer rows.Close()
+		started := 0
+		for rows.Next() {
+			var botID uuid.UUID
+			var channel string
+			var configRaw *json.RawMessage
+			if err := rows.Scan(&botID, &channel, &configRaw); err != nil {
+				log.Printf("[channels] failed to scan bot: %v", err)
+				continue
+			}
+			// Decrypt config (same logic as handlers/bots.go)
+			configJSON, err := decryptBotConfig(configRaw)
+			if err != nil {
+				log.Printf("[channels] failed to decrypt config for bot %s: %v", botID, err)
+				continue
+			}
+			if err := channelManager.StartBot(botID.String(), channel, configJSON); err != nil {
+				log.Printf("[channels] failed to auto-start bot %s: %v", botID, err)
+			} else {
+				log.Printf("[channels] auto-started bot %s (%s)", botID, channel)
+				started++
+			}
+		}
+		log.Printf("[channels] auto-started %d bots", started)
+	}()
 
 	// Rate limiters
 	apiLimiter := limiter.New(limiter.Config{
