@@ -31,11 +31,13 @@ export function Sidebar({ onNavigate }: SidebarProps) {
   const handleNewChat = () => {
     setActiveConversationId(null);
     setMessages([]);
+    router.push("/chat");
     onNavigate?.();
   };
 
   const handleSelectConversation = async (id: string) => {
     setActiveConversationId(id);
+    router.push("/chat");
     onNavigate?.();
     try {
       const data = await api.getMessages(id);
