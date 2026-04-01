@@ -93,11 +93,11 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 		if err != nil {
 			log.Printf("[router] agent %s not found: %v", agentID, err)
 			systemPrompt = "You are a helpful assistant."
-			model = "openai/gpt-4o-mini"
+			model = "AHV-Holding-TroLy"
 		}
 	} else {
 		systemPrompt = "You are a helpful assistant."
-		model = "openai/gpt-4o-mini"
+		model = "AHV-Holding-TroLy"
 	}
 
 	// Override model from AI settings if present
