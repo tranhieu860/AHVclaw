@@ -1,0 +1,5 @@
+backend/ahvclaw-api
+.env
+*.log
+backend/.env
+backend/.env.bak

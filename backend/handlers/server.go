@@ -1,0 +1,156 @@
+package handlers
+
+import (
+	"context"
+
+	"github.com/ahvholding/ahvclaw/db"
+	"github.com/ahvholding/ahvclaw/models"
+	sshpkg "github.com/ahvholding/ahvclaw/ssh"
+	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
+)
+
+func ListServers(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(uuid.UUID)
+	rows, err := db.Pool.Query(context.Background(),
+		`SELECT id, user_id, name, host, port, username, auth_type, environment, tags, last_connected_at, created_at
+		 FROM servers WHERE user_id = $1 ORDER BY name`, userID)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "failed to list servers"})
+	}
+	defer rows.Close()
+
+	var servers []models.Server
+	for rows.Next() {
+		var s models.Server
+		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port, &s.Username,
+			&s.AuthType, &s.Environment, &s.Tags, &s.LastConnectedAt, &s.CreatedAt); err != nil {
+			continue
+		}
+		servers = append(servers, s)
+	}
+	if servers == nil {
+		servers = []models.Server{}
+	}
+	return c.JSON(servers)
+}
+
+func CreateServer(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(uuid.UUID)
+	var req models.ServerCreateRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid request"})
+	}
+	if req.Name == "" || req.Host == "" || req.Credentials == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "name, host, and credentials are required"})
+	}
+	if req.Port == 0 {
+		req.Port = 22
+	}
+	if req.Username == "" {
+		req.Username = "root"
+	}
+	if req.AuthType == "" {
+		req.AuthType = "password"
+	}
+	if req.Environment == "" {
+		req.Environment = "dev"
+	}
+
+	var s models.Server
+	err := db.Pool.QueryRow(context.Background(),
+		`INSERT INTO servers (user_id, name, host, port, username, auth_type, credentials_encrypted, environment, tags)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		 RETURNING id, user_id, name, host, port, username, auth_type, environment, tags, last_connected_at, created_at`,
+		userID, req.Name, req.Host, req.Port, req.Username, req.AuthType, req.Credentials, req.Environment, req.Tags,
+	).Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port, &s.Username, &s.AuthType, &s.Environment, &s.Tags, &s.LastConnectedAt, &s.CreatedAt)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "failed to create server: " + err.Error()})
+	}
+
+	return c.Status(201).JSON(s)
+}
+
+func DeleteServer(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(uuid.UUID)
+	serverID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid server ID"})
+	}
+
+	result, err := db.Pool.Exec(context.Background(),
+		"DELETE FROM servers WHERE id = $1 AND user_id = $2", serverID, userID)
+	if err != nil || result.RowsAffected() == 0 {
+		return c.Status(404).JSON(fiber.Map{"error": "server not found"})
+	}
+
+	return c.JSON(fiber.Map{"deleted": true})
+}
+
+func ServerExec(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(uuid.UUID)
+	serverID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid server ID"})
+	}
+
+	var req models.ServerExecRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid request"})
+	}
+	if req.Command == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "command is required"})
+	}
+
+	var host, username, credentials string
+	var port int
+	err = db.Pool.QueryRow(context.Background(),
+		"SELECT host, port, username, credentials_encrypted FROM servers WHERE id = $1 AND user_id = $2",
+		serverID, userID).Scan(&host, &port, &username, &credentials)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "server not found"})
+	}
+
+	client := sshpkg.NewClient(host, port, username, credentials)
+	output, exitCode, err := client.Execute(req.Command)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	_, _ = db.Pool.Exec(context.Background(),
+		"UPDATE servers SET last_connected_at = now() WHERE id = $1", serverID)
+
+	_, _ = db.Pool.Exec(context.Background(),
+		"INSERT INTO audit_logs (user_id, server_id, command, output, exit_code) VALUES ($1, $2, $3, $4, $5)",
+		userID, serverID, req.Command, output, exitCode)
+
+	return c.JSON(models.ServerExecResponse{Output: output, ExitCode: exitCode})
+}
+
+func ServerStatus(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(uuid.UUID)
+	serverID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid server ID"})
+	}
+
+	var host, username, credentials string
+	var port int
+	err = db.Pool.QueryRow(context.Background(),
+		"SELECT host, port, username, credentials_encrypted FROM servers WHERE id = $1 AND user_id = $2",
+		serverID, userID).Scan(&host, &port, &username, &credentials)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "server not found"})
+	}
+
+	client := sshpkg.NewClient(host, port, username, credentials)
+	status, err := client.GetStatus()
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	_, _ = db.Pool.Exec(context.Background(),
+		"UPDATE servers SET last_connected_at = now() WHERE id = $1", serverID)
+
+	return c.JSON(fiber.Map{"status": status})
+}
