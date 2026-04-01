@@ -80,7 +80,7 @@ var migrations = []string{
 		chunks_count INTEGER DEFAULT 0,
 		created_at TIMESTAMPTZ DEFAULT now()
 	)`,
-	// 008: chunks (skip vector column for now if pgvector not available)
+	// 008: chunks
 	`CREATE TABLE IF NOT EXISTS chunks (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		document_id UUID REFERENCES documents(id) ON DELETE CASCADE,
@@ -193,6 +193,131 @@ var migrations = []string{
 	`CREATE INDEX IF NOT EXISTS idx_audit_server ON audit_logs(server_id, executed_at DESC)`,
 	// 019: add tool_call_id to messages
 	`ALTER TABLE messages ADD COLUMN IF NOT EXISTS tool_call_id VARCHAR(255)`,
+
+	// =============================================
+	// Phase 2 Migrations
+	// =============================================
+
+	// 020: bots
+	`CREATE TABLE IF NOT EXISTS bots (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+		name VARCHAR(255) NOT NULL,
+		default_agent_id UUID REFERENCES agents(id),
+		allowed_agent_ids UUID[] DEFAULT '{}',
+		channel VARCHAR(50) NOT NULL,
+		channel_config JSONB DEFAULT '{}',
+		ai_settings JSONB DEFAULT '{}',
+		response_settings JSONB DEFAULT '{}',
+		access_settings JSONB DEFAULT '{}',
+		notification_settings JSONB DEFAULT '{}',
+		is_active BOOLEAN DEFAULT true,
+		stats JSONB DEFAULT '{}',
+		created_at TIMESTAMPTZ DEFAULT now(),
+		updated_at TIMESTAMPTZ DEFAULT now()
+	)`,
+
+	// 021: contacts
+	`CREATE TABLE IF NOT EXISTS contacts (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+		name VARCHAR(255),
+		avatar_url TEXT,
+		tags TEXT[] DEFAULT '{}',
+		notes TEXT,
+		metadata JSONB DEFAULT '{}',
+		first_seen_at TIMESTAMPTZ DEFAULT now(),
+		last_seen_at TIMESTAMPTZ DEFAULT now(),
+		created_at TIMESTAMPTZ DEFAULT now(),
+		updated_at TIMESTAMPTZ DEFAULT now()
+	)`,
+
+	// 022: contact_channels
+	`CREATE TABLE IF NOT EXISTS contact_channels (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		contact_id UUID REFERENCES contacts(id) ON DELETE CASCADE,
+		channel VARCHAR(50) NOT NULL,
+		channel_user_id VARCHAR(255) NOT NULL,
+		channel_username VARCHAR(255),
+		metadata JSONB DEFAULT '{}',
+		UNIQUE(channel, channel_user_id)
+	)`,
+
+	// 023: channel_conversations
+	`CREATE TABLE IF NOT EXISTS channel_conversations (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		bot_id UUID REFERENCES bots(id) ON DELETE CASCADE,
+		contact_id UUID REFERENCES contacts(id) ON DELETE CASCADE,
+		channel VARCHAR(50) NOT NULL,
+		channel_chat_id VARCHAR(255),
+		current_agent_id UUID REFERENCES agents(id),
+		status VARCHAR(20) DEFAULT 'active',
+		takeover_by UUID REFERENCES users(id),
+		created_at TIMESTAMPTZ DEFAULT now(),
+		updated_at TIMESTAMPTZ DEFAULT now()
+	)`,
+
+	// 024: channel_messages
+	`CREATE TABLE IF NOT EXISTS channel_messages (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		conversation_id UUID REFERENCES channel_conversations(id) ON DELETE CASCADE,
+		direction VARCHAR(10) NOT NULL,
+		sender_type VARCHAR(20) NOT NULL,
+		sender_id VARCHAR(255),
+		content TEXT,
+		attachments JSONB DEFAULT '[]',
+		channel_message_id VARCHAR(255),
+		agent_id UUID REFERENCES agents(id),
+		tool_calls JSONB,
+		tool_results JSONB,
+		tokens_in INTEGER DEFAULT 0,
+		tokens_out INTEGER DEFAULT 0,
+		created_at TIMESTAMPTZ DEFAULT now()
+	)`,
+
+	// 025: attachments
+	`CREATE TABLE IF NOT EXISTS attachments (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+		filename VARCHAR(500) NOT NULL,
+		original_name VARCHAR(500) NOT NULL,
+		mime_type VARCHAR(100) NOT NULL,
+		file_size BIGINT NOT NULL,
+		storage_path TEXT NOT NULL,
+		extracted_text TEXT,
+		width INTEGER,
+		height INTEGER,
+		created_at TIMESTAMPTZ DEFAULT now()
+	)`,
+
+	// 026: model_providers
+	`CREATE TABLE IF NOT EXISTS model_providers (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+		name VARCHAR(255) NOT NULL,
+		api_url TEXT NOT NULL,
+		api_key_encrypted TEXT NOT NULL,
+		models JSONB DEFAULT '[]',
+		is_active BOOLEAN DEFAULT true,
+		created_at TIMESTAMPTZ DEFAULT now(),
+		updated_at TIMESTAMPTZ DEFAULT now()
+	)`,
+
+	// 027: Phase 2 indexes
+	`CREATE INDEX IF NOT EXISTS idx_bots_user ON bots(user_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_contacts_user ON contacts(user_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_contact_channels_contact ON contact_channels(contact_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_channel_conversations_bot ON channel_conversations(bot_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_channel_conversations_contact ON channel_conversations(contact_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_channel_messages_conversation ON channel_messages(conversation_id, created_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_attachments_user ON attachments(user_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_model_providers_user ON model_providers(user_id)`,
+
+	// 028: Phase 2 ALTER TABLE additions
+	`ALTER TABLE skills ADD COLUMN IF NOT EXISTS is_system BOOLEAN DEFAULT false`,
+	`ALTER TABLE user_skills ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT true`,
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS storage_quota BIGINT DEFAULT 1073741824`,
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS storage_used BIGINT DEFAULT 0`,
 }
 
 func RunMigrations() error {
