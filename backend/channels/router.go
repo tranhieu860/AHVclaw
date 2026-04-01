@@ -187,8 +187,41 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 		}
 	}
 
-	// 8. Call AI with tool loop
+	// 8. Call AI with tool loop - filter tools based on bot settings
 	toolDefs := tools.AllTools
+	if aiSettingsRaw != nil {
+		var toolSettings struct {
+			AllowedTools []string `json:"allowed_tools"`
+			BlockedTools []string `json:"blocked_tools"`
+		}
+		if json.Unmarshal(*aiSettingsRaw, &toolSettings) == nil {
+			if len(toolSettings.AllowedTools) > 0 {
+				allowSet := make(map[string]bool)
+				for _, t := range toolSettings.AllowedTools {
+					allowSet[t] = true
+				}
+				var filtered []tools.ToolDef
+				for _, t := range toolDefs {
+					if allowSet[t.Function.Name] {
+						filtered = append(filtered, t)
+					}
+				}
+				toolDefs = filtered
+			} else if len(toolSettings.BlockedTools) > 0 {
+				blockSet := make(map[string]bool)
+				for _, t := range toolSettings.BlockedTools {
+					blockSet[t] = true
+				}
+				var filtered []tools.ToolDef
+				for _, t := range toolDefs {
+					if !blockSet[t.Function.Name] {
+						filtered = append(filtered, t)
+					}
+				}
+				toolDefs = filtered
+			}
+		}
+	}
 	executor := tools.NewExecutor(
 		fmt.Sprintf("/data/ahvclaw/workspaces/%s", botUserID.String()),
 		botUserID.String(),
