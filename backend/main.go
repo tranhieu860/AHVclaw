@@ -15,6 +15,7 @@ import (
 	"github.com/ahvholding/ahvclaw/db"
 	"github.com/ahvholding/ahvclaw/embeddings"
 	"github.com/ahvholding/ahvclaw/handlers"
+	"github.com/ahvholding/ahvclaw/skills"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/limiter"
@@ -43,6 +44,8 @@ func main() {
 
 	// Init embeddings
 	embeddings.Init(cfg.RouterURL, cfg.RouterAPIKey)
+	// Seed built-in skills
+	skills.SeedBuiltinSkills()
 
 	app := fiber.New(fiber.Config{
 		AppName:      "AHVclaw API",
@@ -145,6 +148,20 @@ func main() {
 
 	// WebSocket ticket (all roles)
 	protected.Post("/ws/ticket", handlers.CreateWSTicket)
+
+	// Settings (all roles)
+	protected.Get("/settings", handlers.GetSettings)
+	protected.Put("/settings", handlers.UpdateSettings)
+	protected.Get("/settings/storage", handlers.GetStorageInfo)
+	protected.Post("/settings/password", handlers.ChangePassword)
+	protected.Post("/settings/api-key", handlers.GenerateNewAPIKey)
+
+	// Model Providers (all roles)
+	protected.Get("/providers", handlers.ListProviders)
+	protected.Post("/providers", handlers.CreateProvider)
+	protected.Put("/providers/:id", handlers.UpdateProvider)
+	protected.Delete("/providers/:id", handlers.DeleteProvider)
+	protected.Post("/providers/:id/test", handlers.TestProvider)
 	protected.Post("/upload", handlers.UploadFile)
 	protected.Get("/uploads/:id", handlers.ServeUpload)
 	protected.Delete("/uploads/:id", handlers.DeleteUpload)
@@ -159,8 +176,12 @@ func main() {
 	devRoutes.Post("/servers/:id/exec", handlers.ServerExec)
 	devRoutes.Get("/servers/:id/status", handlers.ServerStatus)
 
-	// Admin only routes (future: user management, system settings)
-	// adminRoutes := protected.Group("", auth.RequireRole("admin"))
+	// Admin only routes
+	adminRoutes := protected.Group("", auth.RequireRole("admin"))
+	adminRoutes.Get("/admin/users", handlers.AdminListUsers)
+	adminRoutes.Put("/admin/users/:id/role", handlers.AdminUpdateUserRole)
+	adminRoutes.Delete("/admin/users/:id", handlers.AdminDeleteUser)
+	adminRoutes.Get("/admin/stats", handlers.AdminSystemStats)
 
 	// WebSocket chat
 	app.Use("/ws", handlers.WSUpgrade())
