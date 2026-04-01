@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { MessageSquare, Plus, Settings, Server, Puzzle, Bot, LogOut } from 'lucide-react';
+import { MessageSquare, Plus, Settings, Server, Puzzle, Bot, LogOut, Radio, Inbox, Users } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { ThemeToggle } from './ThemeToggle';
 import { api } from '@/lib/api';
@@ -83,6 +83,9 @@ export function Sidebar({ onNavigate }: SidebarProps) {
 
       <div className="p-2 border-t border-zinc-800 space-y-1">
         <SidebarLink icon={<Bot size={16} />} label="Agents" href="/agents" />
+        <SidebarLink icon={<Radio size={16} />} label="Bots" href="/bots" />
+        <SidebarLink icon={<Inbox size={16} />} label="Inbox" href="/inbox" />
+        <SidebarLink icon={<Users size={16} />} label="Contacts" href="/contacts" />
         <SidebarLink icon={<Puzzle size={16} />} label="Skills" href="/skills" />
         <SidebarLink icon={<Server size={16} />} label="Servers" href="/servers" />
         <SidebarLink icon={<Settings size={16} />} label="Settings" href="/settings" />
