@@ -145,6 +145,9 @@ func main() {
 
 	// WebSocket ticket (all roles)
 	protected.Post("/ws/ticket", handlers.CreateWSTicket)
+	protected.Post("/upload", handlers.UploadFile)
+	protected.Get("/uploads/:id", handlers.ServeUpload)
+	protected.Delete("/uploads/:id", handlers.DeleteUpload)
 
 	// Dev+ routes (admin and dev only)
 	devRoutes := protected.Group("", auth.RequireRole("admin", "dev"))
