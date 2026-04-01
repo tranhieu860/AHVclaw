@@ -10,6 +10,8 @@ import (
 
 	"github.com/ahvholding/ahvclaw/ai"
 	"github.com/ahvholding/ahvclaw/auth"
+	"github.com/ahvholding/ahvclaw/channels"
+	"github.com/ahvholding/ahvclaw/channels/telegram"
 	"github.com/ahvholding/ahvclaw/config"
 	"github.com/ahvholding/ahvclaw/crypto"
 	"github.com/ahvholding/ahvclaw/db"
@@ -71,6 +73,12 @@ func main() {
 
 	auth.Init(cfg.JWTSecret)
 	handlers.Router = ai.NewRouterClient(cfg.RouterURL, cfg.RouterAPIKey)
+
+	// Init channel manager
+	channelRouter := channels.NewRouter(handlers.Router)
+	channelManager := channels.NewManager(channelRouter)
+	channelManager.RegisterAdapter("telegram", telegram.NewAdapter)
+	handlers.ChannelManager = channelManager
 
 	// Rate limiters
 	apiLimiter := limiter.New(limiter.Config{
@@ -146,7 +154,22 @@ func main() {
 	protected.Post("/agents", handlers.CreateAgent)
 	protected.Get("/agents/:id", handlers.GetAgent)
 
-	// WebSocket ticket (all roles)
+	// Contacts (all roles)
+	protected.Get("/contacts", handlers.ListContacts)
+	protected.Get("/contacts/:id", handlers.GetContact)
+	protected.Put("/contacts/:id", handlers.UpdateContact)
+	protected.Delete("/contacts/:id", handlers.DeleteContact)
+	protected.Post("/contacts/merge", handlers.MergeContacts)
+
+	// Inbox (all roles)
+	protected.Get("/inbox", handlers.ListInboxConversations)
+	protected.Get("/inbox/:id", handlers.GetInboxConversation)
+	protected.Post("/inbox/:id/reply", handlers.ReplyToConversation)
+	protected.Post("/inbox/:id/takeover", handlers.TakeoverConversation)
+	protected.Post("/inbox/:id/release", handlers.ReleaseConversation)
+	protected.Post("/inbox/:id/assign", handlers.AssignAgent)
+	protected.Post("/inbox/:id/archive", handlers.ArchiveConversation)
+
 	protected.Post("/ws/ticket", handlers.CreateWSTicket)
 
 	// Settings (all roles)
@@ -176,6 +199,16 @@ func main() {
 	devRoutes.Post("/servers/:id/exec", handlers.ServerExec)
 	devRoutes.Get("/servers/:id/status", handlers.ServerStatus)
 
+	// Bot management (dev+ only)
+	devRoutes.Get("/bots", handlers.ListBots)
+	devRoutes.Post("/bots", handlers.CreateBot)
+	devRoutes.Get("/bots/:id", handlers.GetBot)
+	devRoutes.Put("/bots/:id", handlers.UpdateBot)
+	devRoutes.Delete("/bots/:id", handlers.DeleteBot)
+	devRoutes.Post("/bots/:id/start", handlers.StartBot)
+	devRoutes.Post("/bots/:id/stop", handlers.StopBot)
+	devRoutes.Get("/bots/:id/status", handlers.BotStatus)
+
 	// Admin only routes
 	adminRoutes := protected.Group("", auth.RequireRole("admin"))
 	adminRoutes.Get("/admin/users", handlers.AdminListUsers)
@@ -192,6 +225,7 @@ func main() {
 		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 		<-sigChan
 		log.Println("Shutting down...")
+		channelManager.StopAll()
 		_ = app.Shutdown()
 	}()
 
