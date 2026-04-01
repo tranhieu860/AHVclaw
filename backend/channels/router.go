@@ -388,7 +388,7 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 			trJSON, _ := json.Marshal(result)
 			trRaw := json.RawMessage(trJSON)
 			r.saveChannelMessage(ctx, conv.ID, "outbound", "tool", nil,
-				toolContent, &trRaw, nil, nil)
+				toolContent, &trRaw, nil, nil, tc.ID)
 		}
 	}
 
@@ -494,7 +494,7 @@ func (r *Router) findOrCreateConversation(ctx context.Context, botID, contactID 
 
 // saveChannelMessage saves a message in the unified messages table with source indicator.
 func (r *Router) saveChannelMessage(ctx context.Context, convID uuid.UUID, direction, senderType string,
-	senderID *string, content string, toolData *json.RawMessage, channelMsgID *string, agentID *uuid.UUID) {
+	senderID *string, content string, toolData *json.RawMessage, channelMsgID *string, agentID *uuid.UUID, toolCallID ...string) {
 
 	// Map direction/senderType to role for unified messages table
 	role := "user"
@@ -516,10 +516,15 @@ func (r *Router) saveChannelMessage(ctx context.Context, convID uuid.UUID, direc
 		source = *ch
 	}
 
+	var tcID *string
+	if len(toolCallID) > 0 && toolCallID[0] != "" {
+		tcID = &toolCallID[0]
+	}
+
 	_, err := db.Pool.Exec(ctx,
-		`INSERT INTO messages (conversation_id, role, content, tool_calls, source)
-		 VALUES ($1, $2, $3, $4, $5)`,
-		convID, role, content, toolData, source)
+		`INSERT INTO messages (conversation_id, role, content, tool_calls, source, tool_call_id)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		convID, role, content, toolData, source, tcID)
 	if err != nil {
 		log.Printf("[router] failed to save message: %v", err)
 	}
@@ -532,7 +537,7 @@ func (r *Router) buildMessageHistory(ctx context.Context, convID uuid.UUID, syst
 	}
 
 	rows, err := db.Pool.Query(ctx,
-		`SELECT role, content, tool_calls
+		`SELECT role, content, tool_calls, COALESCE(tool_call_id, '')
 		 FROM messages
 		 WHERE conversation_id = $1
 		 ORDER BY created_at ASC
@@ -547,8 +552,9 @@ func (r *Router) buildMessageHistory(ctx context.Context, convID uuid.UUID, syst
 		var role string
 		var content *string
 		var toolCallsRaw *json.RawMessage
+		var toolCallID string
 
-		if err := rows.Scan(&role, &content, &toolCallsRaw); err != nil {
+		if err := rows.Scan(&role, &content, &toolCallsRaw, &toolCallID); err != nil {
 			continue
 		}
 
@@ -563,6 +569,12 @@ func (r *Router) buildMessageHistory(ctx context.Context, convID uuid.UUID, syst
 			msg := ai.ChatMessage{Role: "assistant", Content: text}
 			if toolCallsRaw != nil {
 				msg.ToolCalls = *toolCallsRaw
+			}
+			messages = append(messages, msg)
+		} else if role == "tool" {
+			msg := ai.ChatMessage{Role: "tool", Content: text}
+			if toolCallID != "" {
+				msg.ToolCallID = toolCallID
 			}
 			messages = append(messages, msg)
 		}

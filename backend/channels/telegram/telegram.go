@@ -114,7 +114,7 @@ func (a *Adapter) SendTyping(chatID string) error {
 		return err
 	}
 	action := tgbotapi.NewChatAction(id, tgbotapi.ChatTyping)
-	_, err = a.api.Send(action)
+	_, err = a.api.Request(action)
 	return err
 }
 
