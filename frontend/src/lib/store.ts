@@ -91,7 +91,7 @@ export const useStore = create<AppStore>((set) => ({
   selectedModel: 'AHV-Holding-TroLy',
   setSelectedModel: (model) => set({ selectedModel: model }),
 
-  sidebarOpen: true,
+  sidebarOpen: typeof window !== 'undefined' && window.innerWidth >= 768,
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
 

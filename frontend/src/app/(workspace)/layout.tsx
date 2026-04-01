@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Menu, X } from 'lucide-react';
 import { Sidebar } from '@/components/Sidebar';
 import { StatusBar } from '@/components/StatusBar';
 import { useStore } from '@/lib/store';
@@ -9,6 +10,7 @@ import { api } from '@/lib/api';
 
 export default function WorkspaceLayout({ children }: { children: React.ReactNode }) {
   const sidebarOpen = useStore((s) => s.sidebarOpen);
+  const toggleSidebar = useStore((s) => s.toggleSidebar);
   const setUser = useStore((s) => s.setUser);
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -27,7 +29,6 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
         setLoading(false);
       })
       .catch(() => {
-        // Token expired, try refresh
         const refreshToken = localStorage.getItem('refresh_token');
         if (refreshToken) {
           api.refreshToken(refreshToken)
@@ -56,12 +57,36 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden">
-      {sidebarOpen && <Sidebar />}
-      <main className="flex flex-col flex-1 min-w-0">
-        <div className="flex-1 overflow-hidden">{children}</div>
-        <StatusBar />
-      </main>
+    <div className="h-screen w-screen flex flex-col overflow-hidden bg-zinc-950 text-zinc-100">
+      {/* Mobile header with menu toggle */}
+      <div className="md:hidden flex items-center gap-3 px-3 py-2 border-b border-zinc-800 bg-zinc-900">
+        <button onClick={toggleSidebar} className="text-zinc-400 hover:text-white">
+          {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
+        </button>
+        <span className="text-sm font-semibold">AHVclaw</span>
+      </div>
+
+      <div className="flex flex-1 overflow-hidden relative">
+        {sidebarOpen && (
+          <>
+            <div
+              className="md:hidden fixed inset-0 bg-black/50 z-20"
+              onClick={toggleSidebar}
+            />
+            <aside className="fixed md:static inset-y-0 left-0 z-30 md:z-auto w-64 flex-shrink-0">
+              <Sidebar onNavigate={() => {
+                if (window.innerWidth < 768) toggleSidebar();
+              }} />
+            </aside>
+          </>
+        )}
+
+        <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+          {children}
+        </main>
+      </div>
+
+      <StatusBar />
     </div>
   );
 }

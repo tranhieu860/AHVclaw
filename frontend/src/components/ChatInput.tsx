@@ -30,7 +30,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
   };
 
   return (
-    <div className="p-4 border-t border-zinc-800">
+    <div className="p-3 md:p-4 border-t border-zinc-800 pb-[env(safe-area-inset-bottom,0.75rem)]">
       <div className="flex items-end gap-2 bg-zinc-800 rounded-xl p-2">
         <textarea
           ref={textareaRef}
@@ -41,7 +41,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
             e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
           }}
           onKeyDown={handleKeyDown}
-          placeholder={disabled ? 'AI is responding...' : 'Type a message... (Enter to send, Shift+Enter for new line)'}
+          placeholder={disabled ? 'AI is responding...' : 'Type a message...'}
           rows={1}
           disabled={disabled}
           className="flex-1 bg-transparent text-white text-sm resize-none outline-none placeholder-zinc-500 px-2 py-1.5 max-h-[200px] disabled:opacity-50"

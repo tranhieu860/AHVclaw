@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/ahvholding/ahvclaw/crypto"
 	"github.com/ahvholding/ahvclaw/db"
 	sshpkg "github.com/ahvholding/ahvclaw/ssh"
 )
@@ -30,7 +31,13 @@ func (e *Executor) serverSSHExec(argsJSON json.RawMessage) *ToolResult {
 		return &ToolResult{Name: "server_ssh_exec", Error: fmt.Sprintf("server '%s' not found", args.ServerName)}
 	}
 
-	client := sshpkg.NewClient(host, port, username, credentials)
+	// Decrypt credentials
+	decryptedCreds, err := crypto.Decrypt(credentials)
+	if err != nil {
+		return &ToolResult{Name: "server_ssh_exec", Error: "decryption failed"}
+	}
+
+	client := sshpkg.NewClient(host, port, username, decryptedCreds)
 	output, exitCode, err := client.Execute(args.Command)
 	if err != nil {
 		return &ToolResult{Name: "server_ssh_exec", Error: err.Error()}
@@ -62,7 +69,13 @@ func (e *Executor) serverStatus(argsJSON json.RawMessage) *ToolResult {
 		return &ToolResult{Name: "server_status", Error: fmt.Sprintf("server '%s' not found", args.ServerName)}
 	}
 
-	client := sshpkg.NewClient(host, port, username, credentials)
+	// Decrypt credentials
+	decryptedCreds, err := crypto.Decrypt(credentials)
+	if err != nil {
+		return &ToolResult{Name: "server_status", Error: "decryption failed"}
+	}
+
+	client := sshpkg.NewClient(host, port, username, decryptedCreds)
 	status, err := client.GetStatus()
 	if err != nil {
 		return &ToolResult{Name: "server_status", Error: err.Error()}

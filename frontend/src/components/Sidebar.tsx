@@ -6,7 +6,11 @@ import { MessageSquare, Plus, Settings, Server, Puzzle, Bot, LogOut } from 'luci
 import { useStore } from '@/lib/store';
 import { api } from '@/lib/api';
 
-export function Sidebar() {
+interface SidebarProps {
+  onNavigate?: () => void;
+}
+
+export function Sidebar({ onNavigate }: SidebarProps) {
   const {
     conversations,
     activeConversationId,
@@ -25,10 +29,12 @@ export function Sidebar() {
   const handleNewChat = () => {
     setActiveConversationId(null);
     setMessages([]);
+    onNavigate?.();
   };
 
   const handleSelectConversation = async (id: string) => {
     setActiveConversationId(id);
+    onNavigate?.();
     try {
       const data = await api.getMessages(id);
       setMessages(data.messages || data || []);
@@ -43,7 +49,7 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="w-64 border-r border-zinc-800 bg-zinc-900 flex flex-col h-full">
+    <div className="w-64 border-r border-zinc-800 bg-zinc-900 flex flex-col h-full">
       <div className="p-4 border-b border-zinc-800">
         <h1 className="text-lg font-bold text-white">AHVclaw</h1>
         <p className="text-xs text-zinc-500">AI Agent Platform</p>
@@ -92,7 +98,7 @@ export function Sidebar() {
           <p className="text-xs text-zinc-400 truncate">{user.email}</p>
         </div>
       )}
-    </aside>
+    </div>
   );
 }
 

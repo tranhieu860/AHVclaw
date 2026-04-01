@@ -10,6 +10,7 @@ import (
 	"github.com/ahvholding/ahvclaw/ai"
 	"github.com/ahvholding/ahvclaw/auth"
 	"github.com/ahvholding/ahvclaw/config"
+	"github.com/ahvholding/ahvclaw/crypto"
 	"github.com/ahvholding/ahvclaw/db"
 	"github.com/ahvholding/ahvclaw/handlers"
 	"github.com/gofiber/fiber/v2"
@@ -30,6 +31,11 @@ func main() {
 
 	if err := db.RunMigrations(); err != nil {
 		log.Fatal("Migrations failed:", err)
+	}
+
+	// Init encryption
+	if err := crypto.Init(cfg.EncryptionKey); err != nil {
+		log.Fatal("Crypto init failed:", err)
 	}
 
 	app := fiber.New(fiber.Config{
@@ -93,7 +99,6 @@ func main() {
 	protected.Delete("/memories/:id", handlers.DeleteMemory)
 	protected.Post("/memories/search", handlers.SearchMemories)
 
-
 	// Server management
 	protected.Get("/servers", handlers.ListServers)
 	protected.Post("/servers", handlers.CreateServer)
@@ -108,6 +113,24 @@ func main() {
 
 	// Browser automation
 	protected.Post("/browser/action", handlers.BrowserAction)
+
+	// Knowledge Base
+	protected.Get("/knowledge-bases", handlers.ListKnowledgeBases)
+	protected.Post("/knowledge-bases", handlers.CreateKnowledgeBase)
+	protected.Delete("/knowledge-bases/:id", handlers.DeleteKnowledgeBase)
+	protected.Get("/knowledge-bases/:id/documents", handlers.ListDocuments)
+	protected.Post("/knowledge-bases/:id/documents", handlers.CreateDocument)
+	protected.Post("/knowledge-bases/:id/search", handlers.SearchKnowledgeBase)
+
+	// Skills
+	protected.Get("/skills", handlers.ListSkills)
+	protected.Post("/skills", handlers.CreateSkill)
+
+	// Agents
+	protected.Get("/agents", handlers.ListAgents)
+	protected.Post("/agents", handlers.CreateAgent)
+	protected.Get("/agents/:id", handlers.GetAgent)
+
 
 	// WebSocket chat
 	app.Use("/ws", handlers.WSUpgrade())

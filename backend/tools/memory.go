@@ -47,18 +47,34 @@ func (e *Executor) memorySearch(argsJSON json.RawMessage) *ToolResult {
 		return &ToolResult{Name: "memory_search", Error: "query is required"}
 	}
 
+	// Use trigram similarity for better fuzzy search + ILIKE fallback
 	rows, err := db.Pool.Query(context.Background(),
-		"SELECT type, key, content FROM memories WHERE user_id = $1 AND (key ILIKE $2 OR content ILIKE $2) ORDER BY updated_at DESC LIMIT 10",
-		e.UserID, "%"+args.Query+"%")
+		`SELECT type, key, content,
+		 GREATEST(similarity(key, $2), similarity(content, $2)) AS sim
+		 FROM memories
+		 WHERE user_id = $1
+		 AND (key % $2 OR content % $2 OR key ILIKE $3 OR content ILIKE $3)
+		 ORDER BY sim DESC
+		 LIMIT 10`,
+		e.UserID, args.Query, "%"+args.Query+"%")
 	if err != nil {
-		return &ToolResult{Name: "memory_search", Error: "search failed"}
+		// Fallback to simple ILIKE if trigram fails
+		rows, err = db.Pool.Query(context.Background(),
+			`SELECT type, key, content, 0::float AS sim
+			 FROM memories WHERE user_id = $1 AND (key ILIKE $2 OR content ILIKE $2)
+			 ORDER BY updated_at DESC LIMIT 10`,
+			e.UserID, "%"+args.Query+"%")
+		if err != nil {
+			return &ToolResult{Name: "memory_search", Error: "search failed"}
+		}
 	}
 	defer rows.Close()
 
 	var results []string
 	for rows.Next() {
 		var mType, mKey, mContent string
-		if err := rows.Scan(&mType, &mKey, &mContent); err != nil {
+		var sim float64
+		if err := rows.Scan(&mType, &mKey, &mContent, &sim); err != nil {
 			continue
 		}
 		results = append(results, fmt.Sprintf("[%s] %s: %s", mType, mKey, mContent))

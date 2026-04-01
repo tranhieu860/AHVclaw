@@ -148,20 +148,31 @@ func SearchMemories(c *fiber.Ctx) error {
 	}
 
 	ctx := context.Background()
-	searchPattern := "%" + req.Query + "%"
 
 	if req.Type != "" {
-		return searchMemoriesByType(c, ctx, userID, req.Type, searchPattern, req.Limit)
+		return searchMemoriesByType(c, ctx, userID, req.Type, req.Query, req.Limit)
 	}
-	return searchAllMemories(c, ctx, userID, searchPattern, req.Limit)
+	return searchAllMemories(c, ctx, userID, req.Query, req.Limit)
 }
 
-func searchAllMemories(c *fiber.Ctx, ctx context.Context, userID uuid.UUID, pattern string, limit int) error {
+func searchAllMemories(c *fiber.Ctx, ctx context.Context, userID uuid.UUID, query string, limit int) error {
+	pattern := "%" + query + "%"
+
+	// Try trigram similarity first, with ILIKE fallback
 	rows, err := db.Pool.Query(ctx,
-		"SELECT id, user_id, type, key, content, source_conversation_id, created_at, updated_at FROM memories WHERE user_id = $1 AND (key ILIKE $2 OR content ILIKE $2) ORDER BY updated_at DESC LIMIT $3",
-		userID, pattern, limit)
+		`SELECT id, user_id, type, key, content, source_conversation_id, created_at, updated_at
+		 FROM memories WHERE user_id = $1
+		 AND (key % $2 OR content % $2 OR key ILIKE $3 OR content ILIKE $3)
+		 ORDER BY GREATEST(similarity(key, $2), similarity(content, $2)) DESC LIMIT $4`,
+		userID, query, pattern, limit)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "search failed"})
+		// Fallback to simple ILIKE if trigram fails
+		rows, err = db.Pool.Query(ctx,
+			"SELECT id, user_id, type, key, content, source_conversation_id, created_at, updated_at FROM memories WHERE user_id = $1 AND (key ILIKE $2 OR content ILIKE $2) ORDER BY updated_at DESC LIMIT $3",
+			userID, pattern, limit)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "search failed"})
+		}
 	}
 	defer rows.Close()
 
@@ -179,12 +190,24 @@ func searchAllMemories(c *fiber.Ctx, ctx context.Context, userID uuid.UUID, patt
 	return c.JSON(memories)
 }
 
-func searchMemoriesByType(c *fiber.Ctx, ctx context.Context, userID uuid.UUID, memType string, pattern string, limit int) error {
+func searchMemoriesByType(c *fiber.Ctx, ctx context.Context, userID uuid.UUID, memType string, query string, limit int) error {
+	pattern := "%" + query + "%"
+
+	// Try trigram similarity first, with ILIKE fallback
 	rows, err := db.Pool.Query(ctx,
-		"SELECT id, user_id, type, key, content, source_conversation_id, created_at, updated_at FROM memories WHERE user_id = $1 AND type = $2 AND (key ILIKE $3 OR content ILIKE $3) ORDER BY updated_at DESC LIMIT $4",
-		userID, memType, pattern, limit)
+		`SELECT id, user_id, type, key, content, source_conversation_id, created_at, updated_at
+		 FROM memories WHERE user_id = $1 AND type = $2
+		 AND (key % $3 OR content % $3 OR key ILIKE $4 OR content ILIKE $4)
+		 ORDER BY GREATEST(similarity(key, $3), similarity(content, $3)) DESC LIMIT $5`,
+		userID, memType, query, pattern, limit)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "search failed"})
+		// Fallback to simple ILIKE if trigram fails
+		rows, err = db.Pool.Query(ctx,
+			"SELECT id, user_id, type, key, content, source_conversation_id, created_at, updated_at FROM memories WHERE user_id = $1 AND type = $2 AND (key ILIKE $3 OR content ILIKE $3) ORDER BY updated_at DESC LIMIT $4",
+			userID, memType, pattern, limit)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "search failed"})
+		}
 	}
 	defer rows.Close()
 

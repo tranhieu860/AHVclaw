@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 
+	"github.com/ahvholding/ahvclaw/crypto"
 	"github.com/ahvholding/ahvclaw/db"
 	"github.com/ahvholding/ahvclaw/models"
 	sshpkg "github.com/ahvholding/ahvclaw/ssh"
@@ -57,12 +58,18 @@ func CreateServer(c *fiber.Ctx) error {
 		req.Environment = "dev"
 	}
 
+	// Encrypt credentials before storing
+	encryptedCreds, err := crypto.Encrypt(req.Credentials)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "encryption failed"})
+	}
+
 	var s models.Server
-	err := db.Pool.QueryRow(context.Background(),
+	err = db.Pool.QueryRow(context.Background(),
 		`INSERT INTO servers (user_id, name, host, port, username, auth_type, credentials_encrypted, environment, tags)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		 RETURNING id, user_id, name, host, port, username, auth_type, environment, tags, last_connected_at, created_at`,
-		userID, req.Name, req.Host, req.Port, req.Username, req.AuthType, req.Credentials, req.Environment, req.Tags,
+		userID, req.Name, req.Host, req.Port, req.Username, req.AuthType, encryptedCreds, req.Environment, req.Tags,
 	).Scan(&s.ID, &s.UserID, &s.Name, &s.Host, &s.Port, &s.Username, &s.AuthType, &s.Environment, &s.Tags, &s.LastConnectedAt, &s.CreatedAt)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed to create server: " + err.Error()})
@@ -111,7 +118,13 @@ func ServerExec(c *fiber.Ctx) error {
 		return c.Status(404).JSON(fiber.Map{"error": "server not found"})
 	}
 
-	client := sshpkg.NewClient(host, port, username, credentials)
+	// Decrypt credentials
+	decryptedCreds, err := crypto.Decrypt(credentials)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "decryption failed"})
+	}
+
+	client := sshpkg.NewClient(host, port, username, decryptedCreds)
 	output, exitCode, err := client.Execute(req.Command)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
@@ -143,7 +156,13 @@ func ServerStatus(c *fiber.Ctx) error {
 		return c.Status(404).JSON(fiber.Map{"error": "server not found"})
 	}
 
-	client := sshpkg.NewClient(host, port, username, credentials)
+	// Decrypt credentials
+	decryptedCreds, err := crypto.Decrypt(credentials)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "decryption failed"})
+	}
+
+	client := sshpkg.NewClient(host, port, username, decryptedCreds)
 	status, err := client.GetStatus()
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})

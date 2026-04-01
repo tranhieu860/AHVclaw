@@ -20,6 +20,7 @@ var AllTools = []ToolDef{
 	serverSSHExecDef(),
 	serverStatusDef(),
 	browserNavigateDef(), browserScreenshotDef(), browserClickDef(), browserTypeDef(), browserExtractDef(),
+	knowledgeSearchDef(),
 }
 
 func fileReadDef() ToolDef {
@@ -162,5 +163,15 @@ func browserTypeDef() ToolDef {
 func browserExtractDef() ToolDef {
 	return makeTool("browser_extract", "Extract text content from the current browser page", `{
 		"type":"object","properties":{}
+	}`)
+}
+
+func knowledgeSearchDef() ToolDef {
+	return makeTool("knowledge_search", "Search the user's knowledge bases for relevant information. Use this when the user asks about documents they have uploaded.", `{
+		"type":"object","properties":{
+			"kb_id":{"type":"string","description":"Optional: specific knowledge base ID to search. If empty, searches all."},
+			"query":{"type":"string","description":"Search query keywords"},
+			"limit":{"type":"integer","description":"Max results to return","default":5}
+		},"required":["query"]
 	}`)
 }

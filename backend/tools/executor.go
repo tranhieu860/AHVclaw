@@ -54,6 +54,8 @@ func (e *Executor) Execute(name string, argsJSON json.RawMessage) *ToolResult {
 		return e.browserType(argsJSON)
 	case "browser_extract":
 		return e.browserExtract(argsJSON)
+	case "knowledge_search":
+		return e.knowledgeSearch(argsJSON)
 	default:
 		return &ToolResult{Name: name, Error: fmt.Sprintf("unknown tool: %s", name)}
 	}
