@@ -47,12 +47,9 @@ func (a *Adapter) ValidateConfig() error {
 	if a.config.AccessToken == "" {
 		return fmt.Errorf("access_token is required")
 	}
-	if a.config.AppID == "" {
-		return fmt.Errorf("app_id is required")
-	}
 	return nil
-}
 
+}
 func (a *Adapter) Start() error {
 	log.Printf("[zalo] bot %s started (webhook mode)", a.botID)
 	return nil

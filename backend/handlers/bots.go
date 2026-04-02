@@ -314,12 +314,15 @@ func encryptConfig(raw *json.RawMessage) (*json.RawMessage, error) {
 		return raw, nil
 	}
 
-	if token, ok := cfg["bot_token"].(string); ok && token != "" {
-		encrypted, err := crypto.Encrypt(token)
-		if err != nil {
-			return nil, err
+	// Encrypt sensitive fields (bot_token for Telegram/Discord, access_token for Zalo)
+	for _, field := range []string{"bot_token", "access_token", "app_secret"} {
+		if token, ok := cfg[field].(string); ok && token != "" {
+			encrypted, err := crypto.Encrypt(token)
+			if err != nil {
+				return nil, err
+			}
+			cfg[field] = encrypted
 		}
-		cfg["bot_token"] = encrypted
 	}
 
 	result, err := json.Marshal(cfg)
@@ -341,12 +344,15 @@ func decryptConfig(raw *json.RawMessage) ([]byte, error) {
 		return *raw, nil
 	}
 
-	if token, ok := cfg["bot_token"].(string); ok && token != "" {
-		decrypted, err := crypto.Decrypt(token)
-		if err != nil {
-			return nil, err
+	// Decrypt sensitive fields
+	for _, field := range []string{"bot_token", "access_token", "app_secret"} {
+		if token, ok := cfg[field].(string); ok && token != "" {
+			decrypted, err := crypto.Decrypt(token)
+			if err != nil {
+				return nil, err
+			}
+			cfg[field] = decrypted
 		}
-		cfg["bot_token"] = decrypted
 	}
 
 	return json.Marshal(cfg)

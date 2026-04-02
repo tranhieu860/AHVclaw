@@ -170,7 +170,7 @@ export default function BotsPage() {
         body: JSON.stringify({
           name: formName,
           channel: formChannel,
-          channel_config: { bot_token: formToken },
+          channel_config: formChannel === 'zalo' ? { access_token: formToken } : { bot_token: formToken },
           ai_settings: isAllSelected ? {} : { allowed_tools: Array.from(selectedTools) },
           default_agent_id: formAgentId || undefined,
         }),
@@ -285,7 +285,7 @@ export default function BotsPage() {
             <option value="zalo">Zalo</option>
             <option value="discord">Discord</option>
           </select>
-          <input placeholder="Token bot" value={formToken} onChange={e => setFormToken(e.target.value)}
+          <input placeholder={formChannel === 'zalo' ? 'Access Token Zalo OA' :  'Token bot'} value={formToken} onChange={e => setFormToken(e.target.value)}
             className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none" />
           <input placeholder="Agent ID (tùy chọn)" value={formAgentId} onChange={e => setFormAgentId(e.target.value)}
             className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none" />
