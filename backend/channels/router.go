@@ -503,16 +503,18 @@ func (r *Router) saveChannelMessage(ctx context.Context, convID uuid.UUID, direc
 }
 
 // buildMessageHistory loads past messages from the unified messages table.
+// Loads the NEWEST 20 messages then reverses to chronological order.
 func (r *Router) buildMessageHistory(ctx context.Context, convID uuid.UUID, systemPrompt string) []ai.ChatMessage {
 	messages := []ai.ChatMessage{
 		{Role: "system", Content: systemPrompt},
 	}
 
+	// Load NEWEST 20 messages, then reverse to chronological order
 	rows, err := db.Pool.Query(ctx,
 		`SELECT role, content, tool_calls, COALESCE(tool_call_id, '')
 		 FROM messages
 		 WHERE conversation_id = $1
-		 ORDER BY created_at ASC
+		 ORDER BY created_at DESC
 		 LIMIT 20`,
 		convID)
 	if err != nil {
@@ -520,6 +522,7 @@ func (r *Router) buildMessageHistory(ctx context.Context, convID uuid.UUID, syst
 	}
 	defer rows.Close()
 
+	var history []ai.ChatMessage
 	for rows.Next() {
 		var role string
 		var content *string
@@ -536,25 +539,31 @@ func (r *Router) buildMessageHistory(ctx context.Context, convID uuid.UUID, syst
 		}
 
 		if role == "user" {
-			messages = append(messages, ai.ChatMessage{Role: "user", Content: text})
+			history = append(history, ai.ChatMessage{Role: "user", Content: text})
 		} else if role == "assistant" {
 			msg := ai.ChatMessage{Role: "assistant", Content: text}
 			if toolCallsRaw != nil {
 				msg.ToolCalls = *toolCallsRaw
 			}
-			messages = append(messages, msg)
+			history = append(history, msg)
 		} else if role == "tool" {
 			if toolCallID == "" {
 				continue // skip orphan tool results
 			}
-			msg := ai.ChatMessage{Role: "tool", Content: text}
-			if toolCallID != "" {
-				msg.ToolCallID = toolCallID
-			}
-			messages = append(messages, msg)
+			history = append(history, ai.ChatMessage{
+				Role:       "tool",
+				Content:    text,
+				ToolCallID: toolCallID,
+			})
 		}
 	}
 
+	// Reverse to chronological order (we loaded DESC)
+	for i, j := 0, len(history)-1; i < j; i, j = i+1, j-1 {
+		history[i], history[j] = history[j], history[i]
+	}
+
+	messages = append(messages, history...)
 	return messages
 }
 

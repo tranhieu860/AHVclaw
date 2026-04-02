@@ -168,7 +168,7 @@ func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
 
 	// Load conversation history
 	rows, err := db.Pool.Query(ctx,
-		"SELECT role, content, tool_calls, tool_call_id FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC", *convID)
+		"SELECT role, content, tool_calls, tool_call_id FROM messages WHERE conversation_id = $1 ORDER BY created_at DESC LIMIT 30", *convID)
 	if err != nil {
 		sendWSError(conn, "failed to load history")
 		return
@@ -194,6 +194,11 @@ func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
 			msg.ToolCallID = *toolCallID
 		}
 		messages = append(messages, msg)
+	}
+
+	// Reverse to chronological order (we loaded DESC)
+	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+		messages[i], messages[j] = messages[j], messages[i]
 	}
 
 	// Create executor for user workspace
