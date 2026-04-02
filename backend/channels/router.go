@@ -526,7 +526,7 @@ func (r *Router) buildMessageHistory(ctx context.Context, convID uuid.UUID, syst
 
 	// Load NEWEST 20 messages, then reverse to chronological order
 	rows, err := db.Pool.Query(ctx,
-		`SELECT role, content, tool_calls, COALESCE(tool_call_id, '')
+		`SELECT role, content
 		 FROM messages
 		 WHERE conversation_id =  AND role IN ('user', 'assistant')
 		 ORDER BY created_at DESC
@@ -541,36 +541,15 @@ func (r *Router) buildMessageHistory(ctx context.Context, convID uuid.UUID, syst
 	for rows.Next() {
 		var role string
 		var content *string
-		var toolCallsRaw *json.RawMessage
-		var toolCallID string
-
-		if err := rows.Scan(&role, &content, &toolCallsRaw, &toolCallID); err != nil {
+		if err := rows.Scan(&role, &content); err != nil {
 			continue
 		}
-
 		text := ""
 		if content != nil {
 			text = *content
 		}
-
-		if role == "user" {
-			history = append(history, ai.ChatMessage{Role: "user", Content: text})
-		} else if role == "assistant" {
-			msg := ai.ChatMessage{Role: "assistant", Content: text}
-			// Skip tool_calls from history - engine handles tool calls within current turn only
-			if false && toolCallsRaw != nil {
-				msg.ToolCalls = *toolCallsRaw
-			}
-			history = append(history, msg)
-		} else if role == "tool" {
-			if toolCallID == "" {
-				continue // skip orphan tool results
-			}
-			history = append(history, ai.ChatMessage{
-				Role:       "tool",
-				Content:    text,
-				ToolCallID: toolCallID,
-			})
+		if role == "user" || role == "assistant" {
+			history = append(history, ai.ChatMessage{Role: role, Content: text})
 		}
 	}
 
