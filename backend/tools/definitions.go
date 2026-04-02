@@ -22,6 +22,7 @@ var AllTools = []ToolDef{
 	browserNavigateDef(), browserScreenshotDef(), browserClickDef(), browserTypeDef(), browserExtractDef(),
 	knowledgeSearchDef(),
 	delegateAgentDef(),
+	manageScheduledTaskDef(),
 }
 
 func fileReadDef() ToolDef {
@@ -184,5 +185,22 @@ func delegateAgentDef() ToolDef {
 			"reason":{"type":"string","description":"Reason for delegation"},
 			"conversation_id":{"type":"string","description":"Channel conversation ID to delegate"}
 		},"required":["agent_name"]
+	}`)
+}
+
+
+func manageScheduledTaskDef() ToolDef {
+	return makeTool("manage_scheduled_task", "Create, list, update, delete, pause, or resume scheduled tasks that run automatically on a cron schedule", `{
+		"type":"object","properties":{
+			"action":{"type":"string","enum":["create","list","update","delete","pause","resume"],"description":"Action to perform"},
+			"name":{"type":"string","description":"Task name (for create)"},
+			"prompt":{"type":"string","description":"AI prompt to execute (for create/update)"},
+			"schedule":{"type":"string","description":"Cron expression, e.g. 0 9 * * * for daily at 9am (for create/update)"},
+			"delivery_channel":{"type":"string","enum":["web","telegram","zalo","discord"],"description":"Where to deliver results (for create/update)","default":"web"},
+			"timezone":{"type":"string","description":"Timezone for schedule, e.g. Asia/Ho_Chi_Minh (for create/update)","default":"Asia/Ho_Chi_Minh"},
+			"task_id":{"type":"string","description":"Task ID (for update/delete/pause/resume)"},
+			"description":{"type":"string","description":"Task description (for create/update)"},
+			"agent_id":{"type":"string","description":"Agent ID to use for execution (optional)"}
+		},"required":["action"]
 	}`)
 }

@@ -59,6 +59,8 @@ func (e *Executor) executeInternal(name string, argsJSON json.RawMessage) *ToolR
 		return e.knowledgeSearch(argsJSON)
 	case "delegate_agent":
 		return e.delegateAgent(argsJSON)
+	case "manage_scheduled_task":
+		return e.manageScheduledTask(argsJSON)
 	default:
 		return &ToolResult{Name: name, Error: fmt.Sprintf("unknown tool: %s", name)}
 	}

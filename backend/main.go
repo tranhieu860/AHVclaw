@@ -20,8 +20,11 @@ import (
 	"github.com/ahvholding/ahvclaw/crypto"
 	"github.com/ahvholding/ahvclaw/db"
 	"github.com/ahvholding/ahvclaw/embeddings"
+	"github.com/ahvholding/ahvclaw/engine"
 	"github.com/ahvholding/ahvclaw/handlers"
+	"github.com/ahvholding/ahvclaw/scheduler"
 	"github.com/ahvholding/ahvclaw/skills"
+	"github.com/ahvholding/ahvclaw/tools"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/limiter"
@@ -109,6 +112,7 @@ func main() {
 	// Seed default Main agent
 	SeedDefaultAgent()
 
+
 	app := fiber.New(fiber.Config{
 		AppName:      "AHVclaw API",
 		ServerHeader: "AHVclaw",
@@ -144,6 +148,60 @@ func main() {
 	channelManager.RegisterAdapter("zalo", zalo.NewAdapter)
 	channelManager.RegisterAdapter("discord", discord.NewAdapter)
 	handlers.ChannelManager = channelManager
+
+	// Start task scheduler
+	taskScheduler := scheduler.New(
+		func(ctx context.Context, taskID, userID uuid.UUID, agentID *uuid.UUID, prompt string) (string, int, int, []string, error) {
+			// Load agent system prompt if agentID specified
+			systemPrompt := "You are an AI assistant executing a scheduled task. Complete the task described in the user message."
+			model := "AHV-Holding-TroLy"
+			if agentID != nil {
+				var agentPrompt *string
+				var agentModel *string
+				db.Pool.QueryRow(ctx, "SELECT system_prompt, model FROM agents WHERE id = ", *agentID).Scan(&agentPrompt, &agentModel)
+				if agentPrompt != nil {
+					systemPrompt = *agentPrompt
+				}
+				if agentModel != nil {
+					model = *agentModel
+				}
+			}
+			messages := []ai.ChatMessage{
+				{Role: "system", Content: systemPrompt},
+				{Role: "user", Content: prompt},
+			}
+			executor := tools.NewExecutor(fmt.Sprintf("/data/ahvclaw/workspaces/%s", userID.String()), userID.String())
+			result, err := engine.ProcessChat(ctx, engine.ChatConfig{
+				AIRouter:         handlers.Router,
+				Model:            model,
+				Messages:         messages,
+				Tools:            allToolsForScheduler(),
+				Executor:         executor,
+				MaxToolRounds:    5,
+				MaxContextTokens: 4000,
+			})
+			if err != nil {
+				return "", 0, 0, nil, err
+			}
+			return result.Content, result.TokensIn, result.TokensOut, nil, nil
+		},
+		func(userID uuid.UUID, channel string, chatID *string, botID *uuid.UUID, content string) error {
+			if channel == "web" {
+				handlers.Hub.BroadcastToUser(userID.String(), handlers.Event{Type: "task_result", Data: content})
+				return nil
+			}
+			if botID != nil {
+				adapter, ok := channelManager.GetAdapter(botID.String())
+				if ok && chatID != nil {
+					return adapter.SendMessage(*chatID, content)
+				}
+			}
+			return nil
+		},
+	)
+	taskScheduler.Start()
+	defer taskScheduler.Stop()
+
 
 	// Auto-start active bots after service starts
 	go func() {
@@ -338,4 +396,21 @@ func main() {
 	if err := app.Listen(addr); err != nil {
 		log.Fatal(err)
 	}
+}
+
+
+// allToolsForScheduler converts tools for scheduler use.
+func allToolsForScheduler() []ai.Tool {
+	var result []ai.Tool
+	for _, d := range tools.AllTools {
+		result = append(result, ai.Tool{
+			Type: d.Type,
+			Function: ai.ToolFunction{
+				Name:        d.Function.Name,
+				Description: d.Function.Description,
+				Parameters:  d.Function.Parameters,
+			},
+		})
+	}
+	return result
 }
