@@ -1,6 +1,7 @@
 'use client';
 
-import { Bot, User, Paperclip } from 'lucide-react';
+import { Bot, User, Paperclip, ChevronDown, ChevronRight } from 'lucide-react';
+import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -16,7 +17,28 @@ interface Message {
   role: string;
   content: string | null;
   source?: string;
+  thinking?: string;
   attachments?: Attachment[];
+}
+
+function ThinkingBlock({ content }: { content: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-2 border-t border-zinc-700/50 pt-2">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-400 transition"
+      >
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        <span>Suy nghi</span>
+      </button>
+      {open && (
+        <pre className="mt-1.5 text-xs text-zinc-500 bg-zinc-900/50 rounded-lg p-2.5 whitespace-pre-wrap break-words font-mono max-h-60 overflow-y-auto leading-relaxed">
+          {content}
+        </pre>
+      )}
+    </div>
+  );
 }
 
 export function MessageBubble({ message }: { message: Message }) {
@@ -69,6 +91,7 @@ export function MessageBubble({ message }: { message: Message }) {
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
           </div>
         )}
+        {message.thinking && <ThinkingBlock content={message.thinking} />}
         {message.source && message.source !== 'web' && (
           <span className="text-[9px] px-1 rounded bg-zinc-700/50 text-zinc-400 ml-1 inline-block mt-0.5">
             {message.source === 'telegram' ? '🔵 TG' : message.source === 'zalo' ? '🟢 ZL' : message.source === 'discord' ? '🟣 DC' : message.source}

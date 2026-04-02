@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { MessageSquare, Plus, Settings, Server, Puzzle, Bot, LogOut, Radio, Users, Clock, Trash2 } from 'lucide-react';
+import { MessageSquare, Plus, Settings, Server, Puzzle, Bot, LogOut, Radio, Users, Clock, Trash2, FolderOpen } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { ThemeToggle } from './ThemeToggle';
 import { api } from '@/lib/api';
@@ -132,6 +132,7 @@ export function Sidebar({ onNavigate }: SidebarProps) {
         <SidebarLink icon={<Radio size={16} />} label="Bot" href="/bots" />
         <SidebarLink icon={<Users size={16} />} label="Liên hệ" href="/contacts" />
         <SidebarLink icon={<Clock size={16} />} label="Tác vụ" href="/tasks" />
+        <SidebarLink icon={<FolderOpen size={16} />} label="Dự án" href="/projects" />
         <SidebarLink icon={<Puzzle size={16} />} label="Kỹ năng" href="/skills" />
         <SidebarLink icon={<Server size={16} />} label="Máy chủ" href="/servers" />
         <SidebarLink icon={<Settings size={16} />} label="Cài đặt" href="/settings" />

@@ -141,6 +141,22 @@ class ApiClient {
 
   // Event WebSocket
 
+
+  // Projects
+  async getProjects() { return this.fetchJSON("/api/projects"); }
+  async createProject(data: Record<string, unknown>) { return this.fetchJSON("/api/projects", { method: "POST", body: JSON.stringify(data) }); }
+  async getProject(id: string) { return this.fetchJSON(`/api/projects/${id}`); }
+  async updateProject(id: string, data: Record<string, unknown>) { return this.fetchJSON(`/api/projects/${id}`, { method: "PUT", body: JSON.stringify(data) }); }
+  async deleteProject(id: string) { return this.fetchJSON(`/api/projects/${id}`, { method: "DELETE" }); }
+  async uploadProjectFile(id: string, file: File) {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`${API_URL}/api/projects/${id}/files`, { method: "POST", headers: { "Authorization": `Bearer ${this.accessToken}` }, body: formData });
+    if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+    return res.json();
+  }
+  async deleteProjectFile(projectId: string, fileId: string) { return this.fetchJSON(`/api/projects/${projectId}/files/${fileId}`, { method: "DELETE" }); }
+
   async createEventSocket(): Promise<WebSocket> {
     const wsUrl = API_URL.replace("http", "ws");
     try {

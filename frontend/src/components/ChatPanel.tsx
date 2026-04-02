@@ -16,6 +16,7 @@ export function ChatPanel() {
 
   const [isStreaming, setIsStreaming] = useState(false);
   const [toolActivity, setToolActivity] = useState<string | null>(null);
+  const thinkingRef = useRef<string>("");
   const wsRef = useRef<WebSocket | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -60,6 +61,7 @@ export function ChatPanel() {
 
     setIsStreaming(true);
     setToolActivity(null);
+    thinkingRef.current = "";
 
     try {
       const ws = await api.createChatSocket();
@@ -83,6 +85,16 @@ export function ChatPanel() {
           case 'delta': {
             const delta = typeof msg.data === 'string' ? JSON.parse(msg.data) : msg.data;
             if (delta.done) {
+              if (thinkingRef.current) {
+                const currentMsgs = [...useStore.getState().messages];
+                for (let i = currentMsgs.length - 1; i >= 0; i--) {
+                  if (currentMsgs[i].role === 'assistant') {
+                    currentMsgs[i] = { ...currentMsgs[i], thinking: thinkingRef.current };
+                    break;
+                  }
+                }
+                setMessages(currentMsgs);
+              }
               setIsStreaming(false);
               setToolActivity(null);
               ws.close();
@@ -107,6 +119,11 @@ export function ChatPanel() {
               ? `\n\n**Tool Error (${result.name}):** ${result.error}`
               : `\n\n**Tool (${result.name}):** ${(result.content || 'Done').substring(0, 500)}`;
             updateLastAssistantContent(resultText);
+            break;
+          }
+          case "thinking": {
+            const thinkData = typeof msg.data === "string" ? JSON.parse(msg.data) : msg.data;
+            thinkingRef.current += (thinkingRef.current ? "\n" : "") + (thinkData.content || "");
             break;
           }
           case 'error': {
