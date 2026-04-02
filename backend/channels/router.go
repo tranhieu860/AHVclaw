@@ -329,7 +329,7 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 			// Save assistant message
 			content := fullContent.String()
 			r.saveChannelMessage(ctx, conv.ID, "outbound", "ai", nil,
-				content, nil, nil, agentID)
+				sanitizeUTF8(content), nil, nil, agentID)
 
 			break
 		}
@@ -493,6 +493,16 @@ func (r *Router) findOrCreateConversation(ctx context.Context, botID, contactID 
 }
 
 // saveChannelMessage saves a message in the unified messages table with source indicator.
+func sanitizeUTF8(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r != 0xFFFD {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 func (r *Router) saveChannelMessage(ctx context.Context, convID uuid.UUID, direction, senderType string,
 	senderID *string, content string, toolData *json.RawMessage, channelMsgID *string, agentID *uuid.UUID, toolCallID ...string) {
 
