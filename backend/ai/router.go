@@ -3,12 +3,24 @@ package ai
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
+
+type AIError struct {
+	StatusCode int
+	Message    string
+	Retryable  bool
+}
+
+func (e *AIError) Error() string {
+	return fmt.Sprintf("AI error %d: %s", e.StatusCode, e.Message)
+}
 
 type RouterClient struct {
 	BaseURL string
@@ -20,7 +32,7 @@ func NewRouterClient(baseURL, apiKey string) *RouterClient {
 	return &RouterClient{
 		BaseURL: baseURL,
 		APIKey:  apiKey,
-		Client:  &http.Client{},
+		Client:  &http.Client{Timeout: 120 * time.Second},
 	}
 }
 
@@ -69,13 +81,19 @@ type StreamChunk struct {
 }
 
 func (r *RouterClient) StreamChat(req ChatCompletionRequest, onChunk func(StreamChunk)) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	return r.StreamChatWithContext(ctx, req, onChunk)
+}
+
+func (r *RouterClient) StreamChatWithContext(ctx context.Context, req ChatCompletionRequest, onChunk func(StreamChunk)) error {
 	req.Stream = true
 	body, err := json.Marshal(req)
 	if err != nil {
 		return err
 	}
 
-	httpReq, err := http.NewRequest("POST", r.BaseURL+"/v1/chat/completions", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", r.BaseURL+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -86,16 +104,24 @@ func (r *RouterClient) StreamChat(req ChatCompletionRequest, onChunk func(Stream
 
 	resp, err := r.Client.Do(httpReq)
 	if err != nil {
+		if ctx.Err() != nil {
+			return &AIError{StatusCode: 0, Message: "timeout", Retryable: true}
+		}
 		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("9router error %d: %s", resp.StatusCode, string(respBody))
+		return &AIError{
+			StatusCode: resp.StatusCode,
+			Message:    string(respBody),
+			Retryable:  resp.StatusCode == 429 || resp.StatusCode >= 500,
+		}
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 256*1024), 256*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data: ") {
@@ -111,7 +137,10 @@ func (r *RouterClient) StreamChat(req ChatCompletionRequest, onChunk func(Stream
 		}
 		onChunk(chunk)
 	}
-	return scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return &AIError{StatusCode: 0, Message: err.Error(), Retryable: true}
+	}
+	return nil
 }
 
 func (r *RouterClient) ListModels() (json.RawMessage, error) {
