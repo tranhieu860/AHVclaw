@@ -136,10 +136,15 @@ class ApiClient {
   async deleteUser(id: string) { return this.fetchJSON(`/api/admin/users/${id}`, { method: 'DELETE' }); }
 
   // Event WebSocket
+
   async createEventSocket(): Promise<WebSocket> {
-    const wsUrl = API_URL.replace('http', 'ws');
-    const ticket = await this.getWSTicket();
-    return new WebSocket(`${wsUrl}/ws/events?ticket=${ticket}`);
+    const wsUrl = API_URL.replace("http", "ws");
+    try {
+      const ticket = await this.getWSTicket();
+      return new WebSocket(`${wsUrl}/ws/events?ticket=${ticket}`);
+    } catch {
+      return new WebSocket(`${wsUrl}/ws/events?token=${this.accessToken}`);
+    }
   }
 }
 

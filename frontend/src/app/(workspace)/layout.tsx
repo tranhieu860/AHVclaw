@@ -8,6 +8,7 @@ import { StatusBar } from '@/components/StatusBar';
 import { BrowserPanel } from '@/components/BrowserPanel';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { useStore } from '@/lib/store';
+import { useEvents } from @/lib/useEvents;
 import { api } from '@/lib/api';
 
 export default function WorkspaceLayout({ children }: { children: React.ReactNode }) {
@@ -17,6 +18,7 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
   const toggleRightPanel = useStore((s) => s.toggleRightPanel);
   const setUser = useStore((s) => s.setUser);
   const router = useRouter();
+  useEvents();
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
