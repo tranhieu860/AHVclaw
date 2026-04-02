@@ -27,8 +27,8 @@ export function MessageBubble({ message }: { message: Message }) {
   return (
     <div className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
       {!isUser && (
-        <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shrink-0">
-          <Bot size={16} className="text-white" />
+        <div className=w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shrink-0>
+          <Bot size={16} className=text-white />
         </div>
       )}
       <div
@@ -39,7 +39,7 @@ export function MessageBubble({ message }: { message: Message }) {
         }`}
       >
         {message.attachments && message.attachments.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-2">
+          <div className=flex flex-wrap gap-2 mb-2>
             {message.attachments.map((att: Attachment) => {
               const url = `${apiUrl}/api/uploads/${att.id}`;
               const isImage = att.mime_type?.startsWith('image/') || false;
@@ -48,16 +48,16 @@ export function MessageBubble({ message }: { message: Message }) {
                   key={att.id}
                   src={url}
                   alt={att.filename || 'image'}
-                  className="max-w-xs max-h-48 rounded-lg cursor-pointer hover:opacity-90 transition"
+                  className=max-w-xs max-h-48 rounded-lg cursor-pointer hover:opacity-90 transition
                   onClick={() => window.open(url, '_blank')}
                 />
               ) : (
                 <a
                   key={att.id}
                   href={url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 bg-zinc-700/50 text-zinc-300 text-xs px-2.5 py-1.5 rounded-lg hover:bg-zinc-600/50 transition"
+                  target=_blank
+                  rel=noopener noreferrer
+                  className=flex items-center gap-1.5 bg-zinc-700/50 text-zinc-300 text-xs px-2.5 py-1.5 rounded-lg hover:bg-zinc-600/50 transition
                 >
                   <Paperclip size={12} />
                   {att.filename || 'file'}
@@ -67,23 +67,21 @@ export function MessageBubble({ message }: { message: Message }) {
           </div>
         )}
         {isUser ? (
-          <p className="whitespace-pre-wrap">{content}</p>
+          <p className=whitespace-pre-wrap>{content}</p>
         ) : (
-          <div className="prose prose-invert prose-sm max-w-none prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-700 prose-code:text-green-400">
+          <div className=prose prose-invert prose-sm max-w-none prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-700 prose-code:text-green-400>
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
           </div>
         )}
         {message.source && message.source !== 'web' && (
-          <span className="text-[10px] text-zinc-500 mt-1 flex items-center gap-0.5">
-            {message.source === 'telegram' && 'via Telegram'}
-            {message.source === 'zalo' && 'via Zalo'}
-            {message.source === 'discord' && 'via Discord'}
+          <span className=text-[9px] px-1 rounded bg-zinc-700/50 text-zinc-400 ml-1 inline-block mt-0.5>
+            {message.source === 'telegram' ? '🔵 TG' : message.source === 'zalo' ? '🟢 ZL' : message.source === 'discord' ? '🟣 DC' : message.source}
           </span>
         )}
       </div>
       {isUser && (
-        <div className="w-8 h-8 rounded-lg bg-zinc-700 flex items-center justify-center shrink-0">
-          <User size={16} className="text-zinc-300" />
+        <div className=w-8 h-8 rounded-lg bg-zinc-700 flex items-center justify-center shrink-0>
+          <User size={16} className=text-zinc-300 />
         </div>
       )}
     </div>
