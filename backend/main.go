@@ -332,6 +332,16 @@ func main() {
 	protected.Post("/inbox/:id/archive", handlers.ArchiveConversation)
 
 	protected.Post("/ws/ticket", handlers.CreateWSTicket)
+// Tasks (all roles)
+	protected.Get("/tasks", handlers.ListTasks)
+	protected.Post("/tasks", handlers.CreateTask)
+	protected.Get("/tasks/:id", handlers.GetTask)
+	protected.Put("/tasks/:id", handlers.UpdateTask)
+	protected.Delete("/tasks/:id", handlers.DeleteTask)
+	protected.Post("/tasks/:id/pause", handlers.PauseTask)
+	protected.Post("/tasks/:id/resume", handlers.ResumeTask)
+	protected.Post("/tasks/:id/run", handlers.RunTaskNow)
+	protected.Get("/tasks/:id/runs", handlers.ListTaskRuns)
 
 	// Settings (all roles)
 	protected.Get("/settings", handlers.GetSettings)

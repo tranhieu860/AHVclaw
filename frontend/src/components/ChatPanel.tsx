@@ -123,7 +123,7 @@ export function ChatPanel() {
       ws.onerror = () => {
         setIsStreaming(false);
         setToolActivity(null);
-        updateLastAssistantContent('\n\nConnection error. Please try again.');
+        updateLastAssistantContent('\n\nLỗi kết nối. Vui lòng thử lại.');
       };
 
       ws.onclose = () => {
@@ -131,7 +131,7 @@ export function ChatPanel() {
       };
     } catch (err) {
       setIsStreaming(false);
-      updateLastAssistantContent('\n\nFailed to connect. Please try again.');
+      updateLastAssistantContent('\n\nKhông thể kết nối. Vui lòng thử lại.');
     }
   }, [activeConversationId, selectedModel, appendMessage, updateLastAssistantContent, setActiveConversationId, isStreaming, loadConversations]);
 
@@ -145,7 +145,7 @@ export function ChatPanel() {
           <div className="flex items-center justify-center h-full text-zinc-600">
             <div className="text-center">
               <h2 className="text-2xl font-bold text-zinc-400 mb-2">AHVclaw</h2>
-              <p>Start a conversation with AI</p>
+              <p>Bắt đầu cuộc trò chuyện với AI</p>
             </div>
           </div>
         )}

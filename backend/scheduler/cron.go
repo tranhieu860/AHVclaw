@@ -174,13 +174,13 @@ func HumanReadableSchedule(schedule string) string {
 	min, hour, dom, mon, dow := fields[0], fields[1], fields[2], fields[3], fields[4]
 
 	if min != "*" && hour != "*" && dom == "*" && mon == "*" && dow == "*" {
-		return fmt.Sprintf("Daily at %s:%s", zeroPad(hour), zeroPad(min))
+		return fmt.Sprintf("Hàng ngày lúc %s:%s", zeroPad(hour), zeroPad(min))
 	}
 	if min != "*" && hour != "*" && dom == "*" && mon == "*" && dow == "1-5" {
-		return fmt.Sprintf("Weekdays at %s:%s", zeroPad(hour), zeroPad(min))
+		return fmt.Sprintf("Ngày thường lúc %s:%s", zeroPad(hour), zeroPad(min))
 	}
 	if min != "*" && hour != "*" && dom == "*" && mon == "*" && dow != "*" {
-		return fmt.Sprintf("Every %s at %s:%s", dowName(dow), zeroPad(hour), zeroPad(min))
+		return fmt.Sprintf("Mỗi %s lúc %s:%s", dowName(dow), zeroPad(hour), zeroPad(min))
 	}
 	return schedule
 }
@@ -193,7 +193,7 @@ func zeroPad(s string) string {
 }
 
 func dowName(s string) string {
-	names := map[string]string{"0": "Sunday", "1": "Monday", "2": "Tuesday", "3": "Wednesday", "4": "Thursday", "5": "Friday", "6": "Saturday", "7": "Sunday"}
+	names := map[string]string{"0": "Chủ nhật", "1": "Thứ hai", "2": "Thứ ba", "3": "Thứ tư", "4": "Thứ năm", "5": "Thứ sáu", "6": "Thứ bảy", "7": "Chủ nhật"}
 	if n, ok := names[s]; ok {
 		return n
 	}

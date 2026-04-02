@@ -148,7 +148,7 @@ export default function AgentsPage() {
   };
 
   const deleteMemory = async (id: string) => {
-    if (!confirm('Delete this memory?')) return;
+    if (!confirm('Xóa trí nhớ này?')) return;
     try {
       await fetch(`${baseUrl}/api/memories/${id}`, {
         method: 'DELETE',
@@ -162,7 +162,7 @@ export default function AgentsPage() {
     <div className="flex-1 p-6 overflow-y-auto">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold text-white flex items-center gap-2">
-          <Bot size={20} /> Agents & Memories
+          <Bot size={20} /> Agents Agents & Memories Trí nhớ
         </h1>
         <div className="flex items-center gap-2">
           <div className="flex bg-zinc-800 rounded-lg p-0.5">
@@ -181,12 +181,12 @@ export default function AgentsPage() {
           </div>
           {activeTab === 'agents' && (
             <button onClick={() => setShowAdd(!showAdd)} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm flex items-center gap-1">
-              <Plus size={14} /> New Agent
+              <Plus size={14} /> Agent mới
             </button>
           )}
           {activeTab === 'memories' && (
             <button onClick={() => setShowAddMemory(!showAddMemory)} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm flex items-center gap-1">
-              <Plus size={14} /> Add Memory
+              <Plus size={14} /> Thêm trí nhớ
             </button>
           )}
         </div>
@@ -197,13 +197,13 @@ export default function AgentsPage() {
         <>
           {showAdd && (
             <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 mb-6 space-y-3">
-              <input placeholder="Agent Name" value={formName} onChange={e => setFormName(e.target.value)}
+              <input placeholder="Tên agent" value={formName} onChange={e => setFormName(e.target.value)}
                 className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none" />
               <ModelSearch value={formModel} onChange={setFormModel} label="Model" placeholder="e.g. AHV-Holding-TroLy" />
               <ModelFallback value={formFallback} onChange={setFormFallback} />
-              <textarea placeholder="System prompt — define this agent's personality and capabilities..." value={formPrompt} onChange={e => setFormPrompt(e.target.value)}
+              <textarea placeholder="System prompt — định nghĩa tính cách và khả năng của agent..." value={formPrompt} onChange={e => setFormPrompt(e.target.value)}
                 rows={6} className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none resize-none" />
-              <button onClick={addAgent} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm">Create Agent</button>
+              <button onClick={addAgent} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm">Tạo agent</button>
             </div>
           )}
 
@@ -229,7 +229,7 @@ export default function AgentsPage() {
             {agents.length === 0 && !showAdd && (
               <div className="col-span-full text-center py-12 text-zinc-500">
                 <Bot size={32} className="mx-auto mb-3 opacity-50" />
-                <p>No agents yet. Create a custom AI agent to get started.</p>
+                <p>Chưa có agent nào. Tạo agent AI tùy chỉnh để bắt đầu.</p>
               </div>
             )}
           </div>
@@ -244,7 +244,7 @@ export default function AgentsPage() {
             <div className="flex-1 relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
               <input
-                placeholder="Search memories..."
+                placeholder="Tìm kiếm trí nhớ..."
                 value={memorySearch}
                 onChange={e => setMemorySearch(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && searchMemories()}
@@ -260,7 +260,7 @@ export default function AgentsPage() {
           {showAddMemory && (
             <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 mb-4 space-y-3">
               <div className="flex items-center justify-between">
-                <h3 className="text-white text-sm font-medium">Add Memory</h3>
+                <h3 className="text-white text-sm font-medium">Thêm trí nhớ</h3>
                 <button onClick={() => setShowAddMemory(false)} className="text-zinc-500 hover:text-white">
                   <X size={16} />
                 </button>
@@ -275,13 +275,13 @@ export default function AgentsPage() {
                 ))}
               </select>
               <input
-                placeholder="Key (e.g. user_name, preferred_language)"
+                placeholder="Khóa (VD: tên_người_dùng, ngôn_ngữ)"
                 value={memFormKey}
                 onChange={e => setMemFormKey(e.target.value)}
                 className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none"
               />
               <textarea
-                placeholder="Content..."
+                placeholder="Nội dung..."
                 value={memFormContent}
                 onChange={e => setMemFormContent(e.target.value)}
                 rows={3}
@@ -306,7 +306,7 @@ export default function AgentsPage() {
                       className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none resize-none"
                     />
                     <div className="flex gap-2">
-                      <button onClick={() => updateMemory(mem.id, editContent)} className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-xs">Save</button>
+                      <button onClick={() => updateMemory(mem.id, editContent)} className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-xs">Lưu</button>
                       <button onClick={() => setEditingMemory(null)} className="bg-zinc-700 hover:bg-zinc-600 text-white px-3 py-1 rounded text-xs">Cancel</button>
                     </div>
                   </div>
@@ -345,8 +345,8 @@ export default function AgentsPage() {
             {memories.length === 0 && (
               <div className="text-center py-12 text-zinc-500">
                 <Brain size={32} className="mx-auto mb-3 opacity-50" />
-                <p>No memories yet. The AI will learn and remember information as you chat.</p>
-                <p className="text-xs mt-1">You can also add memories manually using the button above.</p>
+                <p>Chưa có trí nhớ nào. AI sẽ học và ghi nhớ thông tin khi bạn trò chuyện.</p>
+                <p className="text-xs mt-1">Bạn cũng có thể thêm trí nhớ thủ công bằng nút ở trên.</p>
               </div>
             )}
           </div>

@@ -101,7 +101,7 @@ export default function ContactsPage() {
   };
 
   const timeAgo = (date?: string) => {
-    if (!date) return 'Unknown';
+    if (!date) return 'Không rõ';
     const diff = Date.now() - new Date(date).getTime();
     const mins = Math.floor(diff / 60000);
     if (mins < 60) return `${mins}m ago`;
@@ -114,28 +114,28 @@ export default function ContactsPage() {
     <div className="flex-1 p-6 overflow-y-auto">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold text-white flex items-center gap-2">
-          <Users size={20} /> Contacts
+          <Users size={20} /> Danh bạ
         </h1>
       </div>
 
       <div className="relative mb-4">
         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search contacts..."
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Tìm kiếm liên hệ..."
           className="w-full bg-zinc-800 text-white text-sm rounded-lg pl-9 pr-3 py-2 border border-zinc-700 focus:border-blue-500 outline-none" />
       </div>
 
       {selected && (
         <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 mb-6">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-white font-medium">Edit Contact</h3>
+            <h3 className="text-white font-medium">Sửa liên hệ</h3>
             <button onClick={() => setSelected(null)} className="text-zinc-500 hover:text-white"><X size={16} /></button>
           </div>
           <div className="space-y-3">
-            <input value={editName} onChange={e => setEditName(e.target.value)} placeholder="Name"
+            <input value={editName} onChange={e => setEditName(e.target.value)} placeholder="Tên"
               className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none" />
-            <input value={editTags} onChange={e => setEditTags(e.target.value)} placeholder="Tags (comma separated)"
+            <input value={editTags} onChange={e => setEditTags(e.target.value)} placeholder="Nhãn (phân cách bằng dấu phẩy)"
               className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none" />
-            <textarea value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Notes..." rows={3}
+            <textarea value={editNotes} onChange={e => setEditNotes(e.target.value)} placeholder="Ghi chú..." rows={3}
               className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none resize-none" />
             <div className="text-xs text-zinc-500">Channels: {(selected.channels || []).join(', ') || 'None'}</div>
             <button onClick={saveContact} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm flex items-center gap-1">
@@ -148,7 +148,7 @@ export default function ContactsPage() {
                   className="flex-1 bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 outline-none">
                   <option value="">Chọn contact để gộp vào...</option>
                   {contacts.filter(c => c.id !== selected?.id).map(c => (
-                    <option key={c.id} value={c.id}>{c.name || 'Unknown'}</option>
+                    <option key={c.id} value={c.id}>{c.name || 'Không rõ'}</option>
                   ))}
                 </select>
                 <button onClick={mergeContacts} disabled={!mergeTarget}
@@ -168,15 +168,15 @@ export default function ContactsPage() {
               <th className="text-left px-4 py-3 font-medium">Name</th>
               <th className="text-left px-4 py-3 font-medium">Tags</th>
               <th className="text-left px-4 py-3 font-medium">Channels</th>
-              <th className="text-left px-4 py-3 font-medium">Last Seen</th>
-              <th className="text-left px-4 py-3 font-medium">Action</th>
+              <th className="text-left px-4 py-3 font-medium">Lần cuối</th>
+              <th className="text-left px-4 py-3 font-medium">Thao tác</th>
             </tr>
           </thead>
           <tbody>
             {contacts.map(c => (
               <tr key={c.id} onClick={() => selectContact(c)}
                 className="border-b border-zinc-800/50 hover:bg-zinc-800/50 cursor-pointer transition">
-                <td className="px-4 py-3 text-white">{c.name || 'Unknown'}</td>
+                <td className="px-4 py-3 text-white">{c.name || 'Không rõ'}</td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-1">
                     {(c.tags || []).map(tag => (
@@ -204,7 +204,7 @@ export default function ContactsPage() {
         {contacts.length === 0 && (
           <div className="text-center py-12 text-zinc-500">
             <Users size={32} className="mx-auto mb-3 opacity-50" />
-            <p>No contacts found.</p>
+            <p>Không tìm thấy liên hệ nào.</p>
           </div>
         )}
       </div>

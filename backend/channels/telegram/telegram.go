@@ -67,14 +67,15 @@ func (a *Adapter) Start() error {
 
 	// Register slash commands with Telegram
 	commands := []tgbotapi.BotCommand{
-		{Command: "start", Description: "Bat dau tro chuyen"},
-		{Command: "new", Description: "Cuoc tro chuyen moi"},
-		{Command: "models", Description: "Chon model AI"},
-		{Command: "help", Description: "Huong dan su dung"},
-		{Command: "agents", Description: "Chon agent"},
-		{Command: "skills", Description: "Xem danh sach skill"},
-		{Command: "memory", Description: "Xem memory da luu"},
-		{Command: "status", Description: "Trang thai hien tai"},
+		{Command: "start", Description: "Bắt đầu trò chuyện"},
+		{Command: "new", Description: "Cuộc trò chuyện mới"},
+		{Command: "models", Description: "Chọn model AI"},
+		{Command: "help", Description: "Hướng dẫn sử dụng"},
+		{Command: "agents", Description: "Chọn agent"},
+		{Command: "skills", Description: "Xem danh sách skill"},
+		{Command: "memory", Description: "Xem memory đã lưu"},
+		{Command: "tasks", Description: "Quản lý scheduled tasks"},
+		{Command: "status", Description: "Trạng thái hiện tại"},
 	}
 	cmdConfig := tgbotapi.NewSetMyCommands(commands...)
 	if _, err := bot.Request(cmdConfig); err != nil {
@@ -263,7 +264,7 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 	case "new":
 		botUUID, err := uuid.Parse(a.botID)
 		if err != nil {
-			a.sendText(chatID, "Loi noi bo.")
+			a.sendText(chatID, "Lỗi nội bộ.")
 			return
 		}
 		chatIDStr := strconv.FormatInt(msg.Chat.ID, 10)
@@ -274,20 +275,20 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 		)
 		if err != nil {
 			log.Printf("[telegram] /new error: %v", err)
-			a.sendText(chatID, "Khong the tao cuoc tro chuyen moi.")
+			a.sendText(chatID, "Không thể tạo cuộc trò chuyện mới.")
 			return
 		}
 		archived := tag.RowsAffected()
 		if archived > 0 {
-			a.sendText(chatID, "Da luu tru cuoc tro chuyen cu. Bat dau cuoc tro chuyen moi!")
+			a.sendText(chatID, "Đã lưu trữ cuộc trò chuyện cũ. Bắt đầu cuộc trò chuyện mới!")
 		} else {
-			a.sendText(chatID, "Bat dau cuoc tro chuyen moi!")
+			a.sendText(chatID, "Bắt đầu cuộc trò chuyện mới!")
 		}
 
 	case "models":
 		userID, err := a.getBotUserID(ctx)
 		if err != nil {
-			a.sendText(chatID, "Loi noi bo.")
+			a.sendText(chatID, "Lỗi nội bộ.")
 			return
 		}
 		rows, err := db.Pool.Query(ctx,
@@ -297,7 +298,7 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 			userID,
 		)
 		if err != nil {
-			a.sendText(chatID, "Khong the lay danh sach model.")
+			a.sendText(chatID, "Không thể lấy danh sách model.")
 			return
 		}
 		defer rows.Close()
@@ -311,7 +312,7 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 		}
 
 		if len(models) == 0 {
-			a.sendText(chatID, "Chua co model nao duoc su dung.")
+			a.sendText(chatID, "Chưa có model nào được sử dụng.")
 			return
 		}
 
@@ -326,7 +327,7 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 			))
 		}
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(kbRows...)
-		a.sendTextWithKeyboard(chatID, "Chon model AI:", keyboard)
+		a.sendTextWithKeyboard(chatID, "Chọn model AI:", keyboard)
 
 	case "help":
 		help := "Danh sach lenh:\n\n" +
@@ -336,14 +337,15 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 			"/agents - Chon agent\n" +
 			"/skills - Xem danh sach skill\n" +
 			"/memory - Xem memory da luu\n" +
+			"/tasks - Quan ly scheduled tasks\n" +
 			"/status - Trang thai hien tai\n" +
-			"/help - Huong dan su dung"
+			"/help - Hướng dẫn sử dụng"
 		a.sendText(chatID, help)
 
 	case "agents":
 		userID, err := a.getBotUserID(ctx)
 		if err != nil {
-			a.sendText(chatID, "Loi noi bo.")
+			a.sendText(chatID, "Lỗi nội bộ.")
 			return
 		}
 		rows, err := db.Pool.Query(ctx,
@@ -353,7 +355,7 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 			userID,
 		)
 		if err != nil {
-			a.sendText(chatID, "Khong the lay danh sach agent.")
+			a.sendText(chatID, "Không thể lấy danh sách agent.")
 			return
 		}
 		defer rows.Close()
@@ -372,7 +374,7 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 		}
 
 		if len(agentList) == 0 {
-			a.sendText(chatID, "Chua co agent nao.")
+			a.sendText(chatID, "Chưa có agent nào.")
 			return
 		}
 
@@ -387,12 +389,12 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 			))
 		}
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(kbRows...)
-		a.sendTextWithKeyboard(chatID, "Chon agent:", keyboard)
+		a.sendTextWithKeyboard(chatID, "Chọn agent:", keyboard)
 
 	case "skills":
 		userID, err := a.getBotUserID(ctx)
 		if err != nil {
-			a.sendText(chatID, "Loi noi bo.")
+			a.sendText(chatID, "Lỗi nội bộ.")
 			return
 		}
 		rows, err := db.Pool.Query(ctx,
@@ -404,7 +406,7 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 			userID,
 		)
 		if err != nil {
-			a.sendText(chatID, "Khong the lay danh sach skill.")
+			a.sendText(chatID, "Không thể lấy danh sách skill.")
 			return
 		}
 		defer rows.Close()
@@ -425,7 +427,7 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 			}
 		}
 		if count == 0 {
-			a.sendText(chatID, "Ban chua cai skill nao.")
+			a.sendText(chatID, "Bạn chưa cài skill nào.")
 			return
 		}
 		a.sendText(chatID, sb.String())
@@ -433,7 +435,7 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 	case "memory":
 		userID, err := a.getBotUserID(ctx)
 		if err != nil {
-			a.sendText(chatID, "Loi noi bo.")
+			a.sendText(chatID, "Lỗi nội bộ.")
 			return
 		}
 		rows, err := db.Pool.Query(ctx,
@@ -443,7 +445,7 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 			userID,
 		)
 		if err != nil {
-			a.sendText(chatID, "Khong the lay memory.")
+			a.sendText(chatID, "Không thể lấy memory.")
 			return
 		}
 		defer rows.Close()
@@ -462,15 +464,70 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 			}
 		}
 		if count == 0 {
-			a.sendText(chatID, "Chua co memory nao duoc luu.")
+			a.sendText(chatID, "Chưa có memory nào được lưu.")
 			return
 		}
 		a.sendText(chatID, sb.String())
 
+	case "tasks":
+		userID, err := a.getBotUserID(ctx)
+		if err != nil {
+			a.sendText(chatID, "Lỗi nội bộ.")
+			return
+		}
+		rows, err := db.Pool.Query(ctx,
+			`SELECT id, name, is_active, schedule_human, next_run_at
+			 FROM scheduled_tasks WHERE user_id=$1
+			 ORDER BY created_at DESC LIMIT 20`, userID)
+		if err != nil {
+			a.sendText(chatID, "Không thể lấy danh sách task.")
+			return
+		}
+		defer rows.Close()
+
+		type taskItem struct {
+			id       string
+			name     string
+			active   bool
+			schedule *string
+			nextRun  *time.Time
+		}
+		var taskList []taskItem
+		for rows.Next() {
+			var t taskItem
+			var tid uuid.UUID
+			if rows.Scan(&tid, &t.name, &t.active, &t.schedule, &t.nextRun) == nil {
+				t.id = tid.String()
+				taskList = append(taskList, t)
+			}
+		}
+
+		if len(taskList) == 0 {
+			a.sendText(chatID, "Chưa có scheduled task nào.")
+			return
+		}
+
+		var kbRows [][]tgbotapi.InlineKeyboardButton
+		for _, t := range taskList {
+			icon := "\u2705"
+			if !t.active {
+				icon = "\u23f8"
+			}
+			label := fmt.Sprintf("%s %s", icon, t.name)
+			if len(label) > 40 {
+				label = label[:40] + "..."
+			}
+			kbRows = append(kbRows, tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData(label, "task:"+t.id),
+			))
+		}
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(kbRows...)
+		a.sendTextWithKeyboard(chatID, "Scheduled Tasks:", keyboard)
+
 	case "status":
 		botUUID, err := uuid.Parse(a.botID)
 		if err != nil {
-			a.sendText(chatID, "Loi noi bo.")
+			a.sendText(chatID, "Lỗi nội bộ.")
 			return
 		}
 		chatIDStr := strconv.FormatInt(msg.Chat.ID, 10)
@@ -490,15 +547,15 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 		).Scan(&model, &agentName, &msgCount)
 
 		if err != nil {
-			a.sendText(chatID, "Chua co cuoc tro chuyen nao dang hoat dong.")
+			a.sendText(chatID, "Chưa có cuộc trò chuyện nào đang hoạt động.")
 			return
 		}
 
-		modelStr := "(chua dat)"
+		modelStr := "(chưa đặt)"
 		if model != nil && *model != "" {
 			modelStr = *model
 		}
-		agentStr := "(mac dinh)"
+		agentStr := "(mặc định)"
 		if agentName != nil && *agentName != "" {
 			agentStr = *agentName
 		}
@@ -533,16 +590,16 @@ func (a *Adapter) handleCallbackQuery(cq *tgbotapi.CallbackQuery) {
 			newModel, botUUID, chatIDStr,
 		)
 		if err != nil || tag.RowsAffected() == 0 {
-			a.sendText(chatID, "Khong the cap nhat model.")
+			a.sendText(chatID, "Không thể cập nhật model.")
 			return
 		}
-		a.sendText(chatID, fmt.Sprintf("Da chuyen sang model: %s", newModel))
+		a.sendText(chatID, fmt.Sprintf("Đã chuyển sang model: %s", newModel))
 
 	} else if strings.HasPrefix(data, "agent:") {
 		agentIDStr := strings.TrimPrefix(data, "agent:")
 		agentUUID, err := uuid.Parse(agentIDStr)
 		if err != nil {
-			a.sendText(chatID, "Agent khong hop le.")
+			a.sendText(chatID, "Agent không hợp lệ.")
 			return
 		}
 		tag, err := db.Pool.Exec(ctx,
@@ -551,7 +608,7 @@ func (a *Adapter) handleCallbackQuery(cq *tgbotapi.CallbackQuery) {
 			agentUUID, botUUID, chatIDStr,
 		)
 		if err != nil || tag.RowsAffected() == 0 {
-			a.sendText(chatID, "Khong the cap nhat agent.")
+			a.sendText(chatID, "Không thể cập nhật agent.")
 			return
 		}
 		// Get agent name for confirmation
@@ -560,7 +617,75 @@ func (a *Adapter) handleCallbackQuery(cq *tgbotapi.CallbackQuery) {
 		if agentName == "" {
 			agentName = agentIDStr
 		}
-		a.sendText(chatID, fmt.Sprintf("Da chuyen sang agent: %s", agentName))
+		a.sendText(chatID, fmt.Sprintf("Đã chuyển sang agent: %s", agentName))
+	} else if strings.HasPrefix(data, "task:") {
+		taskIDStr := strings.TrimPrefix(data, "task:")
+		taskUUID, err := uuid.Parse(taskIDStr)
+		if err != nil {
+			a.sendText(chatID, "Task không hợp lệ.")
+			return
+		}
+		var name, schedule string
+		var isActive bool
+		var nextRun *time.Time
+		var lastStatus *string
+		err = db.Pool.QueryRow(ctx,
+			`SELECT t.name, t.schedule_human, t.is_active, t.next_run_at,
+			        (SELECT status FROM task_runs WHERE task_id=t.id ORDER BY started_at DESC LIMIT 1)
+			 FROM scheduled_tasks t WHERE t.id=$1`, taskUUID).Scan(&name, &schedule, &isActive, &nextRun, &lastStatus)
+		if err != nil {
+			a.sendText(chatID, "Không tìm thấy task.")
+			return
+		}
+		statusStr := "Active"
+		if !isActive {
+			statusStr = "Paused"
+		}
+		nextRunStr := "--"
+		if nextRun != nil {
+			nextRunStr = nextRun.Format("02/01 15:04")
+		}
+		lastStr := "--"
+		if lastStatus != nil {
+			lastStr = *lastStatus
+		}
+		info := fmt.Sprintf("Task: %s\nSchedule: %s\nStatus: %s\nNext run: %s\nLast result: %s", name, schedule, statusStr, nextRunStr, lastStr)
+
+		var actionBtns []tgbotapi.InlineKeyboardButton
+		actionBtns = append(actionBtns, tgbotapi.NewInlineKeyboardButtonData("\u25b6\ufe0f Run Now", "taskrun:"+taskIDStr))
+		if isActive {
+			actionBtns = append(actionBtns, tgbotapi.NewInlineKeyboardButtonData("\u23f8 Pause", "taskpause:"+taskIDStr))
+		} else {
+			actionBtns = append(actionBtns, tgbotapi.NewInlineKeyboardButtonData("\u25b6 Resume", "taskresume:"+taskIDStr))
+		}
+		actionBtns = append(actionBtns, tgbotapi.NewInlineKeyboardButtonData("\U0001f5d1 Delete", "taskdelete:"+taskIDStr))
+		kb := tgbotapi.NewInlineKeyboardMarkup(actionBtns)
+		a.sendTextWithKeyboard(chatID, info, kb)
+
+	} else if strings.HasPrefix(data, "taskrun:") {
+		taskIDStr := strings.TrimPrefix(data, "taskrun:")
+		taskUUID, _ := uuid.Parse(taskIDStr)
+		now := time.Now()
+		_, _ = db.Pool.Exec(ctx, "UPDATE scheduled_tasks SET next_run_at=$1, is_active=true, updated_at=now() WHERE id=$2", now, taskUUID)
+		a.sendText(chatID, "Task sẽ chạy trong giây lát!")
+
+	} else if strings.HasPrefix(data, "taskpause:") {
+		taskIDStr := strings.TrimPrefix(data, "taskpause:")
+		taskUUID, _ := uuid.Parse(taskIDStr)
+		_, _ = db.Pool.Exec(ctx, "UPDATE scheduled_tasks SET is_active=false, updated_at=now() WHERE id=$1", taskUUID)
+		a.sendText(chatID, "Đã tạm dừng task.")
+
+	} else if strings.HasPrefix(data, "taskresume:") {
+		taskIDStr := strings.TrimPrefix(data, "taskresume:")
+		taskUUID, _ := uuid.Parse(taskIDStr)
+		_, _ = db.Pool.Exec(ctx, "UPDATE scheduled_tasks SET is_active=true, error_count=0, updated_at=now() WHERE id=$1", taskUUID)
+		a.sendText(chatID, "Đã tiếp tục task.")
+
+	} else if strings.HasPrefix(data, "taskdelete:") {
+		taskIDStr := strings.TrimPrefix(data, "taskdelete:")
+		taskUUID, _ := uuid.Parse(taskIDStr)
+		_, _ = db.Pool.Exec(ctx, "DELETE FROM scheduled_tasks WHERE id=$1", taskUUID)
+		a.sendText(chatID, "Đã xóa task.")
 	}
 }
 

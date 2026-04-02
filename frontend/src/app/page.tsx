@@ -14,33 +14,33 @@ import {
 const features = [
   {
     icon: Bot,
-    title: "AI Chat",
-    description: "Chat with 20+ AI models including GPT, Claude, Gemini",
+    title: "Trò chuyện AI",
+    description: "Trò chuyện với hơn 20 model AI bao gồm GPT, Claude, Gemini",
   },
   {
     icon: Globe,
-    title: "Browser Automation",
-    description: "AI browses the web, takes screenshots, extracts data",
+    title: "Tự động hóa trình duyệt",
+    description: "AI duyệt web, chụp ảnh màn hình, trích xuất dữ liệu",
   },
   {
     icon: Code,
-    title: "Code Editor & Terminal",
-    description: "Edit code with Monaco, run commands directly",
+    title: "Soạn thảo code & Terminal",
+    description: "Soạn thảo code với Monaco, chạy lệnh trực tiếp",
   },
   {
     icon: Smartphone,
-    title: "Omnichannel",
-    description: "Connect Telegram, Zalo, Discord bots",
+    title: "Đa kênh",
+    description: "Kết nối bot Telegram, Zalo, Discord",
   },
   {
     icon: Brain,
-    title: "Memory",
-    description: "AI remembers your preferences and context",
+    title: "Trí nhớ",
+    description: "AI ghi nhớ sở thích và ngữ cảnh của bạn",
   },
   {
     icon: Shield,
-    title: "Server Management",
-    description: "SSH into servers, monitor health, run commands",
+    title: "Quản lý máy chủ",
+    description: "SSH vào máy chủ, giám sát tình trạng, chạy lệnh",
   },
 ];
 
@@ -49,15 +49,15 @@ const pricingTiers = [
     name: "Free",
     price: "$0",
     period: "/month",
-    description: "Get started with the essentials",
+    description: "Bắt đầu với các tính năng cơ bản",
     features: [
-      "100 messages/day",
-      "1 workspace",
-      "5 AI models",
-      "1GB storage",
-      "Community support",
+      "100 tin nhắn/ngày",
+      "1 không gian làm việc",
+      "5 model AI",
+      "1GB lưu trữ",
+      "Hỗ trợ cộng đồng",
     ],
-    cta: "Start Free",
+    cta: "Dùng miễn phí",
     href: "/login?register=true",
     highlighted: false,
   },
@@ -65,16 +65,16 @@ const pricingTiers = [
     name: "Pro",
     price: "$5",
     period: "/month",
-    description: "For power users and teams",
+    description: "Dành cho người dùng chuyên nghiệp",
     features: [
-      "Unlimited messages",
-      "5 workspaces",
-      "All AI models",
-      "10GB storage",
-      "Telegram/Zalo/Discord bots",
-      "Priority support",
+      "Tin nhắn không giới hạn",
+      "5 không gian làm việc",
+      "Tất cả model AI",
+      "10GB lưu trữ",
+      "Bot Telegram/Zalo/Discord",
+      "Hỗ trợ ưu tiên",
     ],
-    cta: "Upgrade to Pro",
+    cta: "Nâng cấp Pro",
     href: "/login?register=true",
     highlighted: true,
   },
@@ -82,16 +82,16 @@ const pricingTiers = [
     name: "Enterprise",
     price: "Custom",
     period: "",
-    description: "For organizations at scale",
+    description: "Dành cho tổ chức quy mô lớn",
     features: [
-      "Everything in Pro",
-      "Unlimited workspaces",
-      "Custom AI models",
-      "Unlimited storage",
-      "Dedicated support",
-      "SLA guarantee",
+      "Tất cả tính năng Pro",
+      "Không gian làm việc không giới hạn",
+      "Model AI tùy chỉnh",
+      "Lưu trữ không giới hạn",
+      "Hỗ trợ riêng",
+      "Cam kết SLA",
     ],
-    cta: "Contact Us",
+    cta: "Liên hệ",
     href: "mailto:contact@ahvholding.com",
     highlighted: false,
   },
@@ -112,13 +112,13 @@ export default function LandingPage() {
               href="/login"
               className="rounded-lg px-4 py-2 text-sm text-zinc-400 transition-colors hover:text-white"
             >
-              Sign In
+              Đăng nhập
             </Link>
             <Link
               href="/login?register=true"
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500"
             >
-              Get Started
+              Bắt đầu
             </Link>
           </div>
         </div>
@@ -137,7 +137,7 @@ export default function LandingPage() {
         <div className="relative z-10 mx-auto max-w-4xl text-center">
           <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900/50 px-4 py-1.5 text-sm text-zinc-400">
             <Zap className="h-3.5 w-3.5 text-blue-500" />
-            AI-powered workspace for developers
+            Không gian làm việc AI cho lập trình viên
           </div>
           <h1 className="mb-4 text-5xl font-bold tracking-tight md:text-7xl">
             AHV
@@ -146,25 +146,25 @@ export default function LandingPage() {
             </span>
           </h1>
           <p className="mb-2 text-2xl font-semibold text-zinc-300 md:text-3xl">
-            AI That Executes
+            AI Thực Thi
           </p>
           <p className="mx-auto mb-10 max-w-2xl text-base text-zinc-500 md:text-lg">
-            Not just chat — your AI agent browses websites, runs commands,
-            manages servers, and works across Telegram, Zalo & Discord.
+            Không chỉ trò chuyện — AI của bạn duyệt web, chạy lệnh,
+            quản lý máy chủ, và hoạt động trên Telegram, Zalo & Discord.
           </p>
           <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
             <Link
               href="/login?register=true"
               className="group inline-flex items-center gap-2 rounded-xl bg-blue-600 px-8 py-3.5 text-sm font-semibold text-white transition-all hover:bg-blue-500 hover:shadow-lg hover:shadow-blue-500/25"
             >
-              Get Started Free
+              Bắt đầu miễn phí
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
             </Link>
             <Link
               href="/login"
               className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-8 py-3.5 text-sm font-semibold text-zinc-300 transition-all hover:border-zinc-600 hover:bg-zinc-900 hover:text-white"
             >
-              Sign In
+              Đăng nhập
             </Link>
           </div>
         </div>
@@ -175,11 +175,11 @@ export default function LandingPage() {
         <div className="mx-auto max-w-7xl">
           <div className="mb-16 text-center">
             <h2 className="mb-4 text-3xl font-bold md:text-4xl">
-              Everything you need to build with AI
+              Mọi thứ bạn cần để xây dựng với AI
             </h2>
             <p className="mx-auto max-w-2xl text-zinc-500">
-              A complete AI workspace that goes beyond chat. Automate, code,
-              deploy, and manage — all from one place.
+              Không gian làm việc AI toàn diện vượt xa trò chuyện. Tự động hóa, lập trình,
+              triển khai và quản lý — tất cả tại một nơi.
             </p>
           </div>
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -211,10 +211,10 @@ export default function LandingPage() {
         <div className="relative z-10 mx-auto max-w-7xl">
           <div className="mb-16 text-center">
             <h2 className="mb-4 text-3xl font-bold md:text-4xl">
-              Simple, transparent pricing
+              Bảng giá đơn giản, minh bạch
             </h2>
             <p className="mx-auto max-w-2xl text-zinc-500">
-              Start for free. Upgrade when you need more power.
+              Bắt đầu miễn phí. Nâng cấp khi bạn cần thêm sức mạnh.
             </p>
           </div>
           <div className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-3">
@@ -230,7 +230,7 @@ export default function LandingPage() {
               >
                 {tier.highlighted && (
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-blue-600 px-3 py-1 text-xs font-semibold">
-                    Recommended
+                    Đề xuất
                   </div>
                 )}
                 <div className="mb-6">
@@ -276,10 +276,10 @@ export default function LandingPage() {
             <Zap className="h-5 w-5 text-blue-500" />
             <span className="font-semibold">AHVclaw</span>
             <span className="text-zinc-600">|</span>
-            <span className="text-sm text-zinc-500">Built by AHV Holding</span>
+            <span className="text-sm text-zinc-500">Xây dựng bởi AHV Holding</span>
           </div>
           <p className="text-sm text-zinc-600">
-            &copy; 2026 AHV Holding. All rights reserved.
+            &copy; 2026 AHV Holding. Bảo lưu mọi quyền.
           </p>
         </div>
       </footer>

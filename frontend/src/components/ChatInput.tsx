@@ -155,7 +155,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
             onClick={handleFileSelect}
             disabled={disabled || uploadProgress !== null}
             className="p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-700 disabled:opacity-30 transition"
-            title="Attach files"
+            title="Đính kèm tệp"
           >
             <Paperclip size={16} />
           </button>
@@ -169,7 +169,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
             }}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            placeholder={uploadProgress ? `Uploading ${uploadProgress.current}/${uploadProgress.total}...` : disabled ? 'AI is responding...' : 'Type a message...'}
+            placeholder={uploadProgress ? `Uploading ${uploadProgress.current}/${uploadProgress.total}...` : disabled ? 'AI đang trả lời...' : 'Nhập tin nhắn...'}
             rows={1}
             disabled={disabled}
             className="flex-1 bg-transparent text-white text-sm resize-none outline-none placeholder-zinc-500 px-2 py-1.5 max-h-[200px] disabled:opacity-50"

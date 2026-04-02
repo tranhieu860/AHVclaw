@@ -45,15 +45,15 @@ export function WorkspacePanel() {
         setEditorTabs(newTabs);
       }
     } catch (err) {
-      console.error('Failed to save file:', err);
+      console.error('Không thể lưu tệp:', err);
     }
   };
 
   const tabs: { type: TabType; label: string; icon: typeof MessageSquare }[] = [
-    { type: 'chat', label: 'Chat', icon: MessageSquare },
-    { type: 'editor', label: 'Editor', icon: Code },
+    { type: 'chat', label: 'Trò chuyện', icon: MessageSquare },
+    { type: 'editor', label: 'Soạn thảo', icon: Code },
     { type: 'terminal', label: 'Terminal', icon: TerminalSquare },
-    { type: 'browser', label: 'Browser', icon: Globe },
+    { type: 'browser', label: 'Trình duyệt', icon: Globe },
   ];
 
   return (

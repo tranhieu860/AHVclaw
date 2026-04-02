@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { MessageSquare, Plus, Settings, Server, Puzzle, Bot, LogOut, Radio, Users } from 'lucide-react';
+import { MessageSquare, Plus, Settings, Server, Puzzle, Bot, LogOut, Radio, Users, Clock } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { ThemeToggle } from './ThemeToggle';
 import { api } from '@/lib/api';
@@ -63,14 +63,14 @@ export function Sidebar({ onNavigate }: SidebarProps) {
     <div className="w-64 border-r border-zinc-800 bg-zinc-900 flex flex-col h-full">
       <div className="p-4 border-b border-zinc-800">
         <h1 className="text-lg font-bold text-white">AHVclaw</h1>
-        <p className="text-xs text-zinc-500">AI Agent Platform</p>
+        <p className="text-xs text-zinc-500">Nền tảng AI Agent</p>
       </div>
 
       <button
         onClick={handleNewChat}
         className="mx-3 mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium transition"
       >
-        <Plus size={16} /> New Chat
+        <Plus size={16} /> Trò chuyện mới
       </button>
 
       <div className="flex gap-1 px-3 mt-2 flex-wrap">
@@ -106,11 +106,12 @@ export function Sidebar({ onNavigate }: SidebarProps) {
 
       <div className="p-2 border-t border-zinc-800 space-y-1">
         <SidebarLink icon={<Bot size={16} />} label="Agents" href="/agents" />
-        <SidebarLink icon={<Radio size={16} />} label="Bots" href="/bots" />
-        <SidebarLink icon={<Users size={16} />} label="Contacts" href="/contacts" />
-        <SidebarLink icon={<Puzzle size={16} />} label="Skills" href="/skills" />
-        <SidebarLink icon={<Server size={16} />} label="Servers" href="/servers" />
-        <SidebarLink icon={<Settings size={16} />} label="Settings" href="/settings" />
+        <SidebarLink icon={<Radio size={16} />} label="Bot" href="/bots" />
+        <SidebarLink icon={<Users size={16} />} label="Liên hệ" href="/contacts" />
+        <SidebarLink icon={<Clock size={16} />} label="Tác vụ" href="/tasks" />
+        <SidebarLink icon={<Puzzle size={16} />} label="Kỹ năng" href="/skills" />
+        <SidebarLink icon={<Server size={16} />} label="Máy chủ" href="/servers" />
+        <SidebarLink icon={<Settings size={16} />} label="Cài đặt" href="/settings" />
         <button
           onClick={handleLogout}
           className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-red-400 hover:bg-zinc-800/50 transition"

@@ -60,26 +60,26 @@ export default function SkillsPage() {
     <div className="flex-1 p-6 overflow-y-auto">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold text-white flex items-center gap-2">
-          <Sparkles size={20} /> Skills
+          <Sparkles size={20} /> Kỹ năng
         </h1>
         <button onClick={() => setShowAdd(!showAdd)} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm flex items-center gap-1">
-          <Plus size={14} /> New Skill
+          <Plus size={14} /> Kỹ năng mới
         </button>
       </div>
 
       {showAdd && (
         <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 mb-6 space-y-3">
           <div className="grid grid-cols-2 gap-3">
-            <input placeholder="Name" value={formName} onChange={e => setFormName(e.target.value)}
+            <input placeholder="Tên" value={formName} onChange={e => setFormName(e.target.value)}
               className="bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none" />
-            <input placeholder="Slug (unique-id)" value={formSlug} onChange={e => setFormSlug(e.target.value)}
+            <input placeholder="Slug (mã duy nhất)" value={formSlug} onChange={e => setFormSlug(e.target.value)}
               className="bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none" />
           </div>
-          <input placeholder="Description" value={formDesc} onChange={e => setFormDesc(e.target.value)}
+          <input placeholder="Mô tả" value={formDesc} onChange={e => setFormDesc(e.target.value)}
             className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none" />
-          <textarea placeholder="System prompt for this skill..." value={formPrompt} onChange={e => setFormPrompt(e.target.value)}
+          <textarea placeholder="System prompt cho kỹ năng này..." value={formPrompt} onChange={e => setFormPrompt(e.target.value)}
             rows={4} className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none resize-none" />
-          <button onClick={addSkill} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm">Create Skill</button>
+          <button onClick={addSkill} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm">Tạo kỹ năng</button>
         </div>
       )}
 
@@ -93,7 +93,7 @@ export default function SkillsPage() {
               </div>
               <span className="text-xs px-2 py-0.5 rounded bg-zinc-800 text-zinc-400">v{skill.version}</span>
             </div>
-            <p className="text-sm text-zinc-400 mt-2 line-clamp-2">{skill.description || 'No description'}</p>
+            <p className="text-sm text-zinc-400 mt-2 line-clamp-2">{skill.description || 'Chưa có mô tả'}</p>
             <div className="flex items-center justify-between mt-3 text-xs text-zinc-500">
               <span>{skill.is_public ? 'Public' : 'Private'}</span>
               <span>{skill.installs_count} installs</span>
@@ -103,7 +103,7 @@ export default function SkillsPage() {
         {skills.length === 0 && !showAdd && (
           <div className="col-span-full text-center py-12 text-zinc-500">
             <Sparkles size={32} className="mx-auto mb-3 opacity-50" />
-            <p>No skills yet. Create your first skill to get started.</p>
+            <p>Chưa có kỹ năng nào. Tạo kỹ năng đầu tiên để bắt đầu.</p>
           </div>
         )}
       </div>

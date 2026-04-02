@@ -37,7 +37,7 @@ export function ThemeToggle() {
   };
 
   return (
-    <button onClick={toggle} className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition" title={dark ? "Light mode" : "Dark mode"}>
+    <button onClick={toggle} className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition" title={dark ? "Chế độ sáng" : "Chế độ tối"}>
       {dark ? <Sun size={16} /> : <Moon size={16} />}
     </button>
   );

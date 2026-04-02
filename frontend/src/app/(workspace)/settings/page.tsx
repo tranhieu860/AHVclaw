@@ -25,11 +25,11 @@ interface AdminUser {
 }
 
 const baseTabsConfig = [
-  { id: 'profile', label: 'Profile', icon: User },
-  { id: 'preferences', label: 'Preferences', icon: Palette },
-  { id: 'storage', label: 'Storage', icon: HardDrive },
-  { id: 'security', label: 'Security', icon: Shield },
-  { id: 'providers', label: 'Model Providers', icon: Cpu },
+  { id: 'profile', label: 'Hồ sơ', icon: User },
+  { id: 'preferences', label: 'Tùy chọn', icon: Palette },
+  { id: 'storage', label: 'Lưu trữ', icon: HardDrive },
+  { id: 'security', label: 'Bảo mật', icon: Shield },
+  { id: 'providers', label: 'Nhà cung cấp model', icon: Cpu },
 ] as const;
 
 type BaseTabId = typeof baseTabsConfig[number]['id'];
@@ -71,7 +71,7 @@ export default function SettingsPage() {
   // Build tabs array dynamically
   const tabs = [
     ...baseTabsConfig,
-    ...(user?.role === 'admin' ? [{ id: 'admin' as const, label: 'Admin', icon: Shield }] : []),
+    ...(user?.role === 'admin' ? [{ id: 'admin' as const, label: 'Quản trị', icon: Shield }] : []),
   ];
 
   const loadSettings = async () => {
@@ -131,8 +131,8 @@ export default function SettingsPage() {
   };
 
   const changePassword = async () => {
-    if (newPw !== confirmPw) { setPwMsg('Passwords do not match'); return; }
-    if (!oldPw || !newPw) { setPwMsg('All fields required'); return; }
+    if (newPw !== confirmPw) { setPwMsg('Mật khẩu không khớp'); return; }
+    if (!oldPw || !newPw) { setPwMsg('Tất cả trường là bắt buộc'); return; }
     try {
       const res = await fetch(`${baseUrl}/api/settings/password`, {
         method: 'POST',
@@ -140,13 +140,13 @@ export default function SettingsPage() {
         body: JSON.stringify({ old_password: oldPw, new_password: newPw }),
       });
       if (res.ok) {
-        setPwMsg('Password changed successfully');
+        setPwMsg('Đổi mật khẩu thành công');
         setOldPw(''); setNewPw(''); setConfirmPw('');
       } else {
         const data = await res.json().catch(() => ({}));
-        setPwMsg(data.error || 'Failed to change password');
+        setPwMsg(data.error || 'Đổi mật khẩu thất bại');
       }
-    } catch { setPwMsg('Error changing password'); }
+    } catch { setPwMsg('Lỗi khi đổi mật khẩu'); }
   };
 
   const generateApiKey = async () => {
@@ -215,7 +215,7 @@ export default function SettingsPage() {
   return (
     <div className="flex-1 p-6 overflow-y-auto">
       <h1 className="text-xl font-semibold text-white flex items-center gap-2 mb-6">
-        <Settings size={20} /> Settings
+        <Settings size={20} /> Cài đặt
       </h1>
 
       <div className="flex gap-1 mb-6 border-b border-zinc-800 pb-px">
@@ -267,25 +267,25 @@ export default function SettingsPage() {
         {activeTab === 'preferences' && (
           <div className="space-y-4">
             <div>
-              <label className="text-xs text-zinc-500 block mb-1">Default Model</label>
+              <label className="text-xs text-zinc-500 block mb-1">Model mặc định</label>
               <input value={defaultModel} onChange={e => setDefaultModel(e.target.value)} placeholder="e.g. AHV-Holding-TroLy" className={inputCls} />
             </div>
             <div>
-              <label className="text-xs text-zinc-500 block mb-1">Theme</label>
+              <label className="text-xs text-zinc-500 block mb-1">Giao diện</label>
               <select value={theme} onChange={e => setTheme(e.target.value)} className={inputCls}>
-                <option value="dark">Dark</option>
-                <option value="light">Light</option>
-                <option value="system">System</option>
+                <option value="dark">Tối</option>
+                <option value="light">Sáng</option>
+                <option value="system">Hệ thống</option>
               </select>
             </div>
             <div>
-              <label className="text-xs text-zinc-500 block mb-1">Language</label>
+              <label className="text-xs text-zinc-500 block mb-1">Ngôn ngữ</label>
               <select value={language} onChange={e => setLanguage(e.target.value)} className={inputCls}>
                 <option value="en">English</option>
                 <option value="vi">Vietnamese</option>
               </select>
             </div>
-            <button onClick={savePreferences} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">Save Preferences</button>
+            <button onClick={savePreferences} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">Lưu tùy chọn</button>
           </div>
         )}
 
@@ -302,12 +302,12 @@ export default function SettingsPage() {
                     <div className="bg-blue-600 h-3 rounded-full transition-all" style={{ width: `${Math.min((storage.used / storage.quota) * 100, 100)}%` }} />
                   </div>
                   <p className="text-xs text-zinc-500 mt-2">
-                    {storage.quota > 0 ? `${((storage.used / storage.quota) * 100).toFixed(1)}% used` : 'No quota set'}
+                    {storage.quota > 0 ? `${((storage.used / storage.quota) * 100).toFixed(1)}% used` : 'Chưa đặt hạn mức'}
                   </p>
                 </div>
               </>
             ) : (
-              <p className="text-zinc-500 text-sm">Loading storage info...</p>
+              <p className="text-zinc-500 text-sm">Đang tải thông tin lưu trữ...</p>
             )}
           </div>
         )}
@@ -315,19 +315,19 @@ export default function SettingsPage() {
         {activeTab === 'security' && (
           <div className="space-y-6">
             <div>
-              <h3 className="text-white font-medium mb-3">Change Password</h3>
+              <h3 className="text-white font-medium mb-3">Đổi mật khẩu</h3>
               <div className="space-y-3">
-                <input type="password" value={oldPw} onChange={e => setOldPw(e.target.value)} placeholder="Current password" className={inputCls} />
-                <input type="password" value={newPw} onChange={e => setNewPw(e.target.value)} placeholder="New password" className={inputCls} />
-                <input type="password" value={confirmPw} onChange={e => setConfirmPw(e.target.value)} placeholder="Confirm new password" className={inputCls} />
+                <input type="password" value={oldPw} onChange={e => setOldPw(e.target.value)} placeholder="Mật khẩu hiện tại" className={inputCls} />
+                <input type="password" value={newPw} onChange={e => setNewPw(e.target.value)} placeholder="Mật khẩu mới" className={inputCls} />
+                <input type="password" value={confirmPw} onChange={e => setConfirmPw(e.target.value)} placeholder="Xác nhận mật khẩu mới" className={inputCls} />
                 {pwMsg && <p className={`text-xs ${pwMsg.includes('success') ? 'text-green-400' : 'text-red-400'}`}>{pwMsg}</p>}
-                <button onClick={changePassword} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">Change Password</button>
+                <button onClick={changePassword} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">Đổi mật khẩu</button>
               </div>
             </div>
             <div className="border-t border-zinc-800 pt-4">
               <h3 className="text-white font-medium mb-3">API Key</h3>
-              <p className="text-xs text-zinc-500 mb-3">Generate a new API key. This will invalidate the existing one.</p>
-              <button onClick={generateApiKey} className="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded text-sm">Generate New API Key</button>
+              <p className="text-xs text-zinc-500 mb-3">Tạo API key mới. Key cũ sẽ bị vô hiệu.</p>
+              <button onClick={generateApiKey} className="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded text-sm">Tạo API Key mới</button>
             </div>
           </div>
         )}
@@ -335,8 +335,8 @@ export default function SettingsPage() {
         {activeTab === 'providers' && (
           <div className="space-y-4">
             <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-3">
-              <h3 className="text-white text-sm font-medium">Add Provider</h3>
-              <input value={provName} onChange={e => setProvName(e.target.value)} placeholder="Provider Name" className={inputCls} />
+              <h3 className="text-white text-sm font-medium">Thêm nhà cung cấp</h3>
+              <input value={provName} onChange={e => setProvName(e.target.value)} placeholder="Tên nhà cung cấp" className={inputCls} />
               <input value={provUrl} onChange={e => setProvUrl(e.target.value)} placeholder="API URL (e.g. https://api.example.com/v1)" className={inputCls} />
               <input value={provKey} onChange={e => setProvKey(e.target.value)} placeholder="API Key (optional)" className={inputCls} />
               <button onClick={addProvider} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm flex items-center gap-1">
@@ -357,7 +357,7 @@ export default function SettingsPage() {
                 </div>
               ))}
               {providers.length === 0 && (
-                <p className="text-zinc-500 text-sm text-center py-4">No custom providers configured.</p>
+                <p className="text-zinc-500 text-sm text-center py-4">Chưa cấu hình nhà cung cấp nào.</p>
               )}
             </div>
           </div>
@@ -365,7 +365,7 @@ export default function SettingsPage() {
 
         {activeTab === 'admin' && (
           <div className="space-y-4">
-            <h3 className="text-white font-medium">User Management</h3>
+            <h3 className="text-white font-medium">Quản lý người dùng</h3>
             <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
@@ -373,7 +373,7 @@ export default function SettingsPage() {
                     <th className="text-left px-4 py-3">Name</th>
                     <th className="text-left px-4 py-3">Email</th>
                     <th className="text-left px-4 py-3">Role</th>
-                    <th className="text-left px-4 py-3 w-24">Actions</th>
+                    <th className="text-left px-4 py-3 w-24">Thao tác</th>
                   </tr>
                 </thead>
                 <tbody>

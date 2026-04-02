@@ -325,7 +325,7 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 	// 9. Send response to channel
 	responseText := result.Content
 	if responseText == "" {
-		responseText = "I processed your request."
+		responseText = "Tôi đã xử lý yêu cầu của bạn."
 	}
 
 	r.sendResponse(adapter, msg.ChatID, responseText, maxLength)

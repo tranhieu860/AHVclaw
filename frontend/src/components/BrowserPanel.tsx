@@ -29,7 +29,7 @@ export function BrowserPanel({ onClose }: BrowserPanelProps) {
           value={inputUrl}
           onChange={e => setInputUrl(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && navigate()}
-          placeholder="Enter URL..."
+          placeholder="Nhập URL..."
           className="flex-1 bg-zinc-800 text-white text-xs rounded px-2 py-1 outline-none border border-zinc-700 focus:border-blue-500"
         />
         <button onClick={navigate} className="text-zinc-400 hover:text-white">
@@ -52,7 +52,7 @@ export function BrowserPanel({ onClose }: BrowserPanelProps) {
             />
             {loading && (
               <div className="absolute inset-0 bg-zinc-950/50 flex items-center justify-center">
-                <div className="text-zinc-400 text-sm animate-pulse">Loading...</div>
+                <div className="text-zinc-400 text-sm animate-pulse">Đang tải...</div>
               </div>
             )}
           </>
@@ -60,7 +60,7 @@ export function BrowserPanel({ onClose }: BrowserPanelProps) {
           <div className="h-full flex items-center justify-center bg-zinc-950">
             <div className="text-center text-zinc-500">
               <Globe size={32} className="mx-auto mb-2 opacity-50" />
-              <p className="text-sm">Enter a URL to browse</p>
+              <p className="text-sm">Nhập URL để duyệt web</p>
             </div>
           </div>
         )}

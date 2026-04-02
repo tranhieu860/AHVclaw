@@ -14,15 +14,15 @@ export function StatusBar() {
         <span>Model: {selectedModel}</span>
         <span className="flex items-center gap-1">
           <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-          Connected
+          Đã kết nối
         </span>
       </div>
       <div className="flex items-center gap-2">
-        <button onClick={toggleRightPanel} className="text-zinc-400 hover:text-white flex items-center gap-1" title="Toggle browser panel">
+        <button onClick={toggleRightPanel} className="text-zinc-400 hover:text-white flex items-center gap-1" title="Bật/tắt trình duyệt">
           <Globe size={12} />
         </button>
         <ThemeToggle />
-        <span>{user?.name || "Not logged in"}</span>
+        <span>{user?.name || "Chưa đăng nhập"}</span>
       </div>
     </div>
   );

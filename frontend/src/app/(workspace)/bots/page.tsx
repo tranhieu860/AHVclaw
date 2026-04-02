@@ -66,7 +66,7 @@ function ToolPermissions({ selectedTools, onToggle, onSelectAll, onDeselectAll }
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center justify-between px-3 py-2 bg-zinc-800 hover:bg-zinc-750 text-sm text-zinc-300"
       >
-        <span>Tool Permissions ({selectedTools.size}/{ALL_TOOLS.length})</span>
+        <span>Quyền công cụ ({selectedTools.size}/{ALL_TOOLS.length})</span>
         {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
       </button>
       {expanded && (
@@ -74,11 +74,11 @@ function ToolPermissions({ selectedTools, onToggle, onSelectAll, onDeselectAll }
           <div className="flex gap-2">
             <button type="button" onClick={onSelectAll}
               className="text-xs px-2 py-1 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-300">
-              Select All
+              Chọn tất cả
             </button>
             <button type="button" onClick={onDeselectAll}
               className="text-xs px-2 py-1 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-300">
-              Deselect All
+              Bỏ chọn tất cả
             </button>
           </div>
           {TOOL_GROUPS.map(group => (
@@ -271,13 +271,13 @@ export default function BotsPage() {
           <Radio size={20} /> Bots
         </h1>
         <button onClick={() => setShowAdd(!showAdd)} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm flex items-center gap-1">
-          <Plus size={14} /> New Bot
+          <Plus size={14} /> Bot mới
         </button>
       </div>
 
       {showAdd && (
         <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 mb-6 space-y-3">
-          <input placeholder="Bot Name" value={formName} onChange={e => setFormName(e.target.value)}
+          <input placeholder="Tên bot" value={formName} onChange={e => setFormName(e.target.value)}
             className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none" />
           <select value={formChannel} onChange={e => setFormChannel(e.target.value)}
             className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none">
@@ -285,9 +285,9 @@ export default function BotsPage() {
             <option value="zalo">Zalo</option>
             <option value="discord">Discord</option>
           </select>
-          <input placeholder="Bot Token" value={formToken} onChange={e => setFormToken(e.target.value)}
+          <input placeholder="Token bot" value={formToken} onChange={e => setFormToken(e.target.value)}
             className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none" />
-          <input placeholder="Agent ID (optional)" value={formAgentId} onChange={e => setFormAgentId(e.target.value)}
+          <input placeholder="Agent ID (tùy chọn)" value={formAgentId} onChange={e => setFormAgentId(e.target.value)}
             className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none" />
           <ToolPermissions
             selectedTools={selectedTools}
@@ -295,18 +295,18 @@ export default function BotsPage() {
             onSelectAll={() => setSelectedTools(new Set(ALL_TOOLS.map(t => t.id)))}
             onDeselectAll={() => setSelectedTools(new Set())}
           />
-          <button onClick={addBot} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm">Create Bot</button>
+          <button onClick={addBot} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm">Tạo bot</button>
         </div>
       )}
 
       {deleteId && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-6 max-w-sm w-full mx-4">
-            <h3 className="text-white font-medium mb-2">Delete Bot?</h3>
-            <p className="text-sm text-zinc-400 mb-4">This action cannot be undone. The bot will be stopped and removed.</p>
+            <h3 className="text-white font-medium mb-2">Xóa bot?</h3>
+            <p className="text-sm text-zinc-400 mb-4">Hành động này không thể hoàn tác. Bot sẽ bị dừng và xóa.</p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setDeleteId(null)} className="px-3 py-1.5 rounded text-sm text-zinc-400 hover:text-white">Cancel</button>
-              <button onClick={() => deleteBot(deleteId)} className="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded text-sm">Delete</button>
+              <button onClick={() => setDeleteId(null)} className="px-3 py-1.5 rounded text-sm text-zinc-400 hover:text-white">Hủy</button>
+              <button onClick={() => deleteBot(deleteId)} className="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded text-sm">Xóa</button>
             </div>
           </div>
         </div>
@@ -317,34 +317,34 @@ export default function BotsPage() {
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
           <div className="bg-zinc-900 border border-zinc-700 rounded-lg w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-4 border-b border-zinc-800 sticky top-0 bg-zinc-900 z-10">
-              <h3 className="text-white font-medium">Edit Bot: {editBot.name}</h3>
+              <h3 className="text-white font-medium">Sửa bot: {editBot.name}</h3>
               <button onClick={() => setEditBot(null)} className="text-zinc-400 hover:text-white"><X size={18} /></button>
             </div>
             <div className="p-4 space-y-4">
               {/* Basic */}
               <div>
-                <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1 block">Bot Name</label>
+                <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1 block">Tên bot</label>
                 <input value={editName} onChange={e => setEditName(e.target.value)}
                   className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none" />
               </div>
               <div>
-                <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1 block">Default Agent ID</label>
+                <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1 block">Agent ID mặc định</label>
                 <input value={editAgentId} onChange={e => setEditAgentId(e.target.value)} placeholder="Optional"
                   className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none" />
               </div>
 
-              {/* AI Settings */}
+              {/* Cài đặt AI */}
               <div className="border-t border-zinc-800 pt-4">
-                <h4 className="text-sm font-medium text-zinc-300 mb-3">AI Settings</h4>
+                <h4 className="text-sm font-medium text-zinc-300 mb-3">Cài đặt AI</h4>
                 <ModelSearch value={editModel} onChange={setEditModel} label="Model" placeholder="Default model" />
                 <div className="mt-3">
                   <ModelFallback value={editFallback} onChange={setEditFallback} />
                 </div>
               </div>
 
-              {/* Tool Permissions */}
+              {/* Quyền công cụ */}
               <div className="border-t border-zinc-800 pt-4">
-                <h4 className="text-sm font-medium text-zinc-300 mb-3">Tool Permissions</h4>
+                <h4 className="text-sm font-medium text-zinc-300 mb-3">Quyền công cụ</h4>
                 <ToolPermissions
                   selectedTools={editTools}
                   onToggle={(id) => toggleTool(id, editTools, setEditTools)}
@@ -353,40 +353,40 @@ export default function BotsPage() {
                 />
               </div>
 
-              {/* Response Settings */}
+              {/* Cài đặt phản hồi */}
               <div className="border-t border-zinc-800 pt-4">
-                <h4 className="text-sm font-medium text-zinc-300 mb-3">Response Settings</h4>
+                <h4 className="text-sm font-medium text-zinc-300 mb-3">Cài đặt phản hồi</h4>
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1 block">Max Length</label>
+                      <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1 block">Độ dài tối đa</label>
                       <input type="number" value={editMaxLength} onChange={e => setEditMaxLength(e.target.value)} placeholder="4096"
                         className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none" />
                     </div>
                     <div>
-                      <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1 block">Language</label>
+                      <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1 block">Ngôn ngữ</label>
                       <input value={editLanguage} onChange={e => setEditLanguage(e.target.value)} placeholder="Auto"
                         className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none" />
                     </div>
                   </div>
                   <div>
-                    <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1 block">Welcome Message</label>
-                    <textarea value={editWelcome} onChange={e => setEditWelcome(e.target.value)} placeholder="Sent when a new conversation starts" rows={2}
+                    <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1 block">Tin nhắn chào mừng</label>
+                    <textarea value={editWelcome} onChange={e => setEditWelcome(e.target.value)} placeholder="Gửi khi bắt đầu cuộc trò chuyện mới" rows={2}
                       className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none resize-none" />
                   </div>
                   <div>
-                    <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1 block">Error Message</label>
-                    <textarea value={editError} onChange={e => setEditError(e.target.value)} placeholder="Sent when an error occurs" rows={2}
+                    <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1 block">Tin nhắn lỗi</label>
+                    <textarea value={editError} onChange={e => setEditError(e.target.value)} placeholder="Gửi khi có lỗi xảy ra" rows={2}
                       className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none resize-none" />
                   </div>
                 </div>
               </div>
             </div>
             <div className="flex justify-end gap-2 p-4 border-t border-zinc-800 sticky bottom-0 bg-zinc-900">
-              <button onClick={() => setEditBot(null)} className="px-4 py-2 rounded text-sm text-zinc-400 hover:text-white">Cancel</button>
+              <button onClick={() => setEditBot(null)} className="px-4 py-2 rounded text-sm text-zinc-400 hover:text-white">Hủy</button>
               <button onClick={saveEdit} disabled={saving}
                 className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded text-sm flex items-center gap-1">
-                <Check size={14} /> {saving ? 'Saving...' : 'Save Changes'}
+                <Check size={14} /> {saving ? 'Đang lưu...' : 'Lưu thay đổi'}
               </button>
             </div>
           </div>
@@ -410,11 +410,11 @@ export default function BotsPage() {
                 bot.running ? 'bg-green-900/30 text-green-400' : 'bg-zinc-800 text-zinc-500'
               }`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${bot.running ? 'bg-green-400' : 'bg-zinc-500'}`} />
-                {bot.running ? 'Running' : 'Stopped'}
+                {bot.running ? 'Đang chạy' : 'Đã dừng'}
               </span>
             </div>
             <div className="flex items-center justify-between mt-4">
-              <span className="text-xs text-zinc-500">Last connected: {timeAgo(bot.updated_at)}</span>
+              <span className="text-xs text-zinc-500">Kết nối lần cuối: {timeAgo(bot.updated_at)}</span>
               <div className="flex items-center gap-1">
                 <button onClick={() => openEdit(bot)} className="p-1.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-white" title="Edit">
                   <Pencil size={14} />
@@ -438,7 +438,7 @@ export default function BotsPage() {
         {bots.length === 0 && !showAdd && (
           <div className="col-span-full text-center py-12 text-zinc-500">
             <Radio size={32} className="mx-auto mb-3 opacity-50" />
-            <p>No bots configured. Create a bot to connect to messaging channels.</p>
+            <p>Chưa có bot nào. Tạo bot để kết nối đến các kênh nhắn tin.</p>
           </div>
         )}
       </div>

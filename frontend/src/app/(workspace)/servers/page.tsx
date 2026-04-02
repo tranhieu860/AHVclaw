@@ -64,7 +64,7 @@ export default function ServersPage() {
   };
 
   const deleteServer = async (id: string) => {
-    if (!confirm('Delete this server?')) return;
+    if (!confirm('Xóa máy chủ này?')) return;
     await fetch(`${baseUrl}/api/servers/${id}`, { method: 'DELETE', headers: headers() });
     loadServers();
   };
@@ -72,7 +72,7 @@ export default function ServersPage() {
   const execCommand = async () => {
     if (!selectedServer || !command) return;
     setLoading(true);
-    setOutput('Running...');
+    setOutput('Đang chạy...');
     try {
       const res = await fetch(`${baseUrl}/api/servers/${selectedServer}/exec`, {
         method: 'POST',
@@ -80,9 +80,9 @@ export default function ServersPage() {
         body: JSON.stringify({ command }),
       });
       const data = await res.json();
-      setOutput(data.output || data.error || 'No output');
+      setOutput(data.output || data.error || 'Không có đầu ra');
     } catch {
-      setOutput('Failed to execute command');
+      setOutput('Không thể thực thi lệnh');
     } finally {
       setLoading(false);
     }
@@ -96,7 +96,7 @@ export default function ServersPage() {
       const data = await res.json();
       setOutput(data.status || data.error || 'No status');
     } catch {
-      setOutput('Failed to get status');
+      setOutput('Không thể lấy trạng thái');
     } finally {
       setLoading(false);
     }
@@ -106,26 +106,26 @@ export default function ServersPage() {
     <div className="flex-1 flex flex-col p-4 overflow-hidden">
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-semibold text-white flex items-center gap-2">
-          <Server size={20} /> Servers
+          <Server size={20} /> Máy chủ
         </h1>
         <button onClick={() => setShowAdd(!showAdd)} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm flex items-center gap-1">
-          <Plus size={14} /> Add Server
+          <Plus size={14} /> Thêm máy chủ
         </button>
       </div>
 
       {showAdd && (
         <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 mb-4 grid grid-cols-2 gap-3">
-          <input placeholder="Name" value={formName} onChange={e => setFormName(e.target.value)} className="bg-zinc-800 text-white rounded px-3 py-1.5 text-sm border border-zinc-700" />
-          <input placeholder="Host (IP)" value={formHost} onChange={e => setFormHost(e.target.value)} className="bg-zinc-800 text-white rounded px-3 py-1.5 text-sm border border-zinc-700" />
-          <input placeholder="Port" value={formPort} onChange={e => setFormPort(e.target.value)} className="bg-zinc-800 text-white rounded px-3 py-1.5 text-sm border border-zinc-700" />
-          <input placeholder="Username" value={formUser} onChange={e => setFormUser(e.target.value)} className="bg-zinc-800 text-white rounded px-3 py-1.5 text-sm border border-zinc-700" />
-          <input placeholder="Password" type="password" value={formPass} onChange={e => setFormPass(e.target.value)} className="bg-zinc-800 text-white rounded px-3 py-1.5 text-sm border border-zinc-700" />
+          <input placeholder="Tên" value={formName} onChange={e => setFormName(e.target.value)} className="bg-zinc-800 text-white rounded px-3 py-1.5 text-sm border border-zinc-700" />
+          <input placeholder="Máy chủ (IP)" value={formHost} onChange={e => setFormHost(e.target.value)} className="bg-zinc-800 text-white rounded px-3 py-1.5 text-sm border border-zinc-700" />
+          <input placeholder="Cổng" value={formPort} onChange={e => setFormPort(e.target.value)} className="bg-zinc-800 text-white rounded px-3 py-1.5 text-sm border border-zinc-700" />
+          <input placeholder="Tên đăng nhập" value={formUser} onChange={e => setFormUser(e.target.value)} className="bg-zinc-800 text-white rounded px-3 py-1.5 text-sm border border-zinc-700" />
+          <input placeholder="Mật khẩu" type="password" value={formPass} onChange={e => setFormPass(e.target.value)} className="bg-zinc-800 text-white rounded px-3 py-1.5 text-sm border border-zinc-700" />
           <select value={formEnv} onChange={e => setFormEnv(e.target.value)} className="bg-zinc-800 text-white rounded px-3 py-1.5 text-sm border border-zinc-700">
-            <option value="dev">Development</option>
-            <option value="staging">Staging</option>
-            <option value="production">Production</option>
+            <option value="dev">Phát triển</option>
+            <option value="staging">Dàn dựng</option>
+            <option value="production">Sản xuất</option>
           </select>
-          <button onClick={addServer} className="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded text-sm col-span-2">Save Server</button>
+          <button onClick={addServer} className="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded text-sm col-span-2">Lưu máy chủ</button>
         </div>
       )}
 
@@ -150,7 +150,7 @@ export default function ServersPage() {
               }`}>{s.environment}</span>
             </div>
           ))}
-          {servers.length === 0 && <p className="text-zinc-500 text-sm text-center py-8">No servers added yet</p>}
+          {servers.length === 0 && <p className="text-zinc-500 text-sm text-center py-8">Chưa có máy chủ nào</p>}
         </div>
 
         {/* Command / Output panel */}
@@ -163,7 +163,7 @@ export default function ServersPage() {
                   value={command}
                   onChange={e => setCommand(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && execCommand()}
-                  placeholder="Enter command..."
+                  placeholder="Nhập lệnh..."
                   className="flex-1 bg-transparent text-white text-sm outline-none"
                   disabled={loading}
                 />
@@ -172,11 +172,11 @@ export default function ServersPage() {
                   Run
                 </button>
               </div>
-              <pre className="flex-1 overflow-auto p-3 text-sm text-green-400 font-mono whitespace-pre-wrap">{output || 'Select a server and run a command'}</pre>
+              <pre className="flex-1 overflow-auto p-3 text-sm text-green-400 font-mono whitespace-pre-wrap">{output || 'Chọn máy chủ và chạy lệnh'}</pre>
             </>
           ) : (
             <div className="flex-1 flex items-center justify-center text-zinc-500 text-sm">
-              Select a server to manage
+              Chọn máy chủ để quản lý
             </div>
           )}
         </div>

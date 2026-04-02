@@ -53,7 +53,7 @@ export function ModelSelector() {
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="Search models..."
+                placeholder="Tìm model..."
                 className="flex-1 bg-transparent text-white text-sm outline-none placeholder-zinc-500"
                 autoFocus
               />
@@ -77,7 +77,7 @@ export function ModelSelector() {
               </button>
             ))}
             {filtered.length === 0 && (
-              <p className="text-xs text-zinc-500 p-3 text-center">No models found</p>
+              <p className="text-xs text-zinc-500 p-3 text-center">Không tìm thấy model</p>
             )}
           </div>
         </div>
