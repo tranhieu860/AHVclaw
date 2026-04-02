@@ -3,6 +3,7 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 type ToolResult struct {
@@ -20,7 +21,7 @@ func NewExecutor(workspaceDir string, userID string) *Executor {
 	return &Executor{WorkspaceDir: workspaceDir, UserID: userID}
 }
 
-func (e *Executor) Execute(name string, argsJSON json.RawMessage) *ToolResult {
+func (e *Executor) executeInternal(name string, argsJSON json.RawMessage) *ToolResult {
 	switch name {
 	case "file_read":
 		return e.fileRead(argsJSON)
@@ -60,6 +61,31 @@ func (e *Executor) Execute(name string, argsJSON json.RawMessage) *ToolResult {
 		return e.delegateAgent(argsJSON)
 	default:
 		return &ToolResult{Name: name, Error: fmt.Sprintf("unknown tool: %s", name)}
+	}
+}
+
+func (e *Executor) Execute(name string, argsJSON json.RawMessage) *ToolResult {
+	timeout := 30 * time.Second
+	switch name {
+	case "browser_navigate", "browser_extract", "browser_screenshot":
+		timeout = 45 * time.Second
+	case "terminal_exec":
+		timeout = 120 * time.Second
+	}
+
+	resultCh := make(chan *ToolResult, 1)
+	go func() {
+		resultCh <- e.executeInternal(name, argsJSON)
+	}()
+
+	select {
+	case result := <-resultCh:
+		if len(result.Content) > 8000 {
+			result.Content = result.Content[:8000] + "\n...(truncated)"
+		}
+		return result
+	case <-time.After(timeout):
+		return &ToolResult{Name: name, Error: fmt.Sprintf("tool %s timed out after %v", name, timeout)}
 	}
 }
 

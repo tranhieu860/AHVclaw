@@ -12,6 +12,7 @@ import (
 	"github.com/ahvholding/ahvclaw/ai"
 	authpkg "github.com/ahvholding/ahvclaw/auth"
 	"github.com/ahvholding/ahvclaw/db"
+	"github.com/ahvholding/ahvclaw/engine"
 	"github.com/ahvholding/ahvclaw/models"
 	"github.com/ahvholding/ahvclaw/tools"
 	"github.com/gofiber/contrib/websocket"
@@ -195,298 +196,98 @@ func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
 		messages = append(messages, msg)
 	}
 
-	// Add tool definitions to the request
-	toolDefs := tools.AllTools
-
 	// Create executor for user workspace
 	executor := tools.NewExecutor(fmt.Sprintf("/data/ahvclaw/workspaces/%s", userID.String()), userID.String())
 
 	// Ensure workspace exists
 	os.MkdirAll(executor.WorkspaceDir, 0755)
 
-	// AI conversation loop (handles tool calls)
-	maxToolRounds := 10
-	for round := 0; round < maxToolRounds; round++ {
-		var fullContent strings.Builder
-		var accumulatedToolCalls []json.RawMessage
-		var tokensIn, tokensOut int
-		var finishReason string
+	// Look up user fallback models
+	var userFallback *string
+	db.Pool.QueryRow(ctx, "SELECT value FROM user_settings WHERE user_id = $1 AND key = 'fallback_models'", userID).Scan(&userFallback)
+	fallbackStr := ""
+	if userFallback != nil {
+		fallbackStr = *userFallback
+	}
 
-		aiReq := ai.ChatCompletionRequest{
-			Model:    req.Model,
-			Messages: messages,
-			Stream:   true,
-			Tools:    convertToolDefs(toolDefs),
-		}
+	// Use shared engine for AI loop
+	result, err := engine.ProcessChat(ctx, engine.ChatConfig{
+		AIRouter:         Router,
+		Model:            req.Model,
+		FallbackModels:   fallbackStr,
+		Messages:         messages,
+		Tools:            allToolsAsAI(),
+		Executor:         executor,
+		MaxToolRounds:    10,
+		MaxContextTokens: 8000,
+		OnDelta: func(content string) {
+			sendWSJSON(conn, "delta", models.StreamDelta{Content: content})
+		},
+		OnToolCall: func(name, args string) {
+			sendWSJSON(conn, "tool_call", fiber.Map{"name": name, "arguments": args})
+		},
+		OnToolResult: func(name, content, errStr string) {
+			sendWSJSON(conn, "tool_result", fiber.Map{"name": name, "content": content, "error": errStr})
+		},
+		OnDone: func(tokensIn, tokensOut int) {
+			sendWSJSON(conn, "delta", models.StreamDelta{Done: true, TokensIn: tokensIn, TokensOut: tokensOut})
+		},
+		OnError: func(err error) {
+			sendWSError(conn, "AI error: "+err.Error())
+		},
+	})
 
-		err = Router.StreamChat(aiReq, func(chunk ai.StreamChunk) {
-			if len(chunk.Choices) > 0 {
-				delta := chunk.Choices[0].Delta
-				if delta.Content != "" {
-					fullContent.WriteString(delta.Content)
-					sendWSJSON(conn, "delta", models.StreamDelta{Content: delta.Content})
-				}
-				if delta.ToolCalls != nil {
-					accumulatedToolCalls = append(accumulatedToolCalls, delta.ToolCalls)
-				}
-				if chunk.Choices[0].FinishReason != nil {
-					finishReason = *chunk.Choices[0].FinishReason
-				}
-			}
-			if chunk.Usage != nil {
-				tokensIn = chunk.Usage.PromptTokens
-				tokensOut = chunk.Usage.CompletionTokens
-			}
-		})
+	if err != nil {
+		log.Printf("[web-chat] ProcessChat error: %v", err)
+		return
+	}
 
-		if err != nil {
-			log.Printf("Stream error with model %s: %v", req.Model, err)
-			// Try fallback models from conversation settings
-			var convModel *string
-			db.Pool.QueryRow(ctx, "SELECT model FROM conversations WHERE id = $1", *convID).Scan(&convModel)
-			// Check user settings for fallback
-			var userFallback *string
-			db.Pool.QueryRow(ctx, "SELECT value FROM user_settings WHERE user_id = $1 AND key = 'fallback_models'", userID).Scan(&userFallback)
-			fallbackStr := ""
-			if userFallback != nil && *userFallback != "" {
-				fallbackStr = *userFallback
-			}
-			if fallbackStr != "" {
-				fallbacks := strings.Split(fallbackStr, ",")
-				for _, fb := range fallbacks {
-					fb = strings.TrimSpace(fb)
-					if fb == "" {
-						continue
-					}
-					log.Printf("[chat] Trying fallback model: %s", fb)
-					fullContent.Reset()
-					accumulatedToolCalls = nil
-					finishReason = ""
-					aiReq.Model = fb
-					err = Router.StreamChat(aiReq, func(chunk ai.StreamChunk) {
-						if len(chunk.Choices) > 0 {
-							delta := chunk.Choices[0].Delta
-							if delta.Content != "" {
-								fullContent.WriteString(delta.Content)
-								sendWSJSON(conn, "delta", models.StreamDelta{Content: delta.Content})
-							}
-							if delta.ToolCalls != nil {
-								accumulatedToolCalls = append(accumulatedToolCalls, delta.ToolCalls)
-							}
-							if chunk.Choices[0].FinishReason != nil {
-								finishReason = *chunk.Choices[0].FinishReason
-							}
-						}
-						if chunk.Usage != nil {
-							tokensIn = chunk.Usage.PromptTokens
-							tokensOut = chunk.Usage.CompletionTokens
-						}
-					})
-					if err == nil {
-						break
-					}
-					log.Printf("[chat] Fallback model %s also failed: %v", fb, err)
-				}
-			}
-			if err != nil {
-				sendWSError(conn, "AI streaming failed: "+err.Error())
-				break
-			}
-		}
-
-		// If no tool calls, we're done
-		if finishReason != "tool_calls" || len(accumulatedToolCalls) == 0 {
-			// Save assistant message
-			content := fullContent.String()
+	// Save intermediate tool messages from engine history.
+	// The engine returns the full message history including assistant messages
+	// with tool_calls and tool result messages. We need to save those that were
+	// generated during this invocation (i.e., beyond what we loaded from DB).
+	// The loaded history length tells us where new messages start.
+	historyLen := len(messages)
+	for i := historyLen; i < len(result.Messages); i++ {
+		msg := result.Messages[i]
+		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
 			_, _ = db.Pool.Exec(ctx,
-				"INSERT INTO messages (conversation_id, role, content, tokens_in, tokens_out, model, source) VALUES ($1, 'assistant', $2, $3, $4, $5, 'web')",
-				*convID, content, tokensIn, tokensOut, req.Model)
-
-			// Auto-title if first exchange
-			var msgCount int
-			db.Pool.QueryRow(ctx,
-				"SELECT COUNT(*) FROM messages WHERE conversation_id = $1", *convID).Scan(&msgCount)
-			if msgCount <= 2 {
-				title := req.Content
-				if len(title) > 80 {
-					title = title[:80] + "..."
-				}
-				db.Pool.Exec(ctx,
-					"UPDATE conversations SET title = $1, updated_at = now() WHERE id = $2",
-					title, *convID)
-			} else {
-				db.Pool.Exec(ctx,
-					"UPDATE conversations SET updated_at = now() WHERE id = $1", *convID)
-			}
-
-			// Send done signal
-			sendWSJSON(conn, "delta", models.StreamDelta{
-				Done:      true,
-				TokensIn:  tokensIn,
-				TokensOut: tokensOut,
-			})
-			break
-		}
-
-		// Merge accumulated tool call deltas into complete tool calls
-		mergedToolCallsJSON := mergeToolCallDeltas(accumulatedToolCalls)
-
-		// Parse and execute tool calls
-		var toolCalls []struct {
-			ID       string          `json:"id"`
-			Type     string          `json:"type"`
-			Function struct {
-				Name      string          `json:"name"`
-				Arguments json.RawMessage `json:"arguments"`
-			} `json:"function"`
-		}
-		if err := json.Unmarshal(mergedToolCallsJSON, &toolCalls); err != nil {
-			sendWSError(conn, "failed to parse tool calls")
-			break
-		}
-
-		// Save assistant message with tool calls
-		assistantContent := fullContent.String()
-		_, _ = db.Pool.Exec(ctx,
-			"INSERT INTO messages (conversation_id, role, content, tool_calls, tokens_in, tokens_out, model, source) VALUES ($1, 'assistant', $2, $3, $4, $5, $6, 'web')",
-			*convID, assistantContent, mergedToolCallsJSON, tokensIn, tokensOut, req.Model)
-
-		// Add assistant message to history
-		messages = append(messages, ai.ChatMessage{
-			Role:      "assistant",
-			Content:   assistantContent,
-			ToolCalls: mergedToolCallsJSON,
-		})
-
-		// Execute each tool call
-		for _, tc := range toolCalls {
-			// Send tool call info to frontend
-			sendWSJSON(conn, "tool_call", fiber.Map{
-				"id":        tc.ID,
-				"name":      tc.Function.Name,
-				"arguments": string(tc.Function.Arguments),
-			})
-
-			// Execute the tool
-			result := executor.Execute(tc.Function.Name, tc.Function.Arguments)
-
-			// Send tool result to frontend
-			sendWSJSON(conn, "tool_result", fiber.Map{
-				"id":      tc.ID,
-				"name":    result.Name,
-				"content": result.Content,
-				"error":   result.Error,
-			})
-
-			// Add tool result to message history
-			toolContent := result.Content
-			if result.Error != "" {
-				toolContent = "Error: " + result.Error
-			}
-			messages = append(messages, ai.ChatMessage{
-				Role:       "tool",
-				Content:    toolContent,
-				ToolCallID: tc.ID,
-			})
-
-			// Save tool result to DB
-			trJSON, _ := json.Marshal(result)
+				"INSERT INTO messages (conversation_id, role, content, tool_calls, model, source) VALUES ($1, 'assistant', $2, $3, $4, 'web')",
+				*convID, msg.Content, msg.ToolCalls, req.Model)
+		} else if msg.Role == "tool" {
 			_, _ = db.Pool.Exec(ctx,
-				"INSERT INTO messages (conversation_id, role, content, tool_results, tool_call_id, source) VALUES ($1, 'tool', $2, $3, $4, 'web')",
-				*convID, toolContent, trJSON, tc.ID)
+				"INSERT INTO messages (conversation_id, role, content, tool_call_id, source) VALUES ($1, 'tool', $2, $3, 'web')",
+				*convID, msg.Content, msg.ToolCallID)
 		}
+	}
 
-		// Loop continues - AI will process tool results and may call more tools or respond
-		_ = round
+	// Save final assistant response to DB
+	_, _ = db.Pool.Exec(ctx,
+		"INSERT INTO messages (conversation_id, role, content, source, tokens_in, tokens_out, model) VALUES ($1, 'assistant', $2, 'web', $3, $4, $5)",
+		*convID, result.Content, result.TokensIn, result.TokensOut, req.Model)
+
+	// Auto-title if first exchange
+	var msgCount int
+	db.Pool.QueryRow(ctx,
+		"SELECT COUNT(*) FROM messages WHERE conversation_id = $1", *convID).Scan(&msgCount)
+	if msgCount <= 2 {
+		title := req.Content
+		if len(title) > 80 {
+			title = title[:80] + "..."
+		}
+		db.Pool.Exec(ctx,
+			"UPDATE conversations SET title = $1, updated_at = now() WHERE id = $2",
+			title, *convID)
+	} else {
+		db.Pool.Exec(ctx,
+			"UPDATE conversations SET updated_at = now() WHERE id = $1", *convID)
 	}
 }
 
-// mergeToolCallDeltas merges streaming tool call deltas into complete tool calls
-func mergeToolCallDeltas(deltas []json.RawMessage) json.RawMessage {
-	if len(deltas) == 1 {
-		return deltas[0]
-	}
-
-	type toolCallDelta struct {
-		Index    int    `json:"index"`
-		ID       string `json:"id,omitempty"`
-		Type     string `json:"type,omitempty"`
-		Function struct {
-			Name      string `json:"name,omitempty"`
-			Arguments string `json:"arguments,omitempty"`
-		} `json:"function,omitempty"`
-	}
-
-	type mergedTC struct {
-		ID       string          `json:"id"`
-		Type     string          `json:"type"`
-		Function struct {
-			Name      string          `json:"name"`
-			Arguments json.RawMessage `json:"arguments"`
-		} `json:"function"`
-	}
-
-	type accumEntry struct {
-		ID        string
-		Type      string
-		Name      string
-		Arguments strings.Builder
-	}
-
-	accumulated := make(map[int]*accumEntry)
-
-	for _, deltaRaw := range deltas {
-		var deltaList []toolCallDelta
-		if err := json.Unmarshal(deltaRaw, &deltaList); err != nil {
-			var single toolCallDelta
-			if err2 := json.Unmarshal(deltaRaw, &single); err2 == nil {
-				deltaList = []toolCallDelta{single}
-			} else {
-				continue
-			}
-		}
-		for _, d := range deltaList {
-			entry, ok := accumulated[d.Index]
-			if !ok {
-				entry = &accumEntry{}
-				accumulated[d.Index] = entry
-			}
-			if d.ID != "" {
-				entry.ID = d.ID
-			}
-			if d.Type != "" {
-				entry.Type = d.Type
-			}
-			if d.Function.Name != "" {
-				entry.Name = d.Function.Name
-			}
-			entry.Arguments.WriteString(d.Function.Arguments)
-		}
-	}
-
-	var result []mergedTC
-	for i := 0; i < len(accumulated); i++ {
-		entry, ok := accumulated[i]
-		if !ok {
-			continue
-		}
-		tc := mergedTC{
-			ID:   entry.ID,
-			Type: entry.Type,
-		}
-		tc.Function.Name = entry.Name
-		tc.Function.Arguments = json.RawMessage(entry.Arguments.String())
-		result = append(result, tc)
-	}
-
-	out, _ := json.Marshal(result)
-	return out
-}
-
-// convertToolDefs converts tools.ToolDef to ai.Tool
-func convertToolDefs(defs []tools.ToolDef) []ai.Tool {
+// allToolsAsAI converts tools.AllTools ([]tools.ToolDef) to []ai.Tool.
+func allToolsAsAI() []ai.Tool {
 	var result []ai.Tool
-	for _, d := range defs {
+	for _, d := range tools.AllTools {
 		result = append(result, ai.Tool{
 			Type: d.Type,
 			Function: ai.ToolFunction{
