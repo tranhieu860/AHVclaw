@@ -68,6 +68,10 @@ class ApiClient {
     return this.fetchJSON(`/api/conversations/${conversationId}`);
   }
 
+  async deleteConversation(conversationId: string) {
+    return this.fetchJSON(`/api/conversations/${conversationId}`, { method: 'DELETE' });
+  }
+
   async getModels() {
     return this.fetchJSON('/api/models');
   }

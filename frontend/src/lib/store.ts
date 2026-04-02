@@ -34,6 +34,7 @@ interface AppStore {
   conversations: Conversation[];
   setConversations: (convos: Conversation[]) => void;
   loadConversations: () => Promise<void>;
+  removeConversation: (id: string) => void;
   activeConversationId: string | null;
   setActiveConversationId: (id: string | null) => void;
   messages: Message[];
@@ -72,6 +73,12 @@ export const useStore = create<AppStore>((set) => ({
       console.error('Failed to load conversations:', err);
     }
   },
+
+  removeConversation: (id) => set((s) => ({
+    conversations: s.conversations.filter(c => c.id !== id),
+    activeConversationId: s.activeConversationId === id ? null : s.activeConversationId,
+    messages: s.activeConversationId === id ? [] : s.messages,
+  })),
 
   activeConversationId: null,
   setActiveConversationId: (id) => set({ activeConversationId: id }),

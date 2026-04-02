@@ -61,6 +61,7 @@ export default function SettingsPage() {
   const [defaultModel, setDefaultModel] = useState('');
   const [theme, setTheme] = useState('dark');
   const [language, setLanguage] = useState('vi');
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3101';
   const headers = () => ({
@@ -80,9 +81,10 @@ export default function SettingsPage() {
       if (res.ok) {
         const data = await res.json();
         setSettings(data);
-        setDefaultModel(data.default_model || '');
-        setTheme(data.theme || 'dark');
-        setLanguage(data.language || 'en');
+        const s = (typeof data.settings === 'object' && data.settings) ? data.settings : {};
+        setDefaultModel(s.default_model || '');
+        setTheme(s.theme || 'dark');
+        setLanguage(s.language || 'vi');
       }
     } catch {}
   };
@@ -125,8 +127,10 @@ export default function SettingsPage() {
       await fetch(`${baseUrl}/api/settings`, {
         method: 'PUT',
         headers: headers(),
-        body: JSON.stringify({ default_model: defaultModel, theme, language }),
+        body: JSON.stringify({ settings: JSON.stringify({ default_model: defaultModel, theme, language }) }),
       });
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 2000);
     } catch {}
   };
 
@@ -285,6 +289,7 @@ export default function SettingsPage() {
                 <option value="vi">Vietnamese</option>
               </select>
             </div>
+            {saveSuccess && <p className="text-green-400 text-xs mb-2">Đã lưu!</p>}
             <button onClick={savePreferences} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">Lưu tùy chọn</button>
           </div>
         )}

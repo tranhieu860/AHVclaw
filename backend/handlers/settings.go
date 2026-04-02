@@ -16,9 +16,11 @@ func GetSettings(c *fiber.Ctx) error {
 	userID := c.Locals("user_id").(uuid.UUID)
 	var settings string
 	var storageUsed, storageQuota int64
+	var name, email, role string
+	var apiKey *string
 	err := db.Pool.QueryRow(context.Background(),
-		"SELECT settings, storage_used, storage_quota FROM users WHERE id = $1", userID,
-	).Scan(&settings, &storageUsed, &storageQuota)
+		"SELECT COALESCE(settings, '{}'), storage_used, storage_quota, COALESCE(name,''), email, role, api_key FROM users WHERE id = $1", userID,
+	).Scan(&settings, &storageUsed, &storageQuota, &name, &email, &role, &apiKey)
 	if err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "user not found"})
 	}
@@ -26,11 +28,18 @@ func GetSettings(c *fiber.Ctx) error {
 	if err := json.Unmarshal([]byte(settings), &parsed); err != nil {
 		parsed = map[string]interface{}{}
 	}
-	return c.JSON(fiber.Map{
+	result := fiber.Map{
 		"settings":      parsed,
 		"storage_used":  storageUsed,
 		"storage_quota": storageQuota,
-	})
+		"name":          name,
+		"email":         email,
+		"role":          role,
+	}
+	if apiKey != nil {
+		result["api_key"] = *apiKey
+	}
+	return c.JSON(result)
 }
 
 func UpdateSettings(c *fiber.Ctx) error {
@@ -39,11 +48,26 @@ func UpdateSettings(c *fiber.Ctx) error {
 	if err := c.BodyParser(&body); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid request"})
 	}
-	settingsJSON, err := json.Marshal(body)
-	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid settings"})
+
+	// If body contains a "settings" key with a JSON string, parse and use it
+	var settingsJSON []byte
+	if s, ok := body["settings"]; ok {
+		if str, ok := s.(string); ok {
+			// Validate it is valid JSON
+			var parsed interface{}
+			if json.Unmarshal([]byte(str), &parsed) == nil {
+				settingsJSON = []byte(str)
+			} else {
+				settingsJSON, _ = json.Marshal(body)
+			}
+		} else {
+			settingsJSON, _ = json.Marshal(s)
+		}
+	} else {
+		settingsJSON, _ = json.Marshal(body)
 	}
-	_, err = db.Pool.Exec(context.Background(),
+
+	_, err := db.Pool.Exec(context.Background(),
 		"UPDATE users SET settings = $1, updated_at = NOW() WHERE id = $2",
 		string(settingsJSON), userID)
 	if err != nil {

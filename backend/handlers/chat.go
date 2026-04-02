@@ -271,18 +271,21 @@ func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
 		"INSERT INTO messages (conversation_id, role, content, source, tokens_in, tokens_out, model) VALUES ($1, 'assistant', $2, 'web', $3, $4, $5)",
 		*convID, result.Content, result.TokensIn, result.TokensOut, req.Model)
 
-	// Auto-title if first exchange
-	var msgCount int
+	// Auto-title if conversation has no title yet
+	var existingTitle *string
 	db.Pool.QueryRow(ctx,
-		"SELECT COUNT(*) FROM messages WHERE conversation_id = $1", *convID).Scan(&msgCount)
-	if msgCount <= 2 {
+		"SELECT title FROM conversations WHERE id = $1", *convID).Scan(&existingTitle)
+	if existingTitle == nil || *existingTitle == "" {
 		title := req.Content
-		if len(title) > 80 {
-			title = title[:80] + "..."
+		runes := []rune(title)
+		if len(runes) > 60 {
+			title = string(runes[:60]) + "..."
 		}
 		db.Pool.Exec(ctx,
 			"UPDATE conversations SET title = $1, updated_at = now() WHERE id = $2",
 			title, *convID)
+		// Notify client of auto-generated title
+		sendWSJSON(conn, "title_update", map[string]string{"conversation_id": (*convID).String(), "title": title})
 	} else {
 		db.Pool.Exec(ctx,
 			"UPDATE conversations SET updated_at = now() WHERE id = $1", *convID)

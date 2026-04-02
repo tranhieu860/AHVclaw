@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { MessageSquare, Plus, Settings, Server, Puzzle, Bot, LogOut, Radio, Users, Clock } from 'lucide-react';
+import { MessageSquare, Plus, Settings, Server, Puzzle, Bot, LogOut, Radio, Users, Clock, Trash2 } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { ThemeToggle } from './ThemeToggle';
 import { api } from '@/lib/api';
@@ -19,6 +19,7 @@ export function Sidebar({ onNavigate }: SidebarProps) {
     setActiveConversationId,
     setMessages,
     loadConversations,
+    removeConversation,
     user,
     logout,
   } = useStore();
@@ -51,6 +52,17 @@ export function Sidebar({ onNavigate }: SidebarProps) {
   const handleLogout = () => {
     logout();
     router.push('/login');
+  };
+
+  const handleDeleteConversation = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if (!confirm('Xoa cuoc tro chuyen nay?')) return;
+    try {
+      await api.deleteConversation(id);
+      removeConversation(id);
+    } catch (err) {
+      console.error('Failed to delete conversation:', err);
+    }
   };
 
   const filteredConversations = conversations.filter(conv => {
@@ -88,19 +100,30 @@ export function Sidebar({ onNavigate }: SidebarProps) {
 
       <nav className="flex-1 overflow-y-auto p-2 space-y-1 mt-2">
         {filteredConversations.map((conv) => (
-          <button
+          <div
             key={conv.id}
-            onClick={() => handleSelectConversation(conv.id)}
-            className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left truncate transition ${              activeConversationId === conv.id                ? 'bg-zinc-800 text-white'                : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'            }`}
+            className="group relative"
           >
-            <MessageSquare size={14} className="shrink-0" />
-            <span className="truncate">{conv.title || 'New Chat'}</span>
-            {conv.channel && conv.channel !== 'web' && (
-              <span className="text-[9px] px-1 rounded bg-zinc-700 text-zinc-400 ml-1 shrink-0">
-                {conv.channel === 'telegram' ? '🔵 TG' : conv.channel === 'zalo' ? '🟢 ZL' : conv.channel === 'discord' ? '🟣 DC' : conv.channel}
-              </span>
-            )}
-          </button>
+            <button
+              onClick={() => handleSelectConversation(conv.id)}
+              className={`w-full flex items-center gap-2 px-3 py-2 pr-8 rounded-lg text-sm text-left truncate transition ${activeConversationId === conv.id ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'}`}
+            >
+              <MessageSquare size={14} className="shrink-0" />
+              <span className="truncate flex-1">{conv.title || 'New Chat'}</span>
+              {conv.channel && conv.channel !== 'web' && (
+                <span className="text-[9px] px-1 rounded bg-zinc-700 text-zinc-400 ml-1 shrink-0">
+                  {conv.channel}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={(e) => handleDeleteConversation(e, conv.id)}
+              className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-red-600/20 text-zinc-500 hover:text-red-400 transition"
+              title="Xoa"
+            >
+              <Trash2 size={12} />
+            </button>
+          </div>
         ))}
       </nav>
 

@@ -372,8 +372,23 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 		})
 	}
 
-	// Update conversation timestamp
-	db.Pool.Exec(ctx, "UPDATE conversations SET updated_at = now() WHERE id = $1", conv.ID)
+	// Auto-title if conversation has no title yet (use first user message)
+	var currentTitle *string
+	db.Pool.QueryRow(ctx, "SELECT title FROM conversations WHERE id = $1", conv.ID).Scan(&currentTitle)
+	if currentTitle == nil || *currentTitle == "" {
+		title := msg.Text
+		runes := []rune(title)
+		if len(runes) > 50 {
+			title = string(runes[:50]) + "..."
+		}
+		if title != "" {
+			db.Pool.Exec(ctx, "UPDATE conversations SET title = $1, updated_at = now() WHERE id = $2", title, conv.ID)
+		} else {
+			db.Pool.Exec(ctx, "UPDATE conversations SET updated_at = now() WHERE id = $1", conv.ID)
+		}
+	} else {
+		db.Pool.Exec(ctx, "UPDATE conversations SET updated_at = now() WHERE id = $1", conv.ID)
+	}
 }
 
 // findOrCreateContact finds an existing contact by channel identity or creates a new one.
