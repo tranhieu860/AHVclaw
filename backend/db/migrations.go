@@ -332,6 +332,57 @@ var migrations = []string{
 
 	// 030: Add attachments column to messages
 	`ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachments JSONB`,
+
+	// =============================================
+	// Phase 3 Migrations - Scheduled Tasks
+	// =============================================
+
+	// 031: scheduled_tasks
+	`CREATE TABLE IF NOT EXISTS scheduled_tasks (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+		agent_id UUID REFERENCES agents(id),
+		name VARCHAR(255) NOT NULL,
+		description TEXT,
+		prompt TEXT NOT NULL,
+		schedule VARCHAR(100) NOT NULL,
+		schedule_human VARCHAR(255),
+		timezone VARCHAR(50) DEFAULT 'Asia/Ho_Chi_Minh',
+		delivery_channel VARCHAR(20) NOT NULL,
+		delivery_chat_id VARCHAR(255),
+		bot_id UUID REFERENCES bots(id),
+		is_active BOOLEAN DEFAULT true,
+		last_run_at TIMESTAMPTZ,
+		next_run_at TIMESTAMPTZ,
+		run_count INTEGER DEFAULT 0,
+		error_count INTEGER DEFAULT 0,
+		max_retries INTEGER DEFAULT 1,
+		created_at TIMESTAMPTZ DEFAULT now(),
+		updated_at TIMESTAMPTZ DEFAULT now()
+	)`,
+
+	// 032: scheduled_tasks indexes
+	`CREATE INDEX IF NOT EXISTS idx_tasks_user ON scheduled_tasks(user_id, is_active)`,
+	`CREATE INDEX IF NOT EXISTS idx_tasks_next_run ON scheduled_tasks(next_run_at) WHERE is_active = true`,
+
+	// 033: task_runs
+	`CREATE TABLE IF NOT EXISTS task_runs (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		task_id UUID REFERENCES scheduled_tasks(id) ON DELETE CASCADE,
+		status VARCHAR(20) NOT NULL,
+		started_at TIMESTAMPTZ DEFAULT now(),
+		finished_at TIMESTAMPTZ,
+		result TEXT,
+		error TEXT,
+		tokens_in INTEGER DEFAULT 0,
+		tokens_out INTEGER DEFAULT 0,
+		tools_used JSONB DEFAULT '[]',
+		created_at TIMESTAMPTZ DEFAULT now()
+	)`,
+
+	// 034: task_runs index
+	`CREATE INDEX IF NOT EXISTS idx_task_runs_task ON task_runs(task_id, started_at DESC)`,
+
 }
 
 func RunMigrations() error {
