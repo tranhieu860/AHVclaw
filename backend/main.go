@@ -364,6 +364,15 @@ func main() {
 	protected.Get("/uploads/:id", handlers.ServeUpload)
 	protected.Delete("/uploads/:id", handlers.DeleteUpload)
 
+	// Project routes
+	protected.Get("/projects", handlers.ListProjects)
+	protected.Post("/projects", handlers.CreateProject)
+	protected.Get("/projects/:id", handlers.GetProject)
+	protected.Put("/projects/:id", handlers.UpdateProject)
+	protected.Delete("/projects/:id", handlers.DeleteProject)
+	protected.Post("/projects/:id/files", handlers.UploadProjectFile)
+	protected.Delete("/projects/:id/files/:fileId", handlers.DeleteProjectFile)
+
 	// Dev+ routes (admin and dev only)
 	devRoutes := protected.Group("", auth.RequireRole("admin", "dev"))
 	devRoutes.Post("/terminal/exec", handlers.TerminalExec)
