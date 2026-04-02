@@ -7,13 +7,16 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime/debug"
 	"strings"
 
 	"github.com/ahvholding/ahvclaw/ai"
 	authpkg "github.com/ahvholding/ahvclaw/auth"
 	"github.com/ahvholding/ahvclaw/db"
+	"github.com/ahvholding/ahvclaw/embeddings"
 	"github.com/ahvholding/ahvclaw/engine"
 	"github.com/ahvholding/ahvclaw/models"
+	"github.com/ahvholding/ahvclaw/prompts"
 	"github.com/ahvholding/ahvclaw/tools"
 	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
@@ -83,6 +86,13 @@ func WSChat() fiber.Handler {
 }
 
 func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("[PANIC] web-chat handler: %v\nStack: %s", rec, debug.Stack())
+			sendWSError(conn, "Internal error occurred, please try again")
+		}
+	}()
+
 	log.Printf("[web-chat] handleChat called for user %s", userID)
 	var req models.ChatRequest
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -168,7 +178,7 @@ func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
 
 	// Load conversation history
 	rows, err := db.Pool.Query(ctx,
-		"SELECT role, content, tool_calls, tool_call_id FROM messages WHERE conversation_id = $1 ORDER BY created_at DESC LIMIT 30", *convID)
+		"SELECT role, content, tool_calls, tool_call_id FROM messages WHERE conversation_id = $1 ORDER BY created_at DESC LIMIT 50", *convID)
 	if err != nil {
 		sendWSError(conn, "failed to load history")
 		return
@@ -200,6 +210,99 @@ func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
 	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
 		messages[i], messages[j] = messages[j], messages[i]
 	}
+
+	// Build system prompt from centralized default
+	systemPrompt := prompts.DefaultSystemPrompt
+
+	// Load agent config if conversation has an agent
+	var agentID *uuid.UUID
+	var projectID *uuid.UUID
+	_ = db.Pool.QueryRow(ctx,
+		"SELECT current_agent_id, project_id FROM conversations WHERE id = $1", *convID,
+	).Scan(&agentID, &projectID)
+
+	if agentID != nil {
+		var agentPrompt *string
+		db.Pool.QueryRow(ctx,
+			"SELECT system_prompt FROM agents WHERE id = $1", *agentID,
+		).Scan(&agentPrompt)
+		if agentPrompt != nil && *agentPrompt != "" {
+			systemPrompt = *agentPrompt
+		}
+	}
+
+	// Load project context if conversation has a project
+	if projectID != nil {
+		var projInstructions *string
+		db.Pool.QueryRow(ctx,
+			"SELECT instructions FROM projects WHERE id = $1", *projectID,
+		).Scan(&projInstructions)
+		if projInstructions != nil && *projInstructions != "" {
+			systemPrompt += "\n\n## Project Instructions:\n" + *projInstructions
+		}
+
+		// Load project files as context
+		pfRows, pfErr := db.Pool.Query(ctx,
+			`SELECT filename, content FROM project_files WHERE project_id = $1 AND content IS NOT NULL AND content != '' LIMIT 5`,
+			*projectID)
+		if pfErr == nil && pfRows != nil {
+			defer pfRows.Close()
+			var projFiles strings.Builder
+			for pfRows.Next() {
+				var fname, fcontent string
+				if pfRows.Scan(&fname, &fcontent) == nil {
+					projFiles.WriteString(fmt.Sprintf("\n### File: %s\n%s\n", fname, fcontent))
+				}
+			}
+			if projFiles.Len() > 0 {
+				systemPrompt += "\n\n## Project Files:" + projFiles.String()
+			}
+		}
+	}
+
+	// Load memories via semantic search with fallback to recent
+	var memoryContext strings.Builder
+	semanticResults, semErr := embeddings.SearchByEmbedding(userID.String(), req.Content, 10)
+	if semErr == nil && len(semanticResults) > 0 {
+		for _, r := range semanticResults {
+			memoryContext.WriteString(fmt.Sprintf("- [%s] %s: %s\n",
+				r["type"], r["key"], r["content"]))
+		}
+	} else {
+		memRows, memErr := db.Pool.Query(ctx,
+			`SELECT type, key, content FROM memories WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 10`,
+			userID)
+		if memErr == nil && memRows != nil {
+			defer memRows.Close()
+			for memRows.Next() {
+				var mType, mKey, mContent string
+				if memRows.Scan(&mType, &mKey, &mContent) == nil {
+					memoryContext.WriteString(fmt.Sprintf("- [%s] %s: %s\n", mType, mKey, mContent))
+				}
+			}
+		}
+	}
+	if memoryContext.Len() > 0 {
+		systemPrompt += "\n\n## Your memories about this user:\n" + memoryContext.String()
+	}
+
+	systemPrompt += prompts.ThinkingInstructions
+
+	// Prepend system message and conversation summary
+	var fullMessages []ai.ChatMessage
+	fullMessages = append(fullMessages, ai.ChatMessage{Role: "system", Content: systemPrompt})
+
+	var summary *string
+	db.Pool.QueryRow(ctx, "SELECT summary FROM conversations WHERE id = $1", *convID).Scan(&summary)
+	if summary != nil && *summary != "" {
+		fullMessages = append(fullMessages, ai.ChatMessage{
+			Role:    "system",
+			Content: "## Previous conversation summary:\n" + *summary,
+		})
+	}
+
+	fullMessages = append(fullMessages, messages...)
+	messages = fullMessages
 
 	// Create executor for user workspace
 	executor := tools.NewExecutor(fmt.Sprintf("/data/ahvclaw/workspaces/%s", userID.String()), userID.String())
@@ -247,22 +350,65 @@ func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
 		return
 	}
 
+	// Parse thinking and send as WS event
+	thinking, cleanResponse := engine.ParseThinking(result.Content)
+	if thinking.Raw != "" {
+		sendWSJSON(conn, "thinking", fiber.Map{
+			"content": thinking.Raw,
+			"level":   thinking.Level,
+		})
+	}
+
+	// Run verification on medium/complex responses
+	verification := engine.VerifyResponse(thinking, cleanResponse, nil, nil)
+	if !verification.Passed {
+		log.Printf("[web-chat] verification failed (%s): %s", verification.FailReason, verification.FixPrompt)
+		// Retry once with fix prompt
+		retryMessages := append(result.Messages, ai.ChatMessage{
+			Role:    "user",
+			Content: fmt.Sprintf(prompts.VerificationRetryPrompt, verification.FixPrompt),
+		})
+		retryResult, retryErr := engine.ProcessChat(ctx, engine.ChatConfig{
+			AIRouter:         Router,
+			Model:            req.Model,
+			FallbackModels:   fallbackStr,
+			Messages:         retryMessages,
+			Tools:            allToolsAsAI(),
+			Executor:         executor,
+			MaxToolRounds:    5,
+			MaxContextTokens: 8000,
+			OnDelta: func(content string) {
+				sendWSJSON(conn, "delta", models.StreamDelta{Content: content})
+			},
+			OnDone: func(tokensIn, tokensOut int) {
+				sendWSJSON(conn, "delta", models.StreamDelta{Done: true, TokensIn: tokensIn, TokensOut: tokensOut})
+			},
+		})
+		if retryErr == nil && retryResult.Content != "" {
+			_, retryClean := engine.ParseThinking(retryResult.Content)
+			cleanResponse = retryClean
+			result = retryResult
+		}
+	}
+
+	// Use clean response (without <thinking> tags)
+	result.Content = cleanResponse
+
 	// Save intermediate tool messages from engine history.
-	// The engine returns the full message history including assistant messages
-	// with tool_calls and tool result messages. We need to save those that were
-	// generated during this invocation (i.e., beyond what we loaded from DB).
-	// The loaded history length tells us where new messages start.
 	historyLen := len(messages)
+	newMsgCount := 0
 	for i := historyLen; i < len(result.Messages); i++ {
 		msg := result.Messages[i]
 		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
 			_, _ = db.Pool.Exec(ctx,
 				"INSERT INTO messages (conversation_id, role, content, tool_calls, model, source) VALUES ($1, 'assistant', $2, $3, $4, 'web')",
 				*convID, msg.Content, msg.ToolCalls, req.Model)
+			newMsgCount++
 		} else if msg.Role == "tool" {
 			_, _ = db.Pool.Exec(ctx,
 				"INSERT INTO messages (conversation_id, role, content, tool_call_id, source) VALUES ($1, 'tool', $2, $3, 'web')",
 				*convID, msg.Content, msg.ToolCallID)
+			newMsgCount++
 		}
 	}
 
@@ -270,6 +416,14 @@ func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
 	_, _ = db.Pool.Exec(ctx,
 		"INSERT INTO messages (conversation_id, role, content, source, tokens_in, tokens_out, model) VALUES ($1, 'assistant', $2, 'web', $3, $4, $5)",
 		*convID, result.Content, result.TokensIn, result.TokensOut, req.Model)
+	newMsgCount += 2 // +1 for user message saved earlier, +1 for assistant
+
+	// Update message count and trigger summarization
+	var msgCount int
+	db.Pool.QueryRow(ctx,
+		"UPDATE conversations SET message_count = message_count + $1, updated_at = now() WHERE id = $2 RETURNING message_count",
+		newMsgCount, *convID).Scan(&msgCount)
+	engine.CheckAndSummarize(ctx, *convID, msgCount, Router, req.Model)
 
 	// Auto-title if conversation has no title yet
 	var existingTitle *string
