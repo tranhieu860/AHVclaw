@@ -75,6 +75,7 @@ func (a *Adapter) Start() error {
 		{Command: "skills", Description: "Xem danh sách skill"},
 		{Command: "memory", Description: "Xem memory đã lưu"},
 		{Command: "tasks", Description: "Quản lý scheduled tasks"},
+		{Command: "projects", Description: "Chọn dự án làm việc"},
 		{Command: "status", Description: "Trạng thái hiện tại"},
 	}
 	cmdConfig := tgbotapi.NewSetMyCommands(commands...)
@@ -524,6 +525,58 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(kbRows...)
 		a.sendTextWithKeyboard(chatID, "Scheduled Tasks:", keyboard)
 
+	case "projects":
+		userID, err := a.getBotUserID(ctx)
+		if err != nil {
+			a.sendText(chatID, "Lỗi nội bộ.")
+			return
+		}
+		rows, err := db.Pool.Query(ctx,
+			`SELECT id, name, icon FROM projects
+			 WHERE user_id=$1 AND is_archived=false
+			 ORDER BY name ASC LIMIT 10`,
+			userID,
+		)
+		if err != nil {
+			a.sendText(chatID, "Không thể lấy danh sách dự án.")
+			return
+		}
+		defer rows.Close()
+
+		type projectRow struct {
+			id   string
+			name string
+			icon string
+		}
+		var projectList []projectRow
+		for rows.Next() {
+			var pid uuid.UUID
+			var name, icon string
+			if rows.Scan(&pid, &name, &icon) == nil {
+				projectList = append(projectList, projectRow{id: pid.String(), name: name, icon: icon})
+			}
+		}
+
+		var kbRows [][]tgbotapi.InlineKeyboardButton
+		for _, p := range projectList {
+			label := p.name
+			if p.icon != "" {
+				label = p.icon + " " + label
+			}
+			if len(label) > 40 {
+				label = label[:40] + "..."
+			}
+			kbRows = append(kbRows, tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData(label, "project_select:"+p.id),
+			))
+		}
+		// Add "none" option
+		kbRows = append(kbRows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("\U0001f6ab Không dùng dự án", "project_select:none"),
+		))
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(kbRows...)
+		a.sendTextWithKeyboard(chatID, "\U0001f4c1 Chọn dự án để làm việc:", keyboard)
+
 	case "status":
 		botUUID, err := uuid.Parse(a.botID)
 		if err != nil {
@@ -686,6 +739,43 @@ func (a *Adapter) handleCallbackQuery(cq *tgbotapi.CallbackQuery) {
 		taskUUID, _ := uuid.Parse(taskIDStr)
 		_, _ = db.Pool.Exec(ctx, "DELETE FROM scheduled_tasks WHERE id=$1", taskUUID)
 		a.sendText(chatID, "Đã xóa task.")
+
+	} else if strings.HasPrefix(data, "project_select:") {
+		projectIDStr := strings.TrimPrefix(data, "project_select:")
+		if projectIDStr == "none" {
+			tag, err := db.Pool.Exec(ctx,
+				`UPDATE conversations SET project_id=NULL
+				 WHERE bot_id=$1 AND channel_chat_id=$2 AND status='active'`,
+				botUUID, chatIDStr,
+			)
+			if err != nil || tag.RowsAffected() == 0 {
+				a.sendText(chatID, "Không thể cập nhật dự án.")
+				return
+			}
+			a.sendText(chatID, "Đã bỏ chọn dự án. Cuộc trò chuyện không gắn với dự án nào.")
+		} else {
+			projectUUID, err := uuid.Parse(projectIDStr)
+			if err != nil {
+				a.sendText(chatID, "Dự án không hợp lệ.")
+				return
+			}
+			tag, err := db.Pool.Exec(ctx,
+				`UPDATE conversations SET project_id=$1
+				 WHERE bot_id=$2 AND channel_chat_id=$3 AND status='active'`,
+				projectUUID, botUUID, chatIDStr,
+			)
+			if err != nil || tag.RowsAffected() == 0 {
+				a.sendText(chatID, "Không thể cập nhật dự án.")
+				return
+			}
+			// Get project name for confirmation
+			var projectName string
+			_ = db.Pool.QueryRow(ctx, `SELECT name FROM projects WHERE id=$1`, projectUUID).Scan(&projectName)
+			if projectName == "" {
+				projectName = projectIDStr
+			}
+			a.sendText(chatID, fmt.Sprintf("\U0001f4c1 Đã chọn dự án: %s", projectName))
+		}
 	}
 }
 
