@@ -528,7 +528,7 @@ func (r *Router) buildMessageHistory(ctx context.Context, convID uuid.UUID, syst
 	rows, err := db.Pool.Query(ctx,
 		`SELECT role, content, tool_calls, COALESCE(tool_call_id, '')
 		 FROM messages
-		 WHERE conversation_id = $1
+		 WHERE conversation_id =  AND role IN ('user', 'assistant')
 		 ORDER BY created_at DESC
 		 LIMIT 20`,
 		convID)
@@ -557,7 +557,8 @@ func (r *Router) buildMessageHistory(ctx context.Context, convID uuid.UUID, syst
 			history = append(history, ai.ChatMessage{Role: "user", Content: text})
 		} else if role == "assistant" {
 			msg := ai.ChatMessage{Role: "assistant", Content: text}
-			if toolCallsRaw != nil {
+			// Skip tool_calls from history - engine handles tool calls within current turn only
+			if false && toolCallsRaw != nil {
 				msg.ToolCalls = *toolCallsRaw
 			}
 			history = append(history, msg)
