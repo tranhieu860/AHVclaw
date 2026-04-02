@@ -259,7 +259,7 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 	cmd := msg.Command()
 	switch cmd {
 	case "start":
-		a.sendText(chatID, "Xin chao! Toi la tro ly AI cua ban.\n\nDung /help de xem danh sach lenh.")
+		a.sendText(chatID, "Xin chào! Tôi là trợ lý AI của bạn.\n\nDùng /help để xem danh sách lệnh.")
 
 	case "new":
 		botUUID, err := uuid.Parse(a.botID)
@@ -330,15 +330,15 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 		a.sendTextWithKeyboard(chatID, "Chọn model AI:", keyboard)
 
 	case "help":
-		help := "Danh sach lenh:\n\n" +
-			"/start - Bat dau tro chuyen\n" +
-			"/new - Tao cuoc tro chuyen moi\n" +
+		help := "Danh sách lệnh:\n\n" +
+			"/start - Bắt đầu trò chuyện\n" +
+			"/new - Tạo cuộc trò chuyện mới\n" +
 			"/models - Chon model AI\n" +
 			"/agents - Chon agent\n" +
-			"/skills - Xem danh sach skill\n" +
-			"/memory - Xem memory da luu\n" +
-			"/tasks - Quan ly scheduled tasks\n" +
-			"/status - Trang thai hien tai\n" +
+			"/skills - Xem danh sách skill\n" +
+			"/memory - Xem memory đã lưu\n" +
+			"/tasks - Quản lý scheduled tasks\n" +
+			"/status - Trạng thái hiện tại\n" +
 			"/help - Hướng dẫn sử dụng"
 		a.sendText(chatID, help)
 
@@ -412,7 +412,7 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 		defer rows.Close()
 
 		var sb strings.Builder
-		sb.WriteString("Danh sach skill cua ban:\n\n")
+		sb.WriteString("Danh sách skill của bạn:\n\n")
 		count := 0
 		for rows.Next() {
 			var name string
@@ -451,7 +451,7 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 		defer rows.Close()
 
 		var sb strings.Builder
-		sb.WriteString("Memory da luu:\n\n")
+		sb.WriteString("Memory đã lưu:\n\n")
 		count := 0
 		for rows.Next() {
 			var key, value string
@@ -560,7 +560,7 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 			agentStr = *agentName
 		}
 
-		status := fmt.Sprintf("Trang thai hien tai:\n\nModel: %s\nAgent: %s\nTin nhan: %d",
+		status := fmt.Sprintf("Trạng thái hiện tại:\n\nModel: %s\nAgent: %s\nTin nhắn: %d",
 			modelStr, agentStr, msgCount)
 		a.sendText(chatID, status)
 	}
@@ -689,6 +689,62 @@ func (a *Adapter) handleCallbackQuery(cq *tgbotapi.CallbackQuery) {
 	}
 }
 
+// checkWhitelist checks if a user is allowed to use this bot.
+// Returns true if the user is blocked (not whitelisted).
+func (a *Adapter) checkWhitelist(chatID int64, channelUserID string, from *tgbotapi.User) bool {
+	ctx := context.Background()
+	botUUID, err := uuid.Parse(a.botID)
+	if err != nil {
+		return false
+	}
+
+	var accessSettingsRaw *json.RawMessage
+	err = db.Pool.QueryRow(ctx,
+		`SELECT access_settings FROM bots WHERE id = $1 AND is_active = true`,
+		botUUID,
+	).Scan(&accessSettingsRaw)
+	if err != nil || accessSettingsRaw == nil {
+		return false
+	}
+
+	var accessSettings struct {
+		WhitelistEnabled bool     `json:"whitelist_enabled"`
+		AllowedUserIDs   []string `json:"allowed_user_ids"`
+		AllowAll         bool     `json:"allow_all"`
+	}
+	if json.Unmarshal(*accessSettingsRaw, &accessSettings) != nil {
+		return false
+	}
+
+	if !accessSettings.WhitelistEnabled || accessSettings.AllowAll {
+		return false
+	}
+
+	for _, uid := range accessSettings.AllowedUserIDs {
+		if uid == channelUserID {
+			return false
+		}
+	}
+
+	// User not in whitelist - send their ID
+	displayName := ""
+	if from != nil {
+		displayName = from.FirstName
+		if from.LastName != "" {
+			displayName += " " + from.LastName
+		}
+	}
+
+	replyText := fmt.Sprintf("\u26a0\ufe0f B\u1ea1n ch\u01b0a \u0111\u01b0\u1ee3c ph\u00e9p s\u1eed d\u1ee5ng bot n\u00e0y.\n\n\U0001f4cb ID c\u1ee7a b\u1ea1n: %s\n\nG\u1eddi ID n\u00e0y cho ch\u1ee7 bot \u0111\u1ec3 \u0111\u01b0\u1ee3c th\u00eam v\u00e0o danh s\u00e1ch cho ph\u00e9p.", channelUserID)
+	if displayName != "" {
+		replyText = fmt.Sprintf("\u26a0\ufe0f Xin ch\u00e0o %s, b\u1ea1n ch\u01b0a \u0111\u01b0\u1ee3c ph\u00e9p s\u1eed d\u1ee5ng bot n\u00e0y.\n\n\U0001f4cb ID c\u1ee7a b\u1ea1n: %s\n\nG\u1eddi ID n\u00e0y cho ch\u1ee7 bot \u0111\u1ec3 \u0111\u01b0\u1ee3c th\u00eam v\u00e0o danh s\u00e1ch cho ph\u00e9p.", displayName, channelUserID)
+	}
+
+	a.sendText(chatID, replyText)
+	log.Printf("[telegram] user %s not in whitelist for bot %s", channelUserID, a.botID)
+	return true
+}
+
 // processUpdate handles a single Telegram update.
 func (a *Adapter) processUpdate(update tgbotapi.Update) {
 	// Handle callback queries (inline keyboard responses)
@@ -702,6 +758,12 @@ func (a *Adapter) processUpdate(update tgbotapi.Update) {
 	}
 
 	msg := update.Message
+
+	// Check whitelist before processing any message (including commands)
+	userIDStr := strconv.FormatInt(msg.From.ID, 10)
+	if blocked := a.checkWhitelist(msg.Chat.ID, userIDStr, msg.From); blocked {
+		return
+	}
 
 	// Handle slash commands before routing to AI
 	if msg.IsCommand() {

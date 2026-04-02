@@ -74,7 +74,13 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 					}
 				}
 				if !allowed {
-					log.Printf("[router] user %s not in whitelist for bot %s, ignoring", msg.ChannelUserID, msg.BotID)
+					log.Printf("[router] user %s not in whitelist for bot %s", msg.ChannelUserID, msg.BotID)
+					// Send their user ID so bot owner can add them
+					replyText := fmt.Sprintf("⚠️ Bạn chưa được phép sử dụng bot này.\n\n📋 ID của bạn: %s\n\nGời ID này cho chủ bot để được thêm vào danh sách cho phép.", msg.ChannelUserID)
+					if msg.DisplayName != "" {
+						replyText = fmt.Sprintf("⚠️ Xin chào %s, bạn chưa được phép sử dụng bot này.\n\n📋 ID của bạn: %s\n\nGời ID này cho chủ bot để được thêm vào danh sách cho phép.", msg.DisplayName, msg.ChannelUserID)
+					}
+					adapter.SendMessage(msg.ChatID, replyText)
 					return
 				}
 			}
