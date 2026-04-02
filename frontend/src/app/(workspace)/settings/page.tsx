@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Settings, User, Palette, HardDrive, Shield, Cpu, Plus, Trash2, Copy, Eye, EyeOff, Check } from 'lucide-react';
 import { ModelSearch } from '@/components/ModelSearch';
+import { useStore } from '@/lib/store';
 
 interface Provider {
   id: string;
@@ -16,7 +17,14 @@ interface StorageInfo {
   quota: number;
 }
 
-const tabs = [
+interface AdminUser {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+}
+
+const baseTabsConfig = [
   { id: 'profile', label: 'Profile', icon: User },
   { id: 'preferences', label: 'Preferences', icon: Palette },
   { id: 'storage', label: 'Storage', icon: HardDrive },
@@ -24,15 +32,19 @@ const tabs = [
   { id: 'providers', label: 'Model Providers', icon: Cpu },
 ] as const;
 
-type TabId = typeof tabs[number]['id'];
+type BaseTabId = typeof baseTabsConfig[number]['id'];
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<TabId>('profile');
+  const { user } = useStore();
+  const [activeTab, setActiveTab] = useState<BaseTabId | 'admin'>('profile');
   const [settings, setSettings] = useState<Record<string, string | undefined>>({});
   const [storage, setStorage] = useState<StorageInfo | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [showApiKey, setShowApiKey] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  // Admin state
+  const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
 
   // Security form
   const [oldPw, setOldPw] = useState('');
@@ -55,6 +67,12 @@ export default function SettingsPage() {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
   });
+
+  // Build tabs array dynamically
+  const tabs = [
+    ...baseTabsConfig,
+    ...(user?.role === 'admin' ? [{ id: 'admin' as const, label: 'Admin', icon: Shield }] : []),
+  ];
 
   const loadSettings = async () => {
     try {
@@ -83,11 +101,24 @@ export default function SettingsPage() {
     } catch {}
   };
 
+  const loadAdminUsers = async () => {
+    try {
+      const res = await fetch(`${baseUrl}/api/admin/users`, { headers: headers() });
+      if (res.ok) setAdminUsers(await res.json());
+    } catch {}
+  };
+
   useEffect(() => {
     loadSettings();
     loadStorage();
     loadProviders();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'admin') {
+      loadAdminUsers();
+    }
+  }, [activeTab]);
 
   const savePreferences = async () => {
     try {
@@ -145,6 +176,25 @@ export default function SettingsPage() {
     } catch {}
   };
 
+  const updateUserRole = async (id: string, role: string) => {
+    try {
+      await fetch(`${baseUrl}/api/admin/users/${id}/role`, {
+        method: 'PUT',
+        headers: headers(),
+        body: JSON.stringify({ role }),
+      });
+      loadAdminUsers();
+    } catch {}
+  };
+
+  const deleteUser = async (id: string) => {
+    if (!confirm('Xóa user này?')) return;
+    try {
+      await fetch(`${baseUrl}/api/admin/users/${id}`, { method: 'DELETE', headers: headers() });
+      loadAdminUsers();
+    } catch {}
+  };
+
   const copyApiKey = () => {
     if (settings.api_key) {
       navigator.clipboard.writeText(settings.api_key);
@@ -172,7 +222,7 @@ export default function SettingsPage() {
         {tabs.map(tab => {
           const Icon = tab.icon;
           return (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+            <button key={tab.id} onClick={() => setActiveTab(tab.id as any)}
               className={`flex items-center gap-1.5 px-3 py-2 text-sm rounded-t transition ${
                 activeTab === tab.id ? 'text-white border-b-2 border-blue-500' : 'text-zinc-500 hover:text-zinc-300'
               }`}>
@@ -309,6 +359,44 @@ export default function SettingsPage() {
               {providers.length === 0 && (
                 <p className="text-zinc-500 text-sm text-center py-4">No custom providers configured.</p>
               )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'admin' && (
+          <div className="space-y-4">
+            <h3 className="text-white font-medium">User Management</h3>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-zinc-800 text-zinc-500 text-xs">
+                    <th className="text-left px-4 py-3">Name</th>
+                    <th className="text-left px-4 py-3">Email</th>
+                    <th className="text-left px-4 py-3">Role</th>
+                    <th className="text-left px-4 py-3 w-24">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adminUsers.map(u => (
+                    <tr key={u.id} className="border-b border-zinc-800/50">
+                      <td className="px-4 py-3 text-white">{u.name}</td>
+                      <td className="px-4 py-3 text-zinc-400">{u.email}</td>
+                      <td className="px-4 py-3">
+                        <select value={u.role} onChange={e => updateUserRole(u.id, e.target.value)}
+                          className="bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-700">
+                          <option value="user">User</option>
+                          <option value="dev">Dev</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                      </td>
+                      <td className="px-4 py-3">
+                        <button onClick={() => deleteUser(u.id)} disabled={u.id === user?.id}
+                          className="text-red-400 hover:text-red-300 disabled:opacity-30 text-xs">Delete</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
