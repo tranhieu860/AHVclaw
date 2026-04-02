@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/ahvholding/ahvclaw/channels"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -60,22 +61,53 @@ func (a *Adapter) Start() error {
 	a.api = bot
 	log.Printf("[telegram] bot %s authorized as @%s", a.botID, bot.Self.UserName)
 
-	// Long polling mode
-	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 30
-
-	updates := a.api.GetUpdatesChan(u)
-
 	go func() {
+		backoff := 1 * time.Second
+		maxBackoff := 60 * time.Second
+
 		for {
+			u := tgbotapi.NewUpdate(0)
+			u.Timeout = 30
+			updates := a.api.GetUpdatesChan(u)
+
+			// Process updates
+			running := true
+			for running {
+				select {
+				case <-a.stopCh:
+					a.api.StopReceivingUpdates()
+					log.Printf("[telegram] bot %s stopped", a.botID)
+					return
+				case update, ok := <-updates:
+					if !ok {
+						running = false // channel closed, need reconnect
+						break
+					}
+					backoff = 1 * time.Second // reset on success
+					a.processUpdate(update)
+				}
+			}
+
+			// Reconnect with backoff
+			log.Printf("[telegram] bot %s disconnected, reconnecting in %v", a.botID, backoff)
 			select {
 			case <-a.stopCh:
-				a.api.StopReceivingUpdates()
-				log.Printf("[telegram] bot %s polling stopped", a.botID)
 				return
-			case update := <-updates:
-				a.processUpdate(update)
+			case <-time.After(backoff):
 			}
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+
+			// Recreate bot API
+			bot, err := tgbotapi.NewBotAPI(a.config.BotToken)
+			if err != nil {
+				log.Printf("[telegram] bot %s reconnect failed: %v", a.botID, err)
+				continue
+			}
+			a.api = bot
+			log.Printf("[telegram] bot %s reconnected as @%s", a.botID, bot.Self.UserName)
 		}
 	}()
 
