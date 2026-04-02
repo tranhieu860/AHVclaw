@@ -48,8 +48,8 @@ func (a *Adapter) ValidateConfig() error {
 		return fmt.Errorf("access_token is required")
 	}
 	return nil
-
 }
+
 func (a *Adapter) Start() error {
 	log.Printf("[zalo] bot %s started (webhook mode)", a.botID)
 	return nil
@@ -94,7 +94,7 @@ func (a *Adapter) SendMessage(chatID string, text string) error {
 	}
 
 	var result struct {
-		Error  int    `json:"error"`
+		Error   int    `json:"error"`
 		Message string `json:"message"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err == nil && result.Error != 0 {
@@ -154,68 +154,155 @@ func (a *Adapter) GetProfile(channelUserID string) (*channels.ContactProfile, er
 }
 
 // HandleWebhook processes an incoming Zalo webhook event.
+// Supports both old Zalo OA format and v3 API event format.
 func (a *Adapter) HandleWebhook(body []byte) error {
-	var event struct {
-		AppID     string `json:"app_id"`
-		EventName string `json:"event_name"`
-		Timestamp string `json:"timestamp"`
-		Sender    struct {
-			ID string `json:"id"`
-		} `json:"sender"`
-		Recipient struct {
-			ID string `json:"id"`
-		} `json:"recipient"`
-		Message struct {
-			MsgID       string `json:"msg_id"`
-			Text        string `json:"text"`
-			Attachments []struct {
-				Type    string `json:"type"`
-				Payload struct {
-					URL       string `json:"url"`
-					Thumbnail string `json:"thumbnail"`
-				} `json:"payload"`
-			} `json:"attachments"`
-		} `json:"message"`
-	}
-
-	if err := json.Unmarshal(body, &event); err != nil {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(body, &raw); err != nil {
 		return fmt.Errorf("parse webhook event: %w", err)
 	}
 
-	// Only handle message events
-	switch event.EventName {
-	case "user_send_text", "user_send_image", "user_send_file", "user_send_audio",
-		"user_send_video", "user_send_sticker", "user_send_gif", "user_send_location":
-		// Process these events
+	eventNameVal, ok := raw["event_name"]
+	if !ok {
+		return fmt.Errorf("missing event_name in webhook")
+	}
+	eventName, ok := eventNameVal.(string)
+	if !ok {
+		return fmt.Errorf("event_name is not a string")
+	}
+
+	log.Printf("[zalo] received event: %s", eventName)
+
+	var senderID, displayName, text, messageID, chatID string
+	var files []channels.InboundFile
+
+	switch eventName {
+	// ---- v3 format ----
+	case "message.text.received", "message.image.received", "message.file.received",
+		"message.video.received", "message.audio.received", "message.sticker.received":
+
+		msgRaw, ok := raw["message"].(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("v3 event missing message object")
+		}
+
+		if from, ok := msgRaw["from"].(map[string]interface{}); ok {
+			if id, ok := from["id"].(string); ok {
+				senderID = id
+			}
+			if dn, ok := from["display_name"].(string); ok {
+				displayName = dn
+			}
+		}
+
+		if t, ok := msgRaw["text"].(string); ok {
+			text = t
+		}
+		if mid, ok := msgRaw["message_id"].(string); ok {
+			messageID = mid
+		}
+
+		chatID = senderID
+		if chat, ok := msgRaw["chat"].(map[string]interface{}); ok {
+			if cid, ok := chat["id"].(string); ok {
+				chatID = cid
+			}
+		}
+
+		// Handle v3 image/file attachments
+		if eventName == "message.image.received" {
+			fileEntry := channels.InboundFile{MimeType: "image/jpeg"}
+			if u, ok := msgRaw["url"].(string); ok {
+				fileEntry.URL = u
+			} else if u, ok := msgRaw["thumb"].(string); ok {
+				fileEntry.URL = u
+			}
+			if fileEntry.URL != "" {
+				files = append(files, fileEntry)
+			}
+		}
+		if eventName == "message.file.received" {
+			fileEntry := channels.InboundFile{MimeType: "application/octet-stream"}
+			if u, ok := msgRaw["url"].(string); ok {
+				fileEntry.URL = u
+			}
+			if fn, ok := msgRaw["file_name"].(string); ok {
+				fileEntry.Filename = fn
+			}
+			if fileEntry.URL != "" {
+				files = append(files, fileEntry)
+			}
+		}
+
+	// ---- old format ----
+	case "user_send_text", "user_send_image", "user_send_file",
+		"user_send_audio", "user_send_video", "user_send_sticker",
+		"user_send_gif", "user_send_location":
+
+		if sender, ok := raw["sender"].(map[string]interface{}); ok {
+			if id, ok := sender["id"].(string); ok {
+				senderID = id
+			}
+		}
+
+		if msgRaw, ok := raw["message"].(map[string]interface{}); ok {
+			if t, ok := msgRaw["text"].(string); ok {
+				text = t
+			}
+			if mid, ok := msgRaw["msg_id"].(string); ok {
+				messageID = mid
+			}
+			// Old format attachments
+			if atts, ok := msgRaw["attachments"].([]interface{}); ok {
+				for _, attRaw := range atts {
+					att, ok := attRaw.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					mimeType := "application/octet-stream"
+					if attType, ok := att["type"].(string); ok {
+						switch attType {
+						case "image":
+							mimeType = "image/jpeg"
+						case "video":
+							mimeType = "video/mp4"
+						case "audio":
+							mimeType = "audio/mpeg"
+						}
+					}
+					if payload, ok := att["payload"].(map[string]interface{}); ok {
+						fileEntry := channels.InboundFile{MimeType: mimeType}
+						if u, ok := payload["url"].(string); ok {
+							fileEntry.URL = u
+						} else if u, ok := payload["thumbnail"].(string); ok {
+							fileEntry.URL = u
+						}
+						if fileEntry.URL != "" {
+							files = append(files, fileEntry)
+						}
+					}
+				}
+			}
+		}
+		chatID = senderID
+
 	default:
-		log.Printf("[zalo] ignoring event: %s", event.EventName)
+		log.Printf("[zalo] ignoring event: %s", eventName)
 		return nil
+	}
+
+	if senderID == "" {
+		return fmt.Errorf("could not determine sender ID from event %s", eventName)
 	}
 
 	inbound := channels.InboundMessage{
 		BotID:         a.botID,
 		Channel:       "zalo",
-		ChannelUserID: event.Sender.ID,
-		ChatID:        event.Sender.ID, // Zalo uses user ID as chat ID
-		MessageID:     event.Message.MsgID,
-		Text:          event.Message.Text,
-	}
-
-	// Handle attachments
-	for _, att := range event.Message.Attachments {
-		mimeType := "application/octet-stream"
-		switch att.Type {
-		case "image":
-			mimeType = "image/jpeg"
-		case "video":
-			mimeType = "video/mp4"
-		case "audio":
-			mimeType = "audio/mpeg"
-		}
-		inbound.Files = append(inbound.Files, channels.InboundFile{
-			URL:      att.Payload.URL,
-			MimeType: mimeType,
-		})
+		ChannelUserID: senderID,
+		ChatID:        chatID,
+		MessageID:     messageID,
+		Text:          text,
+		DisplayName:   displayName,
+		Files:         files,
 	}
 
 	// Skip empty messages
