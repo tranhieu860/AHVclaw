@@ -30,6 +30,11 @@ interface Bot {
     error_message?: string;
   };
   default_agent_id?: string;
+  access_settings?: {
+    whitelist_enabled?: boolean;
+    allowed_user_ids?: string[];
+    allow_all?: boolean;
+  };
 }
 
 const ALL_TOOLS = [
@@ -178,6 +183,9 @@ export default function BotsPage() {
   const [selectedTools, setSelectedTools] = useState<Set<string>>(new Set(ALL_TOOLS.map(t => t.id)));
   const [webhookSecret, setWebhookSecret] = useState('');
   const [showWebhookBotId, setShowWebhookBotId] = useState<string | null>(null);
+  const [whitelistEnabled, setWhitelistEnabled] = useState(true);
+  const [allowedUserIds, setAllowedUserIds] = useState('');
+  const [allowAll, setAllowAll] = useState(false);
 
   // Edit modal state
   const [editBot, setEditBot] = useState<Bot | null>(null);
@@ -191,6 +199,9 @@ export default function BotsPage() {
   const [editWelcome, setEditWelcome] = useState('');
   const [editError, setEditError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [editWhitelistEnabled, setEditWhitelistEnabled] = useState(true);
+  const [editAllowedUserIds, setEditAllowedUserIds] = useState('');
+  const [editAllowAll, setEditAllowAll] = useState(false);
 
   const generateSecret = useCallback(() => {
     return crypto.randomUUID().replace(/-/g, '');
@@ -259,12 +270,20 @@ export default function BotsPage() {
             : { bot_token: formToken },
           ai_settings: isAllSelected ? {} : { allowed_tools: Array.from(selectedTools) },
           default_agent_id: formAgentId || undefined,
+          access_settings: {
+            whitelist_enabled: whitelistEnabled,
+            allowed_user_ids: allowedUserIds.split(',').map((s: string) => s.trim()).filter(Boolean),
+            allow_all: allowAll,
+          },
         }),
       });
       setShowAdd(false);
       setFormName(''); setFormToken(''); setFormAgentId('');
       setSelectedTools(new Set(allToolIds));
       setWebhookSecret('');
+      setWhitelistEnabled(true);
+      setAllowedUserIds('');
+      setAllowAll(false);
       loadBots();
     } catch {}
   };
@@ -279,6 +298,10 @@ export default function BotsPage() {
     setEditLanguage(bot.response_settings?.language || '');
     setEditWelcome(bot.response_settings?.welcome_message || '');
     setEditError(bot.response_settings?.error_message || '');
+
+    setEditWhitelistEnabled(bot.access_settings?.whitelist_enabled !== false);
+    setEditAllowedUserIds((bot.access_settings?.allowed_user_ids || []).join(', '));
+    setEditAllowAll(bot.access_settings?.allow_all || false);
 
     if (bot.ai_settings?.allowed_tools && bot.ai_settings.allowed_tools.length > 0) {
       setEditTools(new Set(bot.ai_settings.allowed_tools));
@@ -303,6 +326,11 @@ export default function BotsPage() {
             ...(editModel ? { model: editModel } : {}),
             ...(editFallback ? { fallback_models: editFallback } : {}),
             ...(isAllSelected ? {} : { allowed_tools: Array.from(editTools) }),
+          },
+          access_settings: {
+            whitelist_enabled: editWhitelistEnabled,
+            allowed_user_ids: editAllowedUserIds.split(',').map((s: string) => s.trim()).filter(Boolean),
+            allow_all: editAllowAll,
           },
           response_settings: {
             ...(editMaxLength ? { max_length: parseInt(editMaxLength) } : {}),
@@ -396,6 +424,33 @@ export default function BotsPage() {
             onSelectAll={() => setSelectedTools(new Set(ALL_TOOLS.map(t => t.id)))}
             onDeselectAll={() => setSelectedTools(new Set())}
           />
+
+          {/* Access Control */}
+          <div className="border border-zinc-700 rounded-lg p-3 space-y-3">
+            <h4 className="text-sm font-medium text-zinc-300">Quyền truy cập</h4>
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-sm text-zinc-300">Chỉ cho phép người dùng cụ thể</span>
+              <input type="checkbox" checked={whitelistEnabled} onChange={e => { setWhitelistEnabled(e.target.checked); if (e.target.checked) setAllowAll(false); }}
+                className="rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0" />
+            </label>
+            {whitelistEnabled && !allowAll && (
+              <div>
+                <input placeholder="ID người dùng (phân cách bằng dấu phẩy)" value={allowedUserIds} onChange={e => setAllowedUserIds(e.target.value)}
+                  className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none" />
+                <p className="text-xs text-zinc-500 mt-1">
+                  {formChannel === 'telegram' ? 'Nhập Telegram User ID (số). Dùng @userinfobot để lấy ID' :
+                   formChannel === 'zalo' ? 'Nhập Zalo User ID' :
+                   formChannel === 'discord' ? 'Nhập Discord User ID' : 'Nhập User ID'}
+                </p>
+              </div>
+            )}
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-sm text-zinc-300">Cho phép tất cả (công khai)</span>
+              <input type="checkbox" checked={allowAll} onChange={e => { setAllowAll(e.target.checked); if (e.target.checked) setWhitelistEnabled(false); }}
+                className="rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0" />
+            </label>
+          </div>
+
           <button onClick={addBot} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm">T&#7841;o bot</button>
         </div>
       )}
@@ -505,6 +560,34 @@ export default function BotsPage() {
                   </div>
                 </div>
               </div>
+
+              {/* Access Control */}
+              <div className="border-t border-zinc-800 pt-4">
+                <h4 className="text-sm font-medium text-zinc-300 mb-3">Quyền truy cập</h4>
+                <div className="space-y-3">
+                  <label className="flex items-center justify-between cursor-pointer">
+                    <span className="text-sm text-zinc-300">Chỉ cho phép người dùng cụ thể</span>
+                    <input type="checkbox" checked={editWhitelistEnabled} onChange={e => { setEditWhitelistEnabled(e.target.checked); if (e.target.checked) setEditAllowAll(false); }}
+                      className="rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0" />
+                  </label>
+                  {editWhitelistEnabled && !editAllowAll && (
+                    <div>
+                      <input placeholder="ID người dùng (phân cách bằng dấu phẩy)" value={editAllowedUserIds} onChange={e => setEditAllowedUserIds(e.target.value)}
+                        className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none" />
+                      <p className="text-xs text-zinc-500 mt-1">
+                        {editBot?.channel === 'telegram' ? 'Nhập Telegram User ID (số). Dùng @userinfobot để lấy ID' :
+                         editBot?.channel === 'zalo' ? 'Nhập Zalo User ID' :
+                         editBot?.channel === 'discord' ? 'Nhập Discord User ID' : 'Nhập User ID'}
+                      </p>
+                    </div>
+                  )}
+                  <label className="flex items-center justify-between cursor-pointer">
+                    <span className="text-sm text-zinc-300">Cho phép tất cả (công khai)</span>
+                    <input type="checkbox" checked={editAllowAll} onChange={e => { setEditAllowAll(e.target.checked); if (e.target.checked) setEditWhitelistEnabled(false); }}
+                      className="rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0" />
+                  </label>
+                </div>
+              </div>
             </div>
             <div className="flex justify-end gap-2 p-4 border-t border-zinc-800 sticky bottom-0 bg-zinc-900">
               <button onClick={() => setEditBot(null)} className="px-4 py-2 rounded text-sm text-zinc-400 hover:text-white">H&#7911;y</button>
@@ -528,6 +611,11 @@ export default function BotsPage() {
                 <div>
                   <h3 className="text-white font-medium">{bot.name}</h3>
                   <p className="text-xs text-zinc-500 capitalize">{bot.channel}</p>
+                  <span className={`text-xs px-1.5 py-0.5 rounded ${
+                    bot.access_settings?.allow_all ? 'bg-green-900/30 text-green-400' : 'bg-yellow-900/30 text-yellow-400'
+                  }`}>
+                    {bot.access_settings?.allow_all ? '🌐 Công khai' : '🔒 Riêng tư'}
+                  </span>
                 </div>
               </div>
               <span className={`flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full ${

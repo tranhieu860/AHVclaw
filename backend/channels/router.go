@@ -39,6 +39,7 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 	var defaultAgentID *uuid.UUID
 	var aiSettingsRaw *json.RawMessage
 	var responseSettingsRaw *json.RawMessage
+	var accessSettingsRaw *json.RawMessage
 
 	botUUID, err := uuid.Parse(msg.BotID)
 	if err != nil {
@@ -47,13 +48,37 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 	}
 
 	err = db.Pool.QueryRow(ctx,
-		`SELECT user_id, default_agent_id, ai_settings, response_settings
+		`SELECT user_id, default_agent_id, ai_settings, response_settings, access_settings
 		 FROM bots WHERE id = $1 AND is_active = true`,
 		botUUID,
-	).Scan(&botUserID, &defaultAgentID, &aiSettingsRaw, &responseSettingsRaw)
+	).Scan(&botUserID, &defaultAgentID, &aiSettingsRaw, &responseSettingsRaw, &accessSettingsRaw)
 	if err != nil {
 		log.Printf("[router] bot %s not found or inactive: %v", msg.BotID, err)
 		return
+	}
+
+	// 1b. Check access whitelist
+	if accessSettingsRaw != nil {
+		var accessSettings struct {
+			WhitelistEnabled bool     `json:"whitelist_enabled"`
+			AllowedUserIDs   []string `json:"allowed_user_ids"`
+			AllowAll         bool     `json:"allow_all"`
+		}
+		if json.Unmarshal(*accessSettingsRaw, &accessSettings) == nil {
+			if accessSettings.WhitelistEnabled && !accessSettings.AllowAll {
+				allowed := false
+				for _, uid := range accessSettings.AllowedUserIDs {
+					if uid == msg.ChannelUserID {
+						allowed = true
+						break
+					}
+				}
+				if !allowed {
+					log.Printf("[router] user %s not in whitelist for bot %s, ignoring", msg.ChannelUserID, msg.BotID)
+					return
+				}
+			}
+		}
 	}
 
 	// 2. Find or create contact
