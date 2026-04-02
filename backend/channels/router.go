@@ -15,10 +15,14 @@ import (
 	"github.com/google/uuid"
 )
 
+// BroadcastFn is a function type for broadcasting events to a user's WebSocket connections.
+type BroadcastFn func(userID string, eventType string, data interface{})
+
 // Router handles inbound channel messages: contact resolution,
 // conversation management, AI processing, and response delivery.
 type Router struct {
-	aiRouter *ai.RouterClient
+	aiRouter    *ai.RouterClient
+	BroadcastTo BroadcastFn // optional; set by main.go to avoid import cycle
 }
 
 // NewRouter creates a new channel message router.
@@ -94,6 +98,17 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 	// Save inbound message
 	r.saveChannelMessage(ctx, conv.ID, "inbound", "contact", &msg.ChannelUserID,
 		msgText, nil, &msg.MessageID, nil)
+
+	// Broadcast inbound message to bot owner's WebSocket clients
+	if r.BroadcastTo != nil {
+		r.BroadcastTo(botUserID.String(), "new_message", map[string]interface{}{
+			"conversation_id": conv.ID.String(),
+			"role":            "user",
+			"content":         msgText,
+			"source":          msg.Channel,
+			"timestamp":       time.Now().UTC().Format(time.RFC3339),
+		})
+	}
 
 	// 5b. Send typing indicator
 	if err := adapter.SendTyping(msg.ChatID); err != nil {
@@ -314,6 +329,17 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 	}
 
 	r.sendResponse(adapter, msg.ChatID, responseText, maxLength)
+
+	// Broadcast AI response to bot owner's WebSocket clients
+	if r.BroadcastTo != nil && responseText != "" {
+		r.BroadcastTo(botUserID.String(), "new_message", map[string]interface{}{
+			"conversation_id": conv.ID.String(),
+			"role":            "assistant",
+			"content":         responseText,
+			"source":          msg.Channel,
+			"timestamp":       time.Now().UTC().Format(time.RFC3339),
+		})
+	}
 
 	// Update conversation timestamp
 	db.Pool.Exec(ctx, "UPDATE conversations SET updated_at = now() WHERE id = $1", conv.ID)

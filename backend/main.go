@@ -26,6 +26,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/limiter"
 	"github.com/gofiber/fiber/v2/middleware/logger"
+	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -135,6 +136,9 @@ func main() {
 
 	// Init channel manager
 	channelRouter := channels.NewRouter(handlers.Router)
+	channelRouter.BroadcastTo = func(userID string, eventType string, data interface{}) {
+		handlers.Hub.BroadcastToUser(userID, handlers.Event{Type: eventType, Data: data})
+	}
 	channelManager := channels.NewManager(channelRouter)
 	channelManager.RegisterAdapter("telegram", telegram.NewAdapter)
 	channelManager.RegisterAdapter("zalo", zalo.NewAdapter)
@@ -318,6 +322,7 @@ func main() {
 	// WebSocket chat
 	app.Use("/ws", handlers.WSUpgrade())
 	app.Get("/ws/chat", handlers.WSChat())
+	app.Get("/ws/events", websocket.New(handlers.WSEvents()))
 
 	go func() {
 		sigChan := make(chan os.Signal, 1)
