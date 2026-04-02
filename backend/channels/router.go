@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"runtime/debug"
 	"strings"
 	"time"
 
 	"github.com/ahvholding/ahvclaw/ai"
 	"github.com/ahvholding/ahvclaw/db"
+	"github.com/ahvholding/ahvclaw/embeddings"
 	"github.com/ahvholding/ahvclaw/engine"
+	"github.com/ahvholding/ahvclaw/prompts"
 	"github.com/ahvholding/ahvclaw/tools"
 	"github.com/google/uuid"
 )
@@ -32,6 +35,15 @@ func NewRouter(aiRouter *ai.RouterClient) *Router {
 
 // HandleInbound processes an inbound message from a channel adapter.
 func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("[PANIC] HandleInbound: %v\nStack: %s", rec, debug.Stack())
+			if msg.ChatID != "" {
+				adapter.SendMessage(msg.ChatID, "⚠️ Có lỗi xảy ra, cậu nhắn lại giúp tớ nhé!")
+			}
+		}
+	}()
+
 	ctx := context.Background()
 
 	// 1. Load bot config
@@ -173,6 +185,35 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 		model = "AHV-Holding-TroLy"
 	}
 
+	// 6b. Load project context if conversation has a project
+	if conv.ProjectID != nil {
+		var projInstructions *string
+		db.Pool.QueryRow(ctx,
+			"SELECT instructions FROM projects WHERE id = $1", *conv.ProjectID,
+		).Scan(&projInstructions)
+		if projInstructions != nil && *projInstructions != "" {
+			systemPrompt += "\n\n## Project Instructions:\n" + *projInstructions
+		}
+
+		// Load project files as context
+		pfRows, pfErr := db.Pool.Query(ctx,
+			`SELECT filename, content FROM project_files WHERE project_id = $1 AND content IS NOT NULL AND content != '' LIMIT 5`,
+			*conv.ProjectID)
+		if pfErr == nil && pfRows != nil {
+			defer pfRows.Close()
+			var projFiles strings.Builder
+			for pfRows.Next() {
+				var fname, fcontent string
+				if pfRows.Scan(&fname, &fcontent) == nil {
+					projFiles.WriteString(fmt.Sprintf("\n### File: %s\n%s\n", fname, fcontent))
+				}
+			}
+			if projFiles.Len() > 0 {
+				systemPrompt += "\n\n## Project Files:" + projFiles.String()
+			}
+		}
+	}
+
 	// Override model from AI settings if present
 	if aiSettingsRaw != nil {
 		var aiSettings struct {
@@ -187,24 +228,34 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 		}
 	}
 
-	// Load memories for context
+	// Load memories for context — try semantic search first, fallback to recent
 	var memoryContext strings.Builder
-	memRows, memErr := db.Pool.Query(ctx,
-		`SELECT type, key, content FROM memories WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 10`,
-		botUserID)
-	if memErr == nil && memRows != nil {
-		defer memRows.Close()
-		for memRows.Next() {
-			var mType, mKey, mContent string
-			if memRows.Scan(&mType, &mKey, &mContent) == nil {
-				memoryContext.WriteString(fmt.Sprintf("- [%s] %s: %s\n", mType, mKey, mContent))
+	semanticResults, semErr := embeddings.SearchByEmbedding(botUserID.String(), msgText, 10)
+	if semErr == nil && len(semanticResults) > 0 {
+		for _, r := range semanticResults {
+			memoryContext.WriteString(fmt.Sprintf("- [%s] %s: %s\n",
+				r["type"], r["key"], r["content"]))
+		}
+	} else {
+		// Fallback to recent memories
+		memRows, memErr := db.Pool.Query(ctx,
+			`SELECT type, key, content FROM memories WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 10`,
+			botUserID)
+		if memErr == nil && memRows != nil {
+			defer memRows.Close()
+			for memRows.Next() {
+				var mType, mKey, mContent string
+				if memRows.Scan(&mType, &mKey, &mContent) == nil {
+					memoryContext.WriteString(fmt.Sprintf("- [%s] %s: %s\n", mType, mKey, mContent))
+				}
 			}
 		}
 	}
 	if memoryContext.Len() > 0 {
 		systemPrompt += "\n\n## Your memories about this user:\n" + memoryContext.String()
 	}
-	systemPrompt += "\n\nIMPORTANT: When you learn something about the user (name, preferences, etc.), use the memory_save tool to remember it. When asked about past conversations, use memory_search."
+
+	systemPrompt += prompts.ThinkingInstructions
 
 	// Parse response settings
 	maxLength := 4096
@@ -325,6 +376,43 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 		return
 	}
 
+	// 8b. Parse thinking and run verification
+	thinking, cleanResponse := engine.ParseThinking(result.Content)
+
+	// Send thinking summary for Telegram (non-simple only)
+	if thinkingSummary := engine.FormatThinkingForTelegram(thinking); thinkingSummary != "" {
+		adapter.SendMessage(msg.ChatID, thinkingSummary)
+	}
+
+	// Run verification on medium/complex responses
+	verification := engine.VerifyResponse(thinking, cleanResponse, nil, nil)
+	if !verification.Passed {
+		log.Printf("[router] verification failed (%s): %s", verification.FailReason, verification.FixPrompt)
+		// Retry once with fix prompt
+		retryMessages := append(result.Messages, ai.ChatMessage{
+			Role:    "user",
+			Content: fmt.Sprintf(prompts.VerificationRetryPrompt, verification.FixPrompt),
+		})
+		retryResult, retryErr := engine.ProcessChat(ctx, engine.ChatConfig{
+			AIRouter:         r.aiRouter,
+			Model:            model,
+			FallbackModels:   fallbackModels,
+			Messages:         retryMessages,
+			Tools:            convertToolDefs(toolDefs),
+			Executor:         executor,
+			MaxToolRounds:    5,
+			MaxContextTokens: 8000,
+		})
+		if retryErr == nil && retryResult.Content != "" {
+			_, retryClean := engine.ParseThinking(retryResult.Content)
+			cleanResponse = retryClean
+			result = retryResult
+		}
+	}
+
+	// Use cleanResponse (without <thinking> tags) for the final response
+	result.Content = cleanResponse
+
 	// Save ALL new messages from result.Messages to DB
 	newMessages := result.Messages[originalMsgCount:]
 	for _, m := range newMessages {
@@ -371,6 +459,13 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 			"timestamp":       time.Now().UTC().Format(time.RFC3339),
 		})
 	}
+
+	// Update message count and trigger summarization check
+	var msgCount int
+	db.Pool.QueryRow(ctx,
+		"UPDATE conversations SET message_count = message_count + $1, updated_at = now() WHERE id = $2 RETURNING message_count",
+		len(newMessages)+1, conv.ID).Scan(&msgCount) // +1 for the saved inbound message
+	engine.CheckAndSummarize(ctx, conv.ID, msgCount, r.aiRouter, model)
 
 	// Auto-title if conversation has no title yet (use first user message)
 	var currentTitle *string
@@ -447,6 +542,7 @@ type convResult struct {
 	ID             uuid.UUID
 	CurrentAgentID *uuid.UUID
 	TakeoverBy     *uuid.UUID
+	ProjectID      *uuid.UUID
 }
 
 // findOrCreateConversation finds an active conversation or creates a new one.
@@ -455,11 +551,11 @@ func (r *Router) findOrCreateConversation(ctx context.Context, botID, contactID 
 	// Try to find active conversation in unified table
 	var conv convResult
 	err := db.Pool.QueryRow(ctx,
-		`SELECT id, current_agent_id, takeover_by FROM conversations
+		`SELECT id, current_agent_id, takeover_by, project_id FROM conversations
 		 WHERE bot_id = $1 AND contact_id = $2 AND status = 'active'
 		 ORDER BY updated_at DESC LIMIT 1`,
 		botID, contactID,
-	).Scan(&conv.ID, &conv.CurrentAgentID, &conv.TakeoverBy)
+	).Scan(&conv.ID, &conv.CurrentAgentID, &conv.TakeoverBy, &conv.ProjectID)
 
 	if err == nil {
 		return &conv, nil
@@ -518,19 +614,29 @@ func (r *Router) saveChannelMessage(ctx context.Context, convID uuid.UUID, direc
 }
 
 // buildMessageHistory loads past messages from the unified messages table.
-// Loads the NEWEST 20 messages then reverses to chronological order.
+// Loads conversation summary (if any) + NEWEST 50 messages with tool data, then reverses to chronological order.
 func (r *Router) buildMessageHistory(ctx context.Context, convID uuid.UUID, systemPrompt string) []ai.ChatMessage {
 	messages := []ai.ChatMessage{
 		{Role: "system", Content: systemPrompt},
 	}
 
-	// Load NEWEST 20 messages, then reverse to chronological order
+	// Load conversation summary and prepend as context
+	var summary *string
+	db.Pool.QueryRow(ctx, "SELECT summary FROM conversations WHERE id = $1", convID).Scan(&summary)
+	if summary != nil && *summary != "" {
+		messages = append(messages, ai.ChatMessage{
+			Role:    "system",
+			Content: "## Previous conversation summary:\n" + *summary,
+		})
+	}
+
+	// Load NEWEST 50 messages with tool data, then reverse to chronological order
 	rows, err := db.Pool.Query(ctx,
-		`SELECT role, content
+		`SELECT role, content, tool_calls, COALESCE(tool_call_id, '')
 		 FROM messages
-		 WHERE conversation_id =  AND role IN ('user', 'assistant')
+		 WHERE conversation_id = $1 AND role IN ('user', 'assistant', 'tool')
 		 ORDER BY created_at DESC
-		 LIMIT 20`,
+		 LIMIT 50`,
 		convID)
 	if err != nil {
 		return messages
@@ -541,16 +647,23 @@ func (r *Router) buildMessageHistory(ctx context.Context, convID uuid.UUID, syst
 	for rows.Next() {
 		var role string
 		var content *string
-		if err := rows.Scan(&role, &content); err != nil {
+		var toolCalls *json.RawMessage
+		var toolCallID string
+		if err := rows.Scan(&role, &content, &toolCalls, &toolCallID); err != nil {
 			continue
 		}
 		text := ""
 		if content != nil {
 			text = *content
 		}
-		if role == "user" || role == "assistant" {
-			history = append(history, ai.ChatMessage{Role: role, Content: text})
+		msg := ai.ChatMessage{Role: role, Content: text}
+		if toolCalls != nil {
+			msg.ToolCalls = *toolCalls
 		}
+		if toolCallID != "" {
+			msg.ToolCallID = toolCallID
+		}
+		history = append(history, msg)
 	}
 
 	// Reverse to chronological order (we loaded DESC)
