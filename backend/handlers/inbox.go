@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -194,7 +195,44 @@ func ReplyToConversation(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "failed to save message"})
 	}
 
-	return c.JSON(fiber.Map{"message_id": msgID, "status": "sent"})
+	// Deliver message via channel adapter
+	delivered := false
+	deliveryErr := ""
+	if ChannelManager != nil {
+		var convChannel string
+		var channelChatID *string
+		var botID uuid.UUID
+		err = db.Pool.QueryRow(ctx,
+			"SELECT channel, channel_chat_id, bot_id FROM conversations WHERE id = $1",
+			convID).Scan(&convChannel, &channelChatID, &botID)
+		if err != nil {
+			log.Printf("[inbox] failed to query conversation for delivery: %v", err)
+			deliveryErr = "failed to query conversation"
+		} else if channelChatID == nil || *channelChatID == "" {
+			deliveryErr = "no channel_chat_id for conversation"
+		} else {
+			adapter, ok := ChannelManager.GetAdapter(botID.String())
+			if !ok {
+				deliveryErr = "adapter not running for bot"
+			} else {
+				if sendErr := adapter.SendMessage(*channelChatID, req.Content); sendErr != nil {
+					log.Printf("[inbox] failed to deliver reply via %s: %v", convChannel, sendErr)
+					deliveryErr = sendErr.Error()
+				} else {
+					delivered = true
+				}
+			}
+		}
+	} else {
+		deliveryErr = "channel manager not initialized"
+	}
+
+	return c.JSON(fiber.Map{
+		"message_id":   msgID,
+		"status":       "sent",
+		"delivered":    delivered,
+		"delivery_err": deliveryErr,
+	})
 }
 
 func TakeoverConversation(c *fiber.Ctx) error {
