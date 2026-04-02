@@ -16,7 +16,7 @@ interface ChatInputProps {
 export function ChatInput({ onSend, disabled }: ChatInputProps) {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -43,16 +43,31 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
   };
 
   const handleFiles = async (files: FileList | File[]) => {
-    setUploading(true);
     const fileArray = Array.from(files);
-    for (const file of fileArray) {
-      const att = await uploadFile(file);
-      if (att) {
-        setAttachments(prev => [...prev, att]);
+    setUploadProgress({ current: 0, total: fileArray.length });
+    for (let i = 0; i < fileArray.length; i++) {
+      setUploadProgress({ current: i + 1, total: fileArray.length });
+      const att = await uploadFile(fileArray[i]);
+      if (att) setAttachments(prev => [...prev, att]);
+    }
+    setUploadProgress(null);
+  };
+
+  const handlePaste = useCallback(async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const files: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        const file = items[i].getAsFile();
+        if (file) files.push(file);
       }
     }
-    setUploading(false);
-  };
+    if (files.length > 0) {
+      e.preventDefault();
+      handleFiles(files);
+    }
+  }, []);
 
   const handleFileSelect = () => {
     fileInputRef.current?.click();
@@ -114,6 +129,14 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
+        {uploadProgress && (
+          <div className="px-2 pt-1">
+            <div className="h-1 bg-zinc-700 rounded-full overflow-hidden">
+              <div className="h-full bg-blue-500 transition-all duration-300"
+                style={{ width: `${(uploadProgress.current / uploadProgress.total) * 100}%` }} />
+            </div>
+          </div>
+        )}
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-1.5 px-2 pt-1 pb-1.5">
             {attachments.map(att => (
@@ -130,7 +153,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
           <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" multiple />
           <button
             onClick={handleFileSelect}
-            disabled={disabled || uploading}
+            disabled={disabled || uploadProgress !== null}
             className="p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-700 disabled:opacity-30 transition"
             title="Attach files"
           >
@@ -145,7 +168,8 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
               e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
             }}
             onKeyDown={handleKeyDown}
-            placeholder={uploading ? 'Uploading...' : disabled ? 'AI is responding...' : 'Type a message...'}
+            onPaste={handlePaste}
+            placeholder={uploadProgress ? `Uploading ${uploadProgress.current}/${uploadProgress.total}...` : disabled ? 'AI is responding...' : 'Type a message...'}
             rows={1}
             disabled={disabled}
             className="flex-1 bg-transparent text-white text-sm resize-none outline-none placeholder-zinc-500 px-2 py-1.5 max-h-[200px] disabled:opacity-50"
