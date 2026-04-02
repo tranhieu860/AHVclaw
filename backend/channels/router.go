@@ -10,6 +10,7 @@ import (
 
 	"github.com/ahvholding/ahvclaw/ai"
 	"github.com/ahvholding/ahvclaw/db"
+	"github.com/ahvholding/ahvclaw/engine"
 	"github.com/ahvholding/ahvclaw/tools"
 	"github.com/google/uuid"
 )
@@ -118,11 +119,11 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 		}
 		if err != nil {
 			log.Printf("[router] agent %s not found: %v", agentID, err)
-			systemPrompt = "Bạn là trợ lý AI thông minh. Luôn trả lời bằng tiếng Việt. Sử dụng công cụ (tools) khi cần thiết thay vì đoán."
+			systemPrompt = "B\u1ea1n l\u00e0 tr\u1ee3 l\u00fd AI th\u00f4ng minh. Lu\u00f4n tr\u1ea3 l\u1eddi b\u1eb1ng ti\u1ebfng Vi\u1ec7t. S\u1eed d\u1ee5ng c\u00f4ng c\u1ee5 (tools) khi c\u1ea7n thi\u1ebft thay v\u00ec \u0111o\u00e1n."
 			model = "AHV-Holding-TroLy"
 		}
 	} else {
-		systemPrompt = "Bạn là trợ lý AI thông minh. Luôn trả lời bằng tiếng Việt. Sử dụng công cụ (tools) khi cần thiết thay vì đoán."
+		systemPrompt = "B\u1ea1n l\u00e0 tr\u1ee3 l\u00fd AI th\u00f4ng minh. Lu\u00f4n tr\u1ea3 l\u1eddi b\u1eb1ng ti\u1ebfng Vi\u1ec7t. S\u1eed d\u1ee5ng c\u00f4ng c\u1ee5 (tools) khi c\u1ea7n thi\u1ebft thay v\u00ec \u0111o\u00e1n."
 		model = "AHV-Holding-TroLy"
 	}
 
@@ -252,148 +253,62 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 		botUserID.String(),
 	)
 
-	var finalResponse strings.Builder
-	maxToolRounds := 10
+	// Remember original message count to identify new messages later
+	originalMsgCount := len(messages)
 
-	for round := 0; round < maxToolRounds; round++ {
-		var fullContent strings.Builder
-		var accumulatedToolCalls []json.RawMessage
-		var finishReason string
+	result, err := engine.ProcessChat(ctx, engine.ChatConfig{
+		AIRouter:         r.aiRouter,
+		Model:            model,
+		FallbackModels:   fallbackModels,
+		Messages:         messages,
+		Tools:            convertToolDefs(toolDefs),
+		Executor:         executor,
+		MaxToolRounds:    10,
+		MaxContextTokens: 8000,
+		OnToolCall: func(name, args string) {
+			adapter.SendTyping(msg.ChatID) // Refresh typing on each tool call
+		},
+	})
 
-		aiReq := ai.ChatCompletionRequest{
-			Model:    model,
-			Messages: messages,
-			Stream:   true,
-			Tools:    convertToolDefs(toolDefs),
-		}
-
-		err = r.aiRouter.StreamChat(aiReq, func(chunk ai.StreamChunk) {
-			if len(chunk.Choices) > 0 {
-				delta := chunk.Choices[0].Delta
-				if delta.Content != "" {
-					fullContent.WriteString(delta.Content)
-				}
-				if delta.ToolCalls != nil {
-					accumulatedToolCalls = append(accumulatedToolCalls, delta.ToolCalls)
-				}
-				if chunk.Choices[0].FinishReason != nil {
-					finishReason = *chunk.Choices[0].FinishReason
-				}
-			}
-		})
-
-		if err != nil && fallbackModels != "" {
-			log.Printf("[router] AI stream error with model %s: %v, trying fallbacks", model, err)
-			fallbacks := strings.Split(fallbackModels, ",")
-			for _, fb := range fallbacks {
-				fb = strings.TrimSpace(fb)
-				if fb == "" {
-					continue
-				}
-				log.Printf("[router] Trying fallback model: %s", fb)
-				fullContent.Reset()
-				accumulatedToolCalls = nil
-				finishReason = ""
-				aiReq.Model = fb
-				err = r.aiRouter.StreamChat(aiReq, func(chunk ai.StreamChunk) {
-					if len(chunk.Choices) > 0 {
-						delta := chunk.Choices[0].Delta
-						if delta.Content != "" {
-							fullContent.WriteString(delta.Content)
-						}
-						if delta.ToolCalls != nil {
-							accumulatedToolCalls = append(accumulatedToolCalls, delta.ToolCalls)
-						}
-						if chunk.Choices[0].FinishReason != nil {
-							finishReason = *chunk.Choices[0].FinishReason
-						}
-					}
-				})
-				if err == nil {
-					model = fb
-					break
-				}
-				log.Printf("[router] Fallback model %s also failed: %v", fb, err)
-			}
-		}
-		if err != nil {
-			log.Printf("[router] AI stream error: %v", err)
-			r.sendResponse(adapter, msg.ChatID, "Xin lỗi, đã xảy ra lỗi khi xử lý tin nhắn. Vui lòng thử lại.", maxLength)
-			return
-		}
-
-		// No tool calls - we have the final response
-		if finishReason != "tool_calls" || len(accumulatedToolCalls) == 0 {
-			finalResponse.WriteString(fullContent.String())
-
-			// Save assistant message
-			content := fullContent.String()
-			r.saveChannelMessage(ctx, conv.ID, "outbound", "ai", nil,
-				sanitizeUTF8(content), nil, nil, agentID)
-
-			break
-		}
-
-		// Process tool calls
-		log.Printf("[router] AI requested %d tool call deltas, processing...", len(accumulatedToolCalls))
-		mergedToolCallsJSON := mergeToolCallDeltas(accumulatedToolCalls)
-
-		var toolCalls []struct {
-			ID       string `json:"id"`
-			Type     string `json:"type"`
-			Function struct {
-				Name      string          `json:"name"`
-				Arguments json.RawMessage `json:"arguments"`
-			} `json:"function"`
-		}
-		if err := json.Unmarshal(mergedToolCallsJSON, &toolCalls); err != nil {
-			log.Printf("[router] failed to parse tool calls: %v", err)
-			break
-		}
-
-		// Save assistant message with tool calls
-		assistantContent := fullContent.String()
+	if err != nil {
+		log.Printf("[router] AI engine error: %v", err)
+		errMsg := "Xin l\u1ed7i, \u0111\u00e3 x\u1ea3y ra l\u1ed7i khi x\u1eed l\u00fd tin nh\u1eafn. Vui l\u00f2ng th\u1eed l\u1ea1i."
+		r.sendResponse(adapter, msg.ChatID, errMsg, maxLength)
 		r.saveChannelMessage(ctx, conv.ID, "outbound", "ai", nil,
-			assistantContent, &mergedToolCallsJSON, nil, agentID)
+			errMsg, nil, nil, agentID)
+		return
+	}
 
-		// Add assistant message to history
-		messages = append(messages, ai.ChatMessage{
-			Role:      "assistant",
-			Content:   assistantContent,
-			ToolCalls: mergedToolCallsJSON,
-		})
-
-		// Send typing indicator before tool execution
-		if err := adapter.SendTyping(msg.ChatID); err != nil {
-			log.Printf("[router] typing indicator error: %v", err)
-		}
-
-		// Execute each tool call
-		for _, tc := range toolCalls {
-			log.Printf("[router] Executing tool: %s", tc.Function.Name)
-			result := executor.Execute(tc.Function.Name, tc.Function.Arguments)
-
-			toolContent := result.Content
-			if result.Error != "" {
-				toolContent = "Error: " + result.Error
+	// Save ALL new messages from result.Messages to DB
+	newMessages := result.Messages[originalMsgCount:]
+	for _, m := range newMessages {
+		switch m.Role {
+		case "assistant":
+			var toolCallsPtr *json.RawMessage
+			if len(m.ToolCalls) > 0 {
+				raw := json.RawMessage(m.ToolCalls)
+				toolCallsPtr = &raw
 			}
-
-			messages = append(messages, ai.ChatMessage{
-				Role:       "tool",
-				Content:    toolContent,
-				ToolCallID: tc.ID,
-			})
-
-			// Save tool result
-			trJSON, _ := json.Marshal(result)
-			trRaw := json.RawMessage(trJSON)
+			contentStr := ""
+			if s, ok := m.Content.(string); ok {
+				contentStr = s
+			}
+			r.saveChannelMessage(ctx, conv.ID, "outbound", "ai", nil,
+				contentStr, toolCallsPtr, nil, agentID)
+		case "tool":
+			contentStr := ""
+			if s, ok := m.Content.(string); ok {
+				contentStr = s
+			}
+			toolResultJSON, _ := json.Marshal(map[string]string{"content": contentStr})
+			trRaw := json.RawMessage(toolResultJSON)
 			r.saveChannelMessage(ctx, conv.ID, "outbound", "tool", nil,
-				toolContent, &trRaw, nil, nil, tc.ID)
+				contentStr, &trRaw, nil, nil, m.ToolCallID)
 		}
 	}
 
 	// 9. Send response to channel
-	responseText := finalResponse.String()
+	responseText := result.Content
 	if responseText == "" {
 		responseText = "I processed your request."
 	}
@@ -493,16 +408,6 @@ func (r *Router) findOrCreateConversation(ctx context.Context, botID, contactID 
 }
 
 // saveChannelMessage saves a message in the unified messages table with source indicator.
-func sanitizeUTF8(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		if r != 0xFFFD {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
 func (r *Router) saveChannelMessage(ctx context.Context, convID uuid.UUID, direction, senderType string,
 	senderID *string, content string, toolData *json.RawMessage, channelMsgID *string, agentID *uuid.UUID, toolCallID ...string) {
 
@@ -633,89 +538,6 @@ func splitMessage(text string, maxLength int) []string {
 		text = text[cutAt:]
 	}
 	return parts
-}
-
-// mergeToolCallDeltas merges streaming tool call deltas into complete tool calls.
-// This mirrors the logic in handlers/chat.go.
-func mergeToolCallDeltas(deltas []json.RawMessage) json.RawMessage {
-	if len(deltas) == 1 {
-		return deltas[0]
-	}
-
-	type toolCallDelta struct {
-		Index    int    `json:"index"`
-		ID       string `json:"id,omitempty"`
-		Type     string `json:"type,omitempty"`
-		Function struct {
-			Name      string `json:"name,omitempty"`
-			Arguments string `json:"arguments,omitempty"`
-		} `json:"function,omitempty"`
-	}
-
-	type mergedTC struct {
-		ID       string `json:"id"`
-		Type     string `json:"type"`
-		Function struct {
-			Name      string          `json:"name"`
-			Arguments json.RawMessage `json:"arguments"`
-		} `json:"function"`
-	}
-
-	type accumEntry struct {
-		ID        string
-		Type      string
-		Name      string
-		Arguments strings.Builder
-	}
-
-	accumulated := make(map[int]*accumEntry)
-
-	for _, deltaRaw := range deltas {
-		var deltaList []toolCallDelta
-		if err := json.Unmarshal(deltaRaw, &deltaList); err != nil {
-			var single toolCallDelta
-			if err2 := json.Unmarshal(deltaRaw, &single); err2 == nil {
-				deltaList = []toolCallDelta{single}
-			} else {
-				continue
-			}
-		}
-		for _, d := range deltaList {
-			entry, ok := accumulated[d.Index]
-			if !ok {
-				entry = &accumEntry{}
-				accumulated[d.Index] = entry
-			}
-			if d.ID != "" {
-				entry.ID = d.ID
-			}
-			if d.Type != "" {
-				entry.Type = d.Type
-			}
-			if d.Function.Name != "" {
-				entry.Name = d.Function.Name
-			}
-			entry.Arguments.WriteString(d.Function.Arguments)
-		}
-	}
-
-	var result []mergedTC
-	for i := 0; i < len(accumulated); i++ {
-		entry, ok := accumulated[i]
-		if !ok {
-			continue
-		}
-		tc := mergedTC{
-			ID:   entry.ID,
-			Type: entry.Type,
-		}
-		tc.Function.Name = entry.Name
-		tc.Function.Arguments = json.RawMessage(entry.Arguments.String())
-		result = append(result, tc)
-	}
-
-	out, _ := json.Marshal(result)
-	return out
 }
 
 // convertToolDefs converts tools.ToolDef to ai.Tool.
