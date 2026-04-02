@@ -267,6 +267,7 @@ func main() {
 
 // Zalo webhook (public, no auth)
 	app.Post("/webhook/zalo/:botID", handlers.ZaloWebhook)
+	app.Get("/webhook/zalo/:botID", handlers.ZaloWebhook)
 	api := app.Group("/api")
 
 	// Public routes with auth rate limiting
