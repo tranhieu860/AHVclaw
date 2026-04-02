@@ -417,7 +417,7 @@ var migrations = []string{
 		mime_type VARCHAR(100),
 		created_at TIMESTAMPTZ DEFAULT now()
 	)`,
-	`ALTER TABLE conversations ADD CONSTRAINT IF NOT EXISTS fk_conversations_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL`,
+	`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'fk_conversations_project' AND table_name = 'conversations') THEN ALTER TABLE conversations ADD CONSTRAINT fk_conversations_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL; END IF; END $$`,
 	`CREATE INDEX IF NOT EXISTS idx_conversations_project ON conversations(project_id)`,
 
 	// 037: Backfill message counts
