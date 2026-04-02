@@ -130,7 +130,7 @@ func GetInboxConversation(c *fiber.Ctx) error {
 	}
 
 	rows, err := db.Pool.Query(ctx,
-		"SELECT id, conversation_id, role, role, NULL, content, NULL, NULL, NULL, tool_calls, tool_results, tokens_in, tokens_out, created_at FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC",
+		"SELECT id, conversation_id, role, role, source, content, attachments, NULL, NULL, tool_calls, tool_results, tokens_in, tokens_out, created_at FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC",
 		convID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed to fetch messages"})
