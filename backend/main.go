@@ -161,7 +161,7 @@ func main() {
 			if agentID != nil {
 				var agentPrompt *string
 				var agentModel *string
-				db.Pool.QueryRow(ctx, "SELECT system_prompt, model FROM agents WHERE id = ", *agentID).Scan(&agentPrompt, &agentModel)
+				db.Pool.QueryRow(ctx, "SELECT system_prompt, model FROM agents WHERE id = $1", *agentID).Scan(&agentPrompt, &agentModel)
 				if agentPrompt != nil {
 					systemPrompt = *agentPrompt
 				}
@@ -241,6 +241,35 @@ func main() {
 		}
 		log.Printf("[channels] auto-started %d bots", started)
 	}()
+
+	// Wire silence detector
+	silenceDetector := engine.NewSilenceDetector(
+		func(convID uuid.UUID, content string, channel string, chatID string, botID uuid.UUID) {
+			adapter, ok := channelManager.GetAdapter(botID.String())
+			if !ok {
+				log.Printf("[silence-detector] adapter not found for bot %s", botID)
+				return
+			}
+			channelRouter.HandleInbound(channels.InboundMessage{
+				BotID:   botID.String(),
+				Channel: channel,
+				ChatID:  chatID,
+				Text:    content,
+			}, adapter)
+		},
+		func(channel string, chatID string, botID uuid.UUID, text string) {
+			adapter, ok := channelManager.GetAdapter(botID.String())
+			if !ok {
+				log.Printf("[silence-detector] fallback: adapter not found for bot %s", botID)
+				return
+			}
+			if err := adapter.SendMessage(chatID, text); err != nil {
+				log.Printf("[silence-detector] fallback send error: %v", err)
+			}
+		},
+	)
+	silenceDetector.Start()
+	defer silenceDetector.Stop()
 
 	// Rate limiters
 	apiLimiter := limiter.New(limiter.Config{
