@@ -8,7 +8,7 @@ import { StatusBar } from '@/components/StatusBar';
 import { BrowserPanel } from '@/components/BrowserPanel';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { useStore } from '@/lib/store';
-import { useEvents } from @/lib/useEvents;
+import { useEvents } from '@/lib/useEvents';
 import { api } from '@/lib/api';
 
 export default function WorkspaceLayout({ children }: { children: React.ReactNode }) {

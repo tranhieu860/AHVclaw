@@ -6,7 +6,7 @@ import { useStore } from './store';
 
 export function useEvents() {
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const { user, appendMessage, loadConversations } = useStore();
 
   const connect = useCallback(async () => {
