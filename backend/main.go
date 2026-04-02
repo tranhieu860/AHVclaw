@@ -44,12 +44,15 @@ func decryptBotConfig(raw *json.RawMessage) ([]byte, error) {
 	if err := json.Unmarshal(*raw, &cfg); err != nil {
 		return *raw, nil
 	}
-	if token, ok := cfg["bot_token"].(string); ok && token != "" {
+	for _, field := range []string{"bot_token", "access_token", "app_secret"} {
+		if token, ok := cfg[field].(string); ok && token != "" {
 		decrypted, err := crypto.Decrypt(token)
 		if err != nil {
 			return nil, err
 		}
-		cfg["bot_token"] = decrypted
+		cfg[field] = decrypted
+		}
+
 	}
 	return json.Marshal(cfg)
 }
