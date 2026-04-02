@@ -383,6 +383,46 @@ var migrations = []string{
 	// 034: task_runs index
 	`CREATE INDEX IF NOT EXISTS idx_task_runs_task ON task_runs(task_id, started_at DESC)`,
 
+	// =============================================
+	// Phase 4 Migrations - Intelligent Chat Pipeline
+	// =============================================
+
+	// 035: Intelligent Pipeline --- conversation summary + message retry
+	`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS summary TEXT`,
+	`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS summary_at TIMESTAMPTZ`,
+	`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS message_count INTEGER DEFAULT 0`,
+	`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS project_id UUID`,
+	`ALTER TABLE messages ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0`,
+
+	// 036: Projects
+	`CREATE TABLE IF NOT EXISTS projects (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		name VARCHAR(255) NOT NULL,
+		description TEXT,
+		instructions TEXT,
+		icon VARCHAR(50) DEFAULT '📁',
+		is_archived BOOLEAN DEFAULT false,
+		created_at TIMESTAMPTZ DEFAULT now(),
+		updated_at TIMESTAMPTZ DEFAULT now()
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_projects_user ON projects(user_id)`,
+	`CREATE TABLE IF NOT EXISTS project_files (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+		filename VARCHAR(500) NOT NULL,
+		content TEXT,
+		file_path VARCHAR(1000),
+		file_size BIGINT,
+		mime_type VARCHAR(100),
+		created_at TIMESTAMPTZ DEFAULT now()
+	)`,
+	`ALTER TABLE conversations ADD CONSTRAINT IF NOT EXISTS fk_conversations_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL`,
+	`CREATE INDEX IF NOT EXISTS idx_conversations_project ON conversations(project_id)`,
+
+	// 037: Backfill message counts
+	`UPDATE conversations SET message_count = (SELECT COUNT(*) FROM messages WHERE messages.conversation_id = conversations.id) WHERE message_count = 0`,
+
 }
 
 func RunMigrations() error {
