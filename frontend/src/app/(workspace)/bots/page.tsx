@@ -191,6 +191,7 @@ export default function BotsPage() {
   const [editBot, setEditBot] = useState<Bot | null>(null);
   const [editName, setEditName] = useState('');
   const [editAgentId, setEditAgentId] = useState('');
+  const [editToken, setEditToken] = useState('');
   const [editTools, setEditTools] = useState<Set<string>>(new Set());
   const [editModel, setEditModel] = useState('');
   const [editFallback, setEditFallback] = useState('');
@@ -292,6 +293,7 @@ export default function BotsPage() {
     setEditBot(bot);
     setEditName(bot.name);
     setEditAgentId(bot.default_agent_id || '');
+    setEditToken('');
     setEditModel(bot.ai_settings?.model || '');
     setEditFallback(bot.ai_settings?.fallback_models || '');
     setEditMaxLength(bot.response_settings?.max_length?.toString() || '');
@@ -321,6 +323,7 @@ export default function BotsPage() {
         headers: headers(),
         body: JSON.stringify({
           name: editName || undefined,
+          ...(editToken ? { channel_config: editBot.channel === "zalo" ? { access_token: editToken, webhook_secret: editBot.channel_config?.webhook_secret } : { bot_token: editToken } } : {}),
           default_agent_id: editAgentId || undefined,
           ai_settings: {
             ...(editModel ? { model: editModel } : {}),
@@ -507,8 +510,17 @@ export default function BotsPage() {
                   className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none" />
               </div>
               <div>
-                <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1 block">Agent ID m&#7863;c &#273;&#7883;nh</label>
+                <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1 block">Agent ID mặc định</label>
                 <input value={editAgentId} onChange={e => setEditAgentId(e.target.value)} placeholder="Optional"
+                  className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1 block">
+                  {editBot.channel === 'zalo' ? 'Access Token' : 'Bot Token'}{' '}
+                  <span className="text-zinc-600 normal-case">(để trống nếu không đổi)</span>
+                </label>
+                <input value={editToken} onChange={e => setEditToken(e.target.value)} type="password"
+                  placeholder="Nhập token mới nếu muốn thay đổi..."
                   className="w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none" />
               </div>
 
