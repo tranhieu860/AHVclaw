@@ -541,7 +541,7 @@ func (r *Router) buildMessageHistory(ctx context.Context, convID uuid.UUID, syst
 		 FROM messages
 		 WHERE conversation_id = $1
 		 ORDER BY created_at ASC
-		 LIMIT 50`,
+		 LIMIT 20`,
 		convID)
 	if err != nil {
 		return messages
@@ -572,6 +572,9 @@ func (r *Router) buildMessageHistory(ctx context.Context, convID uuid.UUID, syst
 			}
 			messages = append(messages, msg)
 		} else if role == "tool" {
+			if toolCallID == "" {
+				continue // skip orphan tool results
+			}
 			msg := ai.ChatMessage{Role: "tool", Content: text}
 			if toolCallID != "" {
 				msg.ToolCallID = toolCallID
