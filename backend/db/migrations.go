@@ -620,6 +620,61 @@ var migrations = []string{
 )`,
 	`CREATE INDEX IF NOT EXISTS idx_mood_log_user_time ON mood_log(user_id, created_at DESC)`,
 
+	// =============================================
+	// Phase 9 Migrations - Cognitive Memory Engine
+	// =============================================
+
+	// 054: Unified cognitive embeddings table
+	`CREATE TABLE IF NOT EXISTS cognitive_embeddings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source_type TEXT NOT NULL,
+    source_id UUID NOT NULL,
+    content_hash TEXT NOT NULL,
+    content_preview TEXT NOT NULL,
+    embedding vector(1536) NOT NULL,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+)`,
+	`CREATE INDEX IF NOT EXISTS idx_cognitive_embeddings_user ON cognitive_embeddings(user_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_cognitive_embeddings_source ON cognitive_embeddings(user_id, source_type, source_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_cognitive_embeddings_hash ON cognitive_embeddings(user_id, content_hash)`,
+	`CREATE INDEX IF NOT EXISTS idx_cognitive_embeddings_vector ON cognitive_embeddings USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)`,
+
+	// 055: Cross-reference graph
+	`CREATE TABLE IF NOT EXISTS cross_references (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source_type TEXT NOT NULL,
+    source_id UUID NOT NULL,
+    target_type TEXT NOT NULL,
+    target_id UUID NOT NULL,
+    relation TEXT NOT NULL,
+    strength DECIMAL(3,2) DEFAULT 1.0,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(user_id, source_type, source_id, target_type, target_id, relation)
+)`,
+	`CREATE INDEX IF NOT EXISTS idx_crossref_source ON cross_references(user_id, source_type, source_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_crossref_target ON cross_references(user_id, target_type, target_id)`,
+
+	// 056: Consolidation log
+	`CREATE TABLE IF NOT EXISTS consolidation_runs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    started_at TIMESTAMPTZ NOT NULL,
+    finished_at TIMESTAMPTZ,
+    entries_scanned INT DEFAULT 0,
+    duplicates_merged INT DEFAULT 0,
+    stale_pruned INT DEFAULT 0,
+    new_crossrefs INT DEFAULT 0,
+    summary TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+)`,
+
+	// 057: Unique index for cognitive upsert
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_cognitive_embeddings_unique_source ON cognitive_embeddings(user_id, source_type, source_id)`,
+
 }
 
 func RunMigrations() error {
