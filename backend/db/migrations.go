@@ -421,7 +421,204 @@ var migrations = []string{
 	`CREATE INDEX IF NOT EXISTS idx_conversations_project ON conversations(project_id)`,
 
 	// 037: Backfill message counts
-	`UPDATE conversations SET message_count = (SELECT COUNT(*) FROM messages WHERE messages.conversation_id = conversations.id) WHERE message_count = 0`,
+	`UPDATE conversations SET message_count = sub.cnt FROM (SELECT conversation_id, COUNT(*) as cnt FROM messages GROUP BY conversation_id) sub WHERE conversations.id = sub.conversation_id AND conversations.message_count = 0 AND sub.cnt > 0`,
+
+	// =============================================
+	// Phase 5 Migrations - Security & Performance
+	// =============================================
+
+	// 038: System settings table (for registration_enabled, etc.)
+	`CREATE TABLE IF NOT EXISTS system_settings (
+		key VARCHAR(255) PRIMARY KEY,
+		value TEXT NOT NULL,
+		updated_at TIMESTAMPTZ DEFAULT now()
+	)`,
+	`INSERT INTO system_settings (key, value) VALUES ('registration_enabled', 'false') ON CONFLICT (key) DO NOTHING`,
+
+	// 039a: User settings table (for fallback_models etc.)
+	`CREATE TABLE IF NOT EXISTS user_settings (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		key VARCHAR(255) NOT NULL,
+		value TEXT NOT NULL,
+		created_at TIMESTAMPTZ DEFAULT now(),
+		updated_at TIMESTAMPTZ DEFAULT now(),
+		UNIQUE(user_id, key)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_user_settings_user_key ON user_settings(user_id, key)`,
+
+	// 039: Performance indexes
+	`CREATE INDEX IF NOT EXISTS idx_messages_conv_role_created ON messages(conversation_id, role, created_at DESC)`,
+	`CREATE INDEX IF NOT EXISTS idx_conv_bot_contact_status ON conversations(bot_id, contact_id, status)`,
+	`CREATE INDEX IF NOT EXISTS idx_messages_retry ON messages(conversation_id, role, created_at) WHERE retry_count > 0`,
+
+	// =============================================
+	// Phase 6 Migrations - SSH Host Key TOFU
+	// =============================================
+
+	// 040: SSH host keys for TOFU verification
+	`CREATE TABLE IF NOT EXISTS ssh_host_keys (
+		host VARCHAR(255) NOT NULL,
+		port INTEGER NOT NULL,
+		key_type VARCHAR(50) NOT NULL,
+		fingerprint VARCHAR(255) NOT NULL,
+		raw_key BYTEA NOT NULL,
+		first_seen_at TIMESTAMPTZ DEFAULT now(),
+		PRIMARY KEY (host, port, key_type)
+	)`,
+
+	// 041: Session cleanup indexes
+	`CREATE INDEX IF NOT EXISTS idx_sessions_refresh_token ON sessions(refresh_token)`,
+	`CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)`,
+
+	// 042: Server chat workspace
+	`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS server_id UUID REFERENCES servers(id) ON DELETE SET NULL`,
+	`CREATE INDEX IF NOT EXISTS idx_conversations_server ON conversations(server_id) WHERE server_id IS NOT NULL`,
+
+	// =============================================
+	// Phase 7 Migrations - File-based Memories
+	// =============================================
+
+	// 043: Add file_path column to memories
+	`ALTER TABLE memories ADD COLUMN IF NOT EXISTS file_path TEXT`,
+
+	// 044: Unique index on memories(user_id, type, key)
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_user_type_key ON memories(user_id, type, key)`,
+
+	// 045: Message feedback columns
+	`ALTER TABLE messages ADD COLUMN IF NOT EXISTS feedback_rating SMALLINT`,
+	`ALTER TABLE messages ADD COLUMN IF NOT EXISTS feedback_at TIMESTAMPTZ`,
+	`CREATE INDEX IF NOT EXISTS idx_messages_feedback ON messages (conversation_id, feedback_rating) WHERE feedback_rating IS NOT NULL`,
+
+	// =============================================
+	// Phase 8 Migrations - Autonomous Agent Engine
+	// =============================================
+
+	// 046: Heartbeat config
+	`CREATE TABLE IF NOT EXISTS heartbeat_config (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    enabled BOOLEAN DEFAULT true,
+    interval_min INT DEFAULT 5,
+    quiet_hours_start TIME DEFAULT '23:00',
+    quiet_hours_end TIME DEFAULT '07:00',
+    max_actions_per_hour INT DEFAULT 20,
+    timezone TEXT DEFAULT 'Asia/Ho_Chi_Minh',
+    reflection_time TIME DEFAULT '23:00',
+    digest_time TIME DEFAULT '21:00',
+    delivery_channel TEXT DEFAULT 'telegram',
+    delivery_chat_id TEXT,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+)`,
+
+	// 047: Action trust
+	`CREATE TABLE IF NOT EXISTS action_trust (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    action_type TEXT NOT NULL,
+    action_pattern TEXT NOT NULL,
+    trust_score INT NOT NULL DEFAULT 0,
+    approve_count INT DEFAULT 0,
+    reject_count INT DEFAULT 0,
+    last_used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(user_id, action_type, action_pattern)
+)`,
+
+	// 048: Goals
+	`CREATE TABLE IF NOT EXISTS goals (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT,
+    status TEXT NOT NULL DEFAULT 'proposed',
+    priority TEXT DEFAULT 'medium',
+    source TEXT DEFAULT 'bot',
+    parent_goal_id UUID REFERENCES goals(id) ON DELETE SET NULL,
+    deadline TIMESTAMPTZ,
+    progress INT DEFAULT 0,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    completed_at TIMESTAMPTZ
+)`,
+
+	// 049: Heartbeat runs
+	`CREATE TABLE IF NOT EXISTS heartbeat_runs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    started_at TIMESTAMPTZ NOT NULL,
+    finished_at TIMESTAMPTZ,
+    triggers_checked INT DEFAULT 0,
+    actions_taken INT DEFAULT 0,
+    actions_skipped INT DEFAULT 0,
+    tokens_used INT DEFAULT 0,
+    summary TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+)`,
+	`CREATE INDEX IF NOT EXISTS idx_heartbeat_runs_user_time ON heartbeat_runs(user_id, started_at DESC)`,
+
+	// 050: Autonomous actions
+	`CREATE TABLE IF NOT EXISTS autonomous_actions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    heartbeat_run_id UUID REFERENCES heartbeat_runs(id) ON DELETE SET NULL,
+    action_type TEXT NOT NULL,
+    action_pattern TEXT NOT NULL,
+    description TEXT NOT NULL,
+    trust_score_at_time INT,
+    status TEXT NOT NULL,
+    result TEXT,
+    error TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+)`,
+	`CREATE INDEX IF NOT EXISTS idx_autonomous_actions_user_time ON autonomous_actions(user_id, created_at DESC)`,
+
+	// 051: Reflections
+	`CREATE TABLE IF NOT EXISTS reflections (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    lessons JSONB DEFAULT '[]',
+    user_insights JSONB DEFAULT '[]',
+    prompt_suggestions JSONB DEFAULT '[]',
+    goals_progress JSONB DEFAULT '[]',
+    detected_patterns JSONB DEFAULT '[]',
+    performance_score DECIMAL(3,1),
+    raw_output TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(user_id, date)
+)`,
+
+	// 052: Detected patterns
+	`CREATE TABLE IF NOT EXISTS detected_patterns (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    pattern_type TEXT NOT NULL,
+    description TEXT NOT NULL,
+    evidence JSONB DEFAULT '[]',
+    confidence DECIMAL(3,2) NOT NULL,
+    status TEXT DEFAULT 'detected',
+    action_taken TEXT,
+    task_id UUID,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+)`,
+
+	// 053: Mood log
+	`CREATE TABLE IF NOT EXISTS mood_log (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
+    message_id UUID,
+    sentiment TEXT,
+    urgency TEXT,
+    energy TEXT,
+    emotion TEXT,
+    confidence DECIMAL(3,2),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+)`,
+	`CREATE INDEX IF NOT EXISTS idx_mood_log_user_time ON mood_log(user_id, created_at DESC)`,
 
 }
 
