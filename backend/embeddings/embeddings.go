@@ -36,6 +36,20 @@ func GenerateEmbedding(text string) ([]float32, error) {
 	return hashEmbedding(text), nil
 }
 
+// GenerateEmbeddings generates embeddings for multiple texts in batch
+func GenerateEmbeddings(texts []string) ([][]float32, error) {
+	results := make([][]float32, len(texts))
+	for i, text := range texts {
+		vec, err := GenerateEmbedding(text)
+		if err != nil {
+			results[i] = hashEmbedding(text)
+			continue
+		}
+		results[i] = vec
+	}
+	return results, nil
+}
+
 func apiEmbedding(text string) ([]float32, error) {
 	body, _ := json.Marshal(map[string]interface{}{
 		"input": text,
