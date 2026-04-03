@@ -11,7 +11,6 @@ import (
 	"github.com/ahvholding/ahvclaw/ai"
 	"github.com/ahvholding/ahvclaw/db"
 	"github.com/ahvholding/ahvclaw/engine"
-	"github.com/ahvholding/ahvclaw/handlers"
 	"github.com/ahvholding/ahvclaw/memories"
 	"github.com/google/uuid"
 )
@@ -218,18 +217,18 @@ func applyLessons(ctx context.Context, userID uuid.UUID, res ReflectionResult, d
 func getUserModel(ctx context.Context, userID uuid.UUID) string {
 	var model string
 	db.Pool.QueryRow(ctx,
-		`SELECT value FROM user_settings WHERE user_id=$1 AND key='model'`,
+		`SELECT value FROM user_settings WHERE user_id=$1 AND key='default_model'`,
 		userID,
 	).Scan(&model)
 	if model == "" {
-		model = "google/gemini-2.0-flash-001"
+		model = "AHV-Holding"
 	}
 	return model
 }
 
 // RunReflection runs the end-of-day AI reflection for a user.
 // It skips if a reflection already exists for today.
-func RunReflection(ctx context.Context, userID uuid.UUID, tz string) error {
+func RunReflection(ctx context.Context, userID uuid.UUID, tz string, router *ai.RouterClient) error {
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
 		loc = time.UTC
@@ -272,7 +271,7 @@ Be concise. Return only valid JSON.`
 	// 4. Call engine.ProcessChat with no tools
 	model := getUserModel(ctx, userID)
 	result, err := engine.ProcessChat(ctx, engine.ChatConfig{
-		AIRouter:         handlers.Router,
+		AIRouter:         router,
 		Model:            model,
 		Messages:         messages,
 		MaxToolRounds:    0,

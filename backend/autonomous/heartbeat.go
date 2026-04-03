@@ -243,7 +243,7 @@ func buildHeartbeatPrompt(cfg HeartbeatConfig) string {
 ## Autonomous Heartbeat Mode
 You are running in fully autonomous mode. The user is not present.
 Your job: proactively check on things, surface insights, and take low-risk actions.
-- Only use safe read/low-risk tools (file_read, file_list, file_search, http_request, memory_save, memory_search, server_status, server_list, knowledge_search)
+- Only use safe read/low-risk tools (file_read, file_list, file_search, http_request, memory_save, memory_search, server_status, knowledge_search)
 - Do NOT write files, execute commands, or make external changes unless explicitly trusted
 - Keep output concise (2-5 sentences or a short bullet list)
 - Delivery channel: %s

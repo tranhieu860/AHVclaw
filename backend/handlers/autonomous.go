@@ -166,49 +166,27 @@ func ListTrustPermissions(c *fiber.Ctx) error {
 	return c.JSON(entries)
 }
 
-// UpdateTrustScore adjusts a trust entry via escalate/deescalate.
+// UpdateTrustScore updates a trust entry by ID with a new trust_score value.
 func UpdateTrustScore(c *fiber.Ctx) error {
 	userID := c.Locals("user_id").(uuid.UUID)
-	ctx := context.Background()
-
-	var body struct {
-		ActionType    string `json:"action_type"`
-		ActionPattern string `json:"action_pattern"`
-		Direction     string `json:"direction"` // "up" or "down"
-	}
-	if err := c.BodyParser(&body); err != nil || body.ActionType == "" || body.ActionPattern == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "action_type and action_pattern required"})
-	}
-
-	categoryDefaults := map[string]int{
-		"read": 10, "write_low": 5, "write_high": 3, "critical": 0,
-	}
-	def := categoryDefaults[body.ActionType]
-
-	var err error
-	if body.Direction == "up" {
-		_, err = db.Pool.Exec(ctx,
-			`INSERT INTO action_trust (user_id, action_type, action_pattern, trust_score, approve_count, last_used_at)
-			 VALUES ($1, $2, $3, LEAST($4 + 2, 10), 1, NOW())
-			 ON CONFLICT (user_id, action_type, action_pattern) DO UPDATE SET
-			   trust_score = LEAST(action_trust.trust_score + 2, 10),
-			   approve_count = action_trust.approve_count + 1,
-			   last_used_at = NOW(), updated_at = NOW()`,
-			userID, body.ActionType, body.ActionPattern, def,
-		)
-	} else {
-		_, err = db.Pool.Exec(ctx,
-			`INSERT INTO action_trust (user_id, action_type, action_pattern, trust_score, reject_count, last_used_at)
-			 VALUES ($1, $2, $3, GREATEST($4 - 3, 0), 1, NOW())
-			 ON CONFLICT (user_id, action_type, action_pattern) DO UPDATE SET
-			   trust_score = GREATEST(action_trust.trust_score - 3, 0),
-			   reject_count = action_trust.reject_count + 1,
-			   last_used_at = NOW(), updated_at = NOW()`,
-			userID, body.ActionType, body.ActionPattern, def,
-		)
-	}
+	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "failed to update trust score"})
+		return c.Status(400).JSON(fiber.Map{"error": "invalid id"})
+	}
+	var body struct {
+		TrustScore int `json:"trust_score"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid body"})
+	}
+	if body.TrustScore < 0 || body.TrustScore > 10 {
+		return c.Status(400).JSON(fiber.Map{"error": "trust_score must be 0-10"})
+	}
+	_, err = db.Pool.Exec(c.Context(),
+		`UPDATE action_trust SET trust_score=$1, updated_at=NOW() WHERE id=$2 AND user_id=$3`,
+		body.TrustScore, id, userID)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(fiber.Map{"ok": true})
 }

@@ -77,14 +77,16 @@ func CreateGoal(ctx context.Context, userID uuid.UUID, title, description, prior
 
 func UpdateGoal(ctx context.Context, userID, goalID uuid.UUID, updates map[string]interface{}) error {
 	if status, ok := updates["status"].(string); ok {
-		completedAt := "NULL"
+		var err error
 		if status == "completed" {
-			completedAt = "NOW()"
+			_, err = db.Pool.Exec(ctx,
+				`UPDATE goals SET status=$1, completed_at=NOW(), updated_at=NOW() WHERE id=$2 AND user_id=$3`,
+				status, goalID, userID)
+		} else {
+			_, err = db.Pool.Exec(ctx,
+				`UPDATE goals SET status=$1, completed_at=NULL, updated_at=NOW() WHERE id=$2 AND user_id=$3`,
+				status, goalID, userID)
 		}
-		_, err := db.Pool.Exec(ctx,
-			`UPDATE goals SET status=$1, completed_at=`+completedAt+`, updated_at=NOW()
-			 WHERE id=$2 AND user_id=$3`,
-			status, goalID, userID)
 		if err != nil {
 			return err
 		}

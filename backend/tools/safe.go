@@ -9,7 +9,6 @@ var safeToolNames = map[string]bool{
 	"memory_save":      true,
 	"memory_search":    true,
 	"server_status":    true,
-	"server_list":      true,
 	"knowledge_search": true,
 }
 
