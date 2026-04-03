@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { MessageSquare, Plus, Settings, Server, Puzzle, Bot, LogOut, Radio, Users, Clock, Trash2, FolderOpen } from 'lucide-react';
+import { MessageSquare, Plus, Settings, Server, Puzzle, Bot, LogOut, Radio, Users, Clock, Trash2, FolderOpen, Brain } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { ThemeToggle } from './ThemeToggle';
 import { api } from '@/lib/api';
@@ -128,6 +128,7 @@ export function Sidebar({ onNavigate }: SidebarProps) {
       </nav>
 
       <div className="p-2 border-t border-zinc-800 space-y-1">
+        <SidebarLink icon={<Brain size={16} />} label="Dashboard" href="/dashboard" />
         <SidebarLink icon={<Bot size={16} />} label="Agents" href="/agents" />
         <SidebarLink icon={<Radio size={16} />} label="Bot" href="/bots" />
         <SidebarLink icon={<Users size={16} />} label="Liên hệ" href="/contacts" />
@@ -163,3 +164,4 @@ function SidebarLink({ icon, label, href }: { icon: React.ReactNode; label: stri
     </Link>
   );
 }
+

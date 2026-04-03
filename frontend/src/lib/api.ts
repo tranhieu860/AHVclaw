@@ -104,6 +104,7 @@ class ApiClient {
   async getInbox(params?: Record<string, string>) { const qs = params ? '?' + new URLSearchParams(params).toString() : ''; return this.fetchJSON(`/api/inbox${qs}`); }
   async getInboxConversation(id: string) { return this.fetchJSON(`/api/inbox/${id}`); }
   async replyToConversation(id: string, content: string) { return this.fetchJSON(`/api/inbox/${id}/reply`, { method: 'POST', body: JSON.stringify({ content }) }); }
+  async archiveConversation(id: string) { return this.fetchJSON(`/api/inbox/${id}/archive`, { method: 'POST' }); }
   async takeoverConversation(id: string) { return this.fetchJSON(`/api/inbox/${id}/takeover`, { method: 'POST' }); }
   async releaseConversation(id: string) { return this.fetchJSON(`/api/inbox/${id}/release`, { method: 'POST' }); }
 
@@ -156,6 +157,40 @@ class ApiClient {
     return res.json();
   }
   async deleteProjectFile(projectId: string, fileId: string) { return this.fetchJSON(`/api/projects/${projectId}/files/${fileId}`, { method: "DELETE" }); }
+
+
+  // Autonomous Agent
+  async getAutonomousStatus() { return this.fetchJSON('/api/autonomous/status'); }
+  async updateAutonomousConfig(data: Record<string, unknown>) { return this.fetchJSON('/api/autonomous/config', { method: 'PUT', body: JSON.stringify(data) }); }
+  async stopAutonomous() { return this.fetchJSON('/api/autonomous/stop', { method: 'POST' }); }
+  async resumeAutonomous() { return this.fetchJSON('/api/autonomous/resume', { method: 'POST' }); }
+
+  // Goals
+  async getGoals() { return this.fetchJSON('/api/goals'); }
+  async createGoal(data: Record<string, unknown>) { return this.fetchJSON('/api/goals', { method: 'POST', body: JSON.stringify(data) }); }
+  async updateGoal(id: string, data: Record<string, unknown>) { return this.fetchJSON(`/api/goals/${id}`, { method: 'PUT', body: JSON.stringify(data) }); }
+  async deleteGoal(id: string) { return this.fetchJSON(`/api/goals/${id}`, { method: 'DELETE' }); }
+
+  // Reflections
+  async getReflections() { return this.fetchJSON('/api/reflections'); }
+  async getReflection(date: string) { return this.fetchJSON(`/api/reflections/${date}`); }
+
+  // Trust
+  async getTrustPermissions() { return this.fetchJSON('/api/trust'); }
+  async updateTrustScore(id: string, score: number) { return this.fetchJSON(`/api/trust/${id}`, { method: 'PUT', body: JSON.stringify({ trust_score: score }) }); }
+
+  // Patterns
+  async getPatterns() { return this.fetchJSON('/api/patterns'); }
+  async acceptPattern(id: string) { return this.fetchJSON(`/api/patterns/${id}/accept`, { method: 'POST' }); }
+  async rejectPattern(id: string) { return this.fetchJSON(`/api/patterns/${id}/reject`, { method: 'POST' }); }
+
+  // Knowledge Base
+  async getKnowledgeBases() { return this.fetchJSON('/api/knowledge'); }
+  async createKnowledgeBase(data: Record<string, unknown>) { return this.fetchJSON('/api/knowledge', { method: 'POST', body: JSON.stringify(data) }); }
+  async deleteKnowledgeBase(id: string) { return this.fetchJSON(`/api/knowledge/${id}`, { method: 'DELETE' }); }
+  async getDocuments(kbId: string) { return this.fetchJSON(`/api/knowledge/${kbId}/documents`); }
+  async createDocument(kbId: string, data: Record<string, unknown>) { return this.fetchJSON(`/api/knowledge/${kbId}/documents`, { method: 'POST', body: JSON.stringify(data) }); }
+  async searchKnowledgeBase(kbId: string, query: string) { return this.fetchJSON(`/api/knowledge/${kbId}/search?q=${encodeURIComponent(query)}`); }
 
   async createEventSocket(): Promise<WebSocket> {
     const wsUrl = API_URL.replace("http", "ws");

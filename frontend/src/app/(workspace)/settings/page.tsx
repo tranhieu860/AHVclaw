@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Settings, User, Palette, HardDrive, Shield, Cpu, Plus, Trash2, Copy, Eye, EyeOff, Check } from 'lucide-react';
+import { Settings, User, Palette, HardDrive, Shield, Cpu, Plus, Trash2, Copy, Eye, EyeOff, Check, Zap } from 'lucide-react';
 import { ModelSearch } from '@/components/ModelSearch';
 import { useStore } from '@/lib/store';
 
@@ -30,6 +30,7 @@ const baseTabsConfig = [
   { id: 'storage', label: 'Lưu trữ', icon: HardDrive },
   { id: 'security', label: 'Bảo mật', icon: Shield },
   { id: 'providers', label: 'Nhà cung cấp model', icon: Cpu },
+  { id: 'autonomous', label: 'Tự động', icon: Zap },
 ] as const;
 
 type BaseTabId = typeof baseTabsConfig[number]['id'];
@@ -56,6 +57,17 @@ export default function SettingsPage() {
   const [provName, setProvName] = useState('');
   const [provUrl, setProvUrl] = useState('');
   const [provKey, setProvKey] = useState('');
+  // Autonomous config state
+  const [autoEnabled, setAutoEnabled] = useState(false);
+  const [autoInterval, setAutoInterval] = useState(30);
+  const [autoQuietStart, setAutoQuietStart] = useState('23:00');
+  const [autoQuietEnd, setAutoQuietEnd] = useState('07:00');
+  const [autoMaxActions, setAutoMaxActions] = useState(5);
+  const [autoReflectionTime, setAutoReflectionTime] = useState('22:00');
+  const [autoDigestTime, setAutoDigestTime] = useState('08:00');
+  const [trustPermissions, setTrustPermissions] = useState<Array<{id: string; name: string; trust_score: number}>>([]);
+  const [autoSaving, setAutoSaving] = useState(false);
+  const [autoSaveMsg, setAutoSaveMsg] = useState('');
 
   // Preferences
   const [defaultModel, setDefaultModel] = useState('');
@@ -116,9 +128,37 @@ export default function SettingsPage() {
     loadProviders();
   }, []);
 
+  const loadAutonomous = async () => {
+    try {
+      const baseUrl2 = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3101';
+      const h = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('access_token')}` };
+      const res = await fetch(`${baseUrl2}/api/autonomous/status`, { headers: h });
+      if (res.ok) {
+        const d = await res.json();
+        setAutoEnabled(d.enabled ?? false);
+        if (d.config) {
+          setAutoInterval(d.config.interval_minutes ?? 30);
+          setAutoQuietStart(d.config.quiet_hours_start ?? '23:00');
+          setAutoQuietEnd(d.config.quiet_hours_end ?? '07:00');
+          setAutoMaxActions(d.config.max_actions_per_hour ?? 5);
+          setAutoReflectionTime(d.config.reflection_time ?? '22:00');
+          setAutoDigestTime(d.config.digest_time ?? '08:00');
+        }
+      }
+      const tr = await fetch(`${baseUrl2}/api/trust`, { headers: h });
+      if (tr.ok) {
+        const td = await tr.json();
+        setTrustPermissions(Array.isArray(td) ? td : td?.permissions ?? []);
+      }
+    } catch {}
+  };
+
   useEffect(() => {
     if (activeTab === 'admin') {
       loadAdminUsers();
+    }
+    if (activeTab === 'autonomous') {
+      loadAutonomous();
     }
   }, [activeTab]);
 
@@ -368,6 +408,128 @@ export default function SettingsPage() {
           </div>
         )}
 
+        {activeTab === 'autonomous' && (
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-white font-medium mb-4">Heartbeat Engine</h3>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-zinc-300">Enable Heartbeat</p>
+                    <p className="text-xs text-zinc-500">Run autonomous cycles on a schedule</p>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const baseUrl2 = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3101';
+                        const h = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('access_token')}` };
+                        await fetch(`${baseUrl2}/api/autonomous/${autoEnabled ? 'stop' : 'resume'}`, { method: 'POST', headers: h });
+                        setAutoEnabled(!autoEnabled);
+                      } catch {}
+                    }}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${autoEnabled ? 'bg-green-600' : 'bg-zinc-700'}`}
+                  >
+                    <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition ${autoEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+
+                <div>
+                  <label className="text-xs text-zinc-500 block mb-1">Interval (minutes)</label>
+                  <input type="number" min={1} max={1440} value={autoInterval} onChange={e => setAutoInterval(Number(e.target.value))} className={inputCls} />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-zinc-500 block mb-1">Quiet hours start</label>
+                    <input type="time" value={autoQuietStart} onChange={e => setAutoQuietStart(e.target.value)} className={inputCls} />
+                  </div>
+                  <div>
+                    <label className="text-xs text-zinc-500 block mb-1">Quiet hours end</label>
+                    <input type="time" value={autoQuietEnd} onChange={e => setAutoQuietEnd(e.target.value)} className={inputCls} />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs text-zinc-500 block mb-1">Max actions per hour</label>
+                  <input type="number" min={1} max={100} value={autoMaxActions} onChange={e => setAutoMaxActions(Number(e.target.value))} className={inputCls} />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-zinc-500 block mb-1">Reflection time</label>
+                    <input type="time" value={autoReflectionTime} onChange={e => setAutoReflectionTime(e.target.value)} className={inputCls} />
+                  </div>
+                  <div>
+                    <label className="text-xs text-zinc-500 block mb-1">Digest time</label>
+                    <input type="time" value={autoDigestTime} onChange={e => setAutoDigestTime(e.target.value)} className={inputCls} />
+                  </div>
+                </div>
+
+                {autoSaveMsg && <p className={`text-xs ${autoSaveMsg.includes('saved') ? 'text-green-400' : 'text-red-400'}`}>{autoSaveMsg}</p>}
+                <button
+                  disabled={autoSaving}
+                  onClick={async () => {
+                    setAutoSaving(true);
+                    setAutoSaveMsg('');
+                    try {
+                      const baseUrl2 = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3101';
+                      const h = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('access_token')}` };
+                      await fetch(`${baseUrl2}/api/autonomous/config`, {
+                        method: 'PUT',
+                        headers: h,
+                        body: JSON.stringify({
+                          interval_minutes: autoInterval,
+                          quiet_hours_start: autoQuietStart,
+                          quiet_hours_end: autoQuietEnd,
+                          max_actions_per_hour: autoMaxActions,
+                          reflection_time: autoReflectionTime,
+                          digest_time: autoDigestTime,
+                        }),
+                      });
+                      setAutoSaveMsg('Config saved!');
+                      setTimeout(() => setAutoSaveMsg(''), 2000);
+                    } catch { setAutoSaveMsg('Save failed'); }
+                    finally { setAutoSaving(false); }
+                  }}
+                  className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded text-sm"
+                >
+                  {autoSaving ? 'Saving...' : 'Save config'}
+                </button>
+              </div>
+            </div>
+
+            {trustPermissions.length > 0 && (
+              <div className="border-t border-zinc-800 pt-4">
+                <h3 className="text-white font-medium mb-3">Trust Permissions</h3>
+                <div className="space-y-3">
+                  {trustPermissions.map(tp => (
+                    <div key={tp.id} className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-sm text-zinc-300">{tp.name}</span>
+                        <span className="text-xs text-zinc-500">{tp.trust_score}/10</span>
+                      </div>
+                      <input
+                        type="range" min={0} max={10} step={1}
+                        value={tp.trust_score}
+                        onChange={async e => {
+                          const score = Number(e.target.value);
+                          setTrustPermissions(prev => prev.map(t => t.id === tp.id ? { ...t, trust_score: score } : t));
+                          try {
+                            const baseUrl2 = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3101';
+                            const h = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('access_token')}` };
+                            await fetch(`${baseUrl2}/api/trust/${tp.id}`, { method: 'PUT', headers: h, body: JSON.stringify({ trust_score: score }) });
+                          } catch {}
+                        }}
+                        className="w-full accent-blue-500"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === 'admin' && (
           <div className="space-y-4">
             <h3 className="text-white font-medium">Quản lý người dùng</h3>
@@ -409,3 +571,4 @@ export default function SettingsPage() {
     </div>
   );
 }
+
