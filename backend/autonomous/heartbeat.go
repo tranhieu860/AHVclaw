@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ahvholding/ahvclaw/ai"
+	"github.com/ahvholding/ahvclaw/cognitive"
 	"github.com/ahvholding/ahvclaw/db"
 	"github.com/ahvholding/ahvclaw/engine"
 	"github.com/ahvholding/ahvclaw/prompts"
@@ -81,9 +82,26 @@ func (d *Daemon) tick(ctx context.Context) {
 			continue
 		}
 
-		// Skip quiet hours
+		// Skip quiet hours (but trigger consolidation)
 		if IsQuietHours(cfg) {
-			log.Printf("[heartbeat] quiet hours for user %s, skipping", e.userID)
+			// Run cognitive consolidation once per day during quiet hours
+			var lastConsolidation *time.Time
+			db.Pool.QueryRow(ctx,
+				`SELECT MAX(started_at) FROM consolidation_runs WHERE user_id=$1 AND started_at > NOW() - INTERVAL '20 hours'`,
+				e.userID).Scan(&lastConsolidation)
+			if lastConsolidation == nil {
+				go func(uid uuid.UUID) {
+					cogCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+					defer cancel()
+					if run, err := cognitive.RunConsolidation(cogCtx, d.router, uid); err != nil {
+						log.Printf("[heartbeat] consolidation error for %s: %v", uid, err)
+					} else if run != nil {
+						log.Printf("[heartbeat] consolidation complete for %s: scanned=%d merged=%d pruned=%d crossrefs=%d",
+							uid, run.EntriesScanned, run.DuplicatesMerged, run.StalePruned, run.NewCrossrefs)
+					}
+				}(e.userID)
+			}
+			log.Printf("[heartbeat] quiet hours for user %s, skipping heartbeat", e.userID)
 			continue
 		}
 

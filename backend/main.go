@@ -442,6 +442,12 @@ func main() {
 	protected.Post("/patterns/:id/accept", handlers.AcceptPattern)
 	protected.Post("/patterns/:id/reject", handlers.RejectPattern)
 
+	// Cognitive Memory
+	protected.Get("/cognitive/search", handlers.CognitiveSearch)
+	protected.Get("/cognitive/stats", handlers.CognitiveStats)
+	protected.Get("/cognitive/graph", handlers.CognitiveGraph)
+	protected.Post("/cognitive/backfill", handlers.CognitiveBackfill)
+
 	// Dev+ routes (admin and dev only)
 	devRoutes := protected.Group("", auth.RequireRole("admin", "dev"))
 	devRoutes.Post("/terminal/exec", handlers.TerminalExec)

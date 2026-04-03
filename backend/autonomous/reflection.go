@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ahvholding/ahvclaw/ai"
+	"github.com/ahvholding/ahvclaw/cognitive"
 	"github.com/ahvholding/ahvclaw/db"
 	"github.com/ahvholding/ahvclaw/engine"
 	"github.com/ahvholding/ahvclaw/memories"
@@ -310,6 +311,16 @@ Be concise. Return only valid JSON.`
 	// 6. Save to reflections table
 	if err := saveReflectionToDB(ctx, userID, loc, reflection, rawOutput); err != nil {
 		return fmt.Errorf("reflection DB save failed: %w", err)
+	}
+
+	// 6b. Embed reflection in cognitive memory
+	var reflectionID uuid.UUID
+	err = db.Pool.QueryRow(ctx,
+		`SELECT id FROM reflections WHERE user_id=$1 AND date=$2`,
+		userID, today,
+	).Scan(&reflectionID)
+	if err == nil {
+		go cognitive.EmbedReflection(context.Background(), userID, reflectionID, today, rawOutput)
 	}
 
 	// 7. Auto-apply lessons and patterns

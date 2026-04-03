@@ -11,6 +11,7 @@ import (
 
 	"github.com/ahvholding/ahvclaw/ai"
 	"github.com/ahvholding/ahvclaw/db"
+	"github.com/ahvholding/ahvclaw/cognitive"
 	"github.com/ahvholding/ahvclaw/embeddings"
 	"github.com/ahvholding/ahvclaw/engine"
 	"github.com/ahvholding/ahvclaw/prompts"
@@ -142,6 +143,9 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 	r.saveChannelMessage(ctx, conv.ID, "inbound", "contact", &msg.ChannelUserID,
 		msgText, nil, &msg.MessageID, nil)
 
+	// Auto-embed user message to cognitive memory
+	cognitive.EmbedMessageAsync(botUserID, uuid.New(), "user", msgText, conv.ID)
+
 	// Mood detection (non-blocking)
 	go func() {
 		mood := routerAnalyzeMood(msgText)
@@ -234,31 +238,42 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 		}
 	}
 
-	// Load memories for context — try semantic search first, fallback to recent
-	var memoryContext strings.Builder
-	semanticResults, semErr := embeddings.SearchByEmbedding(botUserID.String(), msgText, 10)
-	if semErr == nil && len(semanticResults) > 0 {
-		for _, r := range semanticResults {
-			memoryContext.WriteString(fmt.Sprintf("- [%s] %s: %s\n",
-				r["type"], r["key"], r["content"]))
-		}
+	// Cognitive memory retrieval (replaces simple memory search)
+	cogResults, cogErr := cognitive.Search(ctx, cognitive.SearchOptions{
+		UserID:   botUserID,
+		Query:    msgText,
+		Limit:    15,
+		MinScore: 0.3,
+	})
+	if cogErr == nil && len(cogResults) > 0 {
+		cogContext := cognitive.BuildContextString(cogResults)
+		systemPrompt += cogContext
 	} else {
-		// Fallback to recent memories
-		memRows, memErr := db.Pool.Query(ctx,
-			`SELECT type, key, content FROM memories WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 10`,
-			botUserID)
-		if memErr == nil && memRows != nil {
-			defer memRows.Close()
-			for memRows.Next() {
-				var mType, mKey, mContent string
-				if memRows.Scan(&mType, &mKey, &mContent) == nil {
-					memoryContext.WriteString(fmt.Sprintf("- [%s] %s: %s\n", mType, mKey, mContent))
+		// Fallback to legacy embedding search
+		var memoryContext strings.Builder
+		semanticResults, semErr := embeddings.SearchByEmbedding(botUserID.String(), msgText, 10)
+		if semErr == nil && len(semanticResults) > 0 {
+			for _, r := range semanticResults {
+				memoryContext.WriteString(fmt.Sprintf("- [%s] %s: %s\n",
+					r["type"], r["key"], r["content"]))
+			}
+		} else {
+			memRows, memErr := db.Pool.Query(ctx,
+				`SELECT type, key, content FROM memories WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 10`,
+				botUserID)
+			if memErr == nil && memRows != nil {
+				defer memRows.Close()
+				for memRows.Next() {
+					var mType, mKey, mContent string
+					if memRows.Scan(&mType, &mKey, &mContent) == nil {
+						memoryContext.WriteString(fmt.Sprintf("- [%s] %s: %s\n", mType, mKey, mContent))
+					}
 				}
 			}
 		}
-	}
-	if memoryContext.Len() > 0 {
-		systemPrompt += "\n\n## Your memories about this user:\n" + memoryContext.String()
+		if memoryContext.Len() > 0 {
+			systemPrompt += "\n\n## Your memories about this user:\n" + memoryContext.String()
+		}
 	}
 
 	systemPrompt += prompts.ThinkingInstructions
@@ -460,6 +475,11 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 	}
 
 	r.sendResponse(adapter, msg.ChatID, responseText, maxLength)
+
+	// Auto-embed assistant response to cognitive memory
+	if responseText != "" {
+		cognitive.EmbedMessageAsync(botUserID, uuid.New(), "assistant", responseText, conv.ID)
+	}
 
 	// Broadcast AI response to bot owner's WebSocket clients
 	if r.BroadcastTo != nil && responseText != "" {
