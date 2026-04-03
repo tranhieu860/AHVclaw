@@ -192,6 +192,20 @@ class ApiClient {
   async createDocument(kbId: string, data: Record<string, unknown>) { return this.fetchJSON(`/api/knowledge/${kbId}/documents`, { method: 'POST', body: JSON.stringify(data) }); }
   async searchKnowledgeBase(kbId: string, query: string) { return this.fetchJSON(`/api/knowledge/${kbId}/search?q=${encodeURIComponent(query)}`); }
 
+
+  // Cognitive Memory
+  async cognitiveSearch(query: string, sourceType?: string, after?: string, before?: string) {
+    const params = new URLSearchParams({ q: query });
+    if (sourceType) params.set("source_type", sourceType);
+    if (after) params.set("after", after);
+    if (before) params.set("before", before);
+    return this.fetchJSON(`/api/cognitive/search?${params}`);
+  }
+  async cognitiveStats() { return this.fetchJSON("/api/cognitive/stats"); }
+  async cognitiveGraph(sourceType: string, sourceId: string) {
+    return this.fetchJSON(`/api/cognitive/graph?source_type=${sourceType}&source_id=${sourceId}`);
+  }
+  async cognitiveBackfill() { return this.fetchJSON("/api/cognitive/backfill", { method: "POST" }); }
   async createEventSocket(): Promise<WebSocket> {
     const wsUrl = API_URL.replace("http", "ws");
     try {

@@ -53,6 +53,14 @@ interface Reflection {
   emotion_breakdown: Record<string, number>;
 }
 
+
+interface CognitiveStats {
+  total_embeddings: number;
+  by_type: Record<string, number>;
+  total_cross_references: number;
+  last_consolidation: string | null;
+}
+
 const cardCls = 'bg-zinc-900 border border-zinc-800 rounded-xl p-4';
 
 function timeAgo(iso: string | null): string {
@@ -80,6 +88,8 @@ export default function DashboardPage() {
   const [patterns, setPatterns] = useState<Pattern[]>([]);
   const [reflection, setReflection] = useState<Reflection | null>(null);
   const [loading, setLoading] = useState(true);
+  const [cogStats, setCogStats] = useState<CognitiveStats | null>(null);
+  const [backfilling, setBackfilling] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [showGoalForm, setShowGoalForm] = useState(false);
   const [goalTitle, setGoalTitle] = useState('');
@@ -106,6 +116,10 @@ export default function DashboardPage() {
         const d = patternsData.value;
         setPatterns(Array.isArray(d) ? d : d?.patterns ?? []);
       }
+      try {
+        const cogData = await api.cognitiveStats().catch(() => null);
+        if (cogData) setCogStats(cogData);
+      } catch {}
       try {
         const today = new Date().toISOString().slice(0, 10);
         const ref = await api.getReflection(today);
@@ -165,6 +179,20 @@ export default function DashboardPage() {
       setPatterns(prev => prev.filter(p => p.id !== id));
     } catch (e) {
       console.error('Pattern action error', e);
+    }
+  };
+
+
+  const handleBackfill = async () => {
+    setBackfilling(true);
+    try {
+      await api.cognitiveBackfill();
+      const cogData = await api.cognitiveStats().catch(() => null);
+      if (cogData) setCogStats(cogData);
+    } catch (e) {
+      console.error("Backfill error", e);
+    } finally {
+      setBackfilling(false);
     }
   };
 
@@ -401,6 +429,67 @@ export default function DashboardPage() {
             <p className="text-zinc-600 text-xs text-center py-4">No reflection data for today.</p>
           )}
         </div>
+
+        {/* Cognitive Memory / Knowledge Graph */}
+        <div className={`${cardCls} lg:col-span-2`}>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-medium text-white flex items-center gap-2">
+              <Brain size={15} className="text-cyan-400" /> Bộ nhớ Nhận thức
+            </h2>
+            <button
+              onClick={handleBackfill}
+              disabled={backfilling}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-cyan-900/30 text-cyan-400 hover:bg-cyan-900/60 disabled:opacity-50 transition"
+            >
+              <RefreshCw size={11} className={backfilling ? "animate-spin" : ""} />
+              {backfilling ? "Đang đồng bộ..." : "Đồng bộ hóa"}
+            </button>
+          </div>
+          {cogStats ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-zinc-800/50 rounded-lg p-3">
+                  <p className="text-xs text-zinc-500 mb-1">Embedding</p>
+                  <p className="text-2xl font-semibold text-cyan-400">{cogStats.total_embeddings.toLocaleString()}</p>
+                </div>
+                <div className="bg-zinc-800/50 rounded-lg p-3">
+                  <p className="text-xs text-zinc-500 mb-1">Tham chiếu chéo</p>
+                  <p className="text-2xl font-semibold text-purple-400">{cogStats.total_cross_references.toLocaleString()}</p>
+                </div>
+              </div>
+              {cogStats.by_type && Object.keys(cogStats.by_type).length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-xs text-zinc-500">Phân loại</p>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { key: "message", color: "bg-blue-900/40 text-blue-400" },
+                      { key: "memory", color: "bg-green-900/40 text-green-400" },
+                      { key: "reflection", color: "bg-purple-900/40 text-purple-400" },
+                      { key: "pattern", color: "bg-orange-900/40 text-orange-400" },
+                      { key: "goal", color: "bg-cyan-900/40 text-cyan-400" },
+                    ].map(({ key, color }) =>
+                      cogStats.by_type[key] !== undefined ? (
+                        <span key={key} className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full ${color}`}>
+                          <span className="capitalize">{key}</span>
+                          <span className="font-medium">{cogStats.by_type[key]}</span>
+                        </span>
+                      ) : null
+                    )}
+                  </div>
+                </div>
+              )}
+              {cogStats.last_consolidation && (
+                <div className="flex justify-between text-xs">
+                  <span className="text-zinc-500">Lần đồng bộ cuối</span>
+                  <span className="text-zinc-300">{timeAgo(cogStats.last_consolidation)}</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-zinc-600 text-xs text-center py-4">Chưa có dữ liệu nhận thức.</p>
+          )}
+        </div>
+
 
       </div>
     </div>
