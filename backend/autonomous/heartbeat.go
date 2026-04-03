@@ -88,8 +88,25 @@ func (d *Daemon) tick(ctx context.Context) {
 			continue
 		}
 
-		// Skip quiet hours (but trigger consolidation)
+		// Skip quiet hours (but trigger reflection + consolidation)
 		if IsQuietHours(cfg) {
+			// Run daily reflection during quiet hours (before consolidation)
+			var lastReflection *time.Time
+			db.Pool.QueryRow(ctx,
+				`SELECT MAX(created_at) FROM reflections WHERE user_id=$1 AND created_at > NOW() - INTERVAL '20 hours'`,
+				e.userID).Scan(&lastReflection)
+			if lastReflection == nil {
+				go func(uid uuid.UUID, tz string) {
+					refCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+					defer cancel()
+					if err := RunReflection(refCtx, uid, tz, d.router); err != nil {
+						log.Printf("[heartbeat] reflection error for %s: %v", uid, err)
+					} else {
+						log.Printf("[heartbeat] reflection complete for %s", uid)
+					}
+				}(e.userID, cfg.Timezone)
+			}
+
 			// Run cognitive consolidation once per day during quiet hours
 			var lastConsolidation *time.Time
 			db.Pool.QueryRow(ctx,
@@ -284,12 +301,72 @@ Your job: proactively check on things, surface insights, and take low-risk actio
 }
 
 // buildHeartbeatTask builds the user-turn prompt for a heartbeat run.
+// It queries active goals, patterns, and mood to create a goal-directed prompt.
 func buildHeartbeatTask(cfg HeartbeatConfig) string {
 	loc, _ := time.LoadLocation(cfg.Timezone)
 	now := time.Now().In(loc)
-	return fmt.Sprintf(
-		"[Autonomous heartbeat @ %s]\nReview recent context, check for anything noteworthy, and produce a brief status update or insight for the user.",
+	ctx := context.Background()
+
+	// Query active goals
+	goalsText := "No active goals"
+	goals, err := ListGoals(ctx, cfg.UserID)
+	if err == nil && len(goals) > 0 {
+		var gb []string
+		for _, g := range goals {
+			if g.Status == "active" || g.Status == "in_progress" {
+				gb = append(gb, fmt.Sprintf("- [%s] %s (%d%%) — %s", g.Priority, g.Title, g.Progress, g.Description))
+			}
+		}
+		if len(gb) > 0 {
+			goalsText = ""
+			for _, line := range gb {
+				goalsText += line + "\n"
+			}
+		}
+	}
+
+	// Query recent accepted patterns
+	patternsText := "No patterns detected yet"
+	patterns, err := ListPatterns(ctx, cfg.UserID)
+	if err == nil && len(patterns) > 0 {
+		var pb []string
+		for _, p := range patterns {
+			if p.Status == "accepted" {
+				pb = append(pb, fmt.Sprintf("- [%s] %s", p.PatternType, p.Description))
+			}
+		}
+		if len(pb) > 0 {
+			patternsText = ""
+			for _, line := range pb {
+				patternsText += line + "\n"
+			}
+		}
+	}
+
+	// Query recent mood
+	moodText := "unknown"
+	moodSummary, _ := GetRecentMoodSummary(ctx, cfg.UserID)
+	if dominant, ok := moodSummary["dominant_mood"].(string); ok && dominant != "" {
+		moodText = dominant
+	}
+
+	return fmt.Sprintf(`[Autonomous heartbeat @ %s]
+
+Active goals:
+%s
+Recent patterns:
+%s
+Recent mood: %s
+
+Your task:
+1. If there are active goals, pick the highest priority one and take a concrete step toward it using your available tools
+2. If no goals, proactively check for anything the user might need (server health, pending items, etc.)
+3. Keep your action brief and focused — one goal, one action
+4. Report what you did and any findings`,
 		now.Format("2006-01-02 15:04"),
+		goalsText,
+		patternsText,
+		moodText,
 	)
 }
 

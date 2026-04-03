@@ -268,6 +268,7 @@ func main() {
 			channelRouter.HandleInbound(channels.InboundMessage{
 				BotID:   botID.String(),
 				Channel: channel,
+				ChannelUserID: chatID,
 				ChatID:  chatID,
 				Text:    content,
 			}, adapter)
