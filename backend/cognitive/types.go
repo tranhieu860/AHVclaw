@@ -45,7 +45,8 @@ type SearchOptions struct {
 	SourceTypes []string   // filter by source type, empty = all
 	TimeAfter   *time.Time // temporal filter
 	TimeBefore  *time.Time
-	MinScore    float64 // minimum final_score threshold (default 0.3)
+	MinScore       float64    // minimum final_score threshold (default 0.3)
+	ConversationID *uuid.UUID // filter messages by conversation (multi-user isolation)
 }
 
 // CrossRef is a relationship between two entities

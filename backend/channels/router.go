@@ -240,10 +240,11 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 
 	// Cognitive memory retrieval (replaces simple memory search)
 	cogResults, cogErr := cognitive.Search(ctx, cognitive.SearchOptions{
-		UserID:   botUserID,
-		Query:    msgText,
-		Limit:    15,
-		MinScore: 0.3,
+		UserID:         botUserID,
+		Query:          msgText,
+		Limit:          15,
+		MinScore:       0.3,
+		ConversationID: &conv.ID,
 	})
 	if cogErr == nil && len(cogResults) > 0 {
 		cogContext := cognitive.BuildContextString(cogResults)
@@ -279,7 +280,7 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 	systemPrompt += prompts.ThinkingInstructions
 
 	// Inject mood context
-	moodCtx := routerGetMoodContext(ctx, botUserID)
+	moodCtx := routerGetMoodContext(ctx, botUserID, conv.ID)
 	if moodCtx != "" {
 		systemPrompt += moodCtx
 	}
@@ -835,13 +836,22 @@ func routerSaveMood(ctx context.Context, userID, convID uuid.UUID, msgID *uuid.U
 	}
 }
 
-func routerGetMoodContext(ctx context.Context, userID uuid.UUID) string {
+func routerGetMoodContext(ctx context.Context, userID uuid.UUID, conversationIDs ...uuid.UUID) string {
 	var sentiment, urgency, energy, emotion string
-	err := db.Pool.QueryRow(ctx,
-		`SELECT sentiment, urgency, energy, emotion FROM mood_log
-		 WHERE user_id=$1 ORDER BY created_at DESC LIMIT 1`,
-		userID,
-	).Scan(&sentiment, &urgency, &energy, &emotion)
+	var err error
+	if len(conversationIDs) > 0 {
+		err = db.Pool.QueryRow(ctx,
+			`SELECT sentiment, urgency, energy, emotion FROM mood_log
+			 WHERE user_id=$1 AND conversation_id=$2 ORDER BY created_at DESC LIMIT 1`,
+			userID, conversationIDs[0],
+		).Scan(&sentiment, &urgency, &energy, &emotion)
+	} else {
+		err = db.Pool.QueryRow(ctx,
+			`SELECT sentiment, urgency, energy, emotion FROM mood_log
+			 WHERE user_id=$1 ORDER BY created_at DESC LIMIT 1`,
+			userID,
+		).Scan(&sentiment, &urgency, &energy, &emotion)
+	}
 	if err != nil {
 		return ""
 	}

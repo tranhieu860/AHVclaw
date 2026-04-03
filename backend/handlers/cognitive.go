@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"context"
+	"log"
 	"time"
 
 	"github.com/ahvholding/ahvclaw/cognitive"
@@ -44,7 +46,8 @@ func CognitiveSearch(c *fiber.Ctx) error {
 
 	results, err := cognitive.Search(c.Context(), opts)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		log.Printf("[cognitive] search error: %v", err)
+		return c.Status(500).JSON(fiber.Map{"error": "internal server error"})
 	}
 	if results == nil {
 		results = []cognitive.SearchResult{}
@@ -57,7 +60,8 @@ func CognitiveStats(c *fiber.Ctx) error {
 	userID := c.Locals("user_id").(uuid.UUID)
 	stats, err := cognitive.GetKnowledgeGraphStats(c.Context(), userID)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		log.Printf("[cognitive] stats error: %v", err)
+		return c.Status(500).JSON(fiber.Map{"error": "internal server error"})
 	}
 	return c.JSON(stats)
 }
@@ -77,7 +81,8 @@ func CognitiveGraph(c *fiber.Ctx) error {
 
 	graph, err := cognitive.GetEntityGraph(c.Context(), userID, sourceType, sourceID)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		log.Printf("[cognitive] graph error: %v", err)
+		return c.Status(500).JSON(fiber.Map{"error": "internal server error"})
 	}
 	return c.JSON(graph)
 }
@@ -85,9 +90,15 @@ func CognitiveGraph(c *fiber.Ctx) error {
 // CognitiveBackfill handles POST /api/cognitive/backfill
 func CognitiveBackfill(c *fiber.Ctx) error {
 	userID := c.Locals("user_id").(uuid.UUID)
-	count, err := cognitive.BackfillMessages(c.Context(), userID, 200)
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-	}
-	return c.JSON(fiber.Map{"embedded": count})
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		count, err := cognitive.BackfillMessages(ctx, userID, 200)
+		if err != nil {
+			log.Printf("[cognitive] backfill error for %s: %v", userID, err)
+		} else {
+			log.Printf("[cognitive] backfill complete for %s: %d messages embedded", userID, count)
+		}
+	}()
+	return c.JSON(fiber.Map{"status": "backfill_started"})
 }

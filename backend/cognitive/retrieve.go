@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -58,6 +59,14 @@ func Search(ctx context.Context, opts SearchOptions) ([]SearchResult, error) {
 	if opts.TimeBefore != nil {
 		conditions = append(conditions, fmt.Sprintf("ce.created_at <= $%d", argIdx))
 		args = append(args, *opts.TimeBefore)
+		argIdx++
+	}
+
+	// Multi-user isolation: messages scoped to conversation, other types shared
+	if opts.ConversationID != nil {
+		conditions = append(conditions, fmt.Sprintf(
+			"(ce.source_type != 'message' OR ce.metadata->>'conversation_id' = $%d)", argIdx))
+		args = append(args, opts.ConversationID.String())
 		argIdx++
 	}
 
@@ -180,13 +189,9 @@ func calcTimeWeight(now, created time.Time) float64 {
 }
 
 func sortByScore(results []SearchResult) {
-	for i := 0; i < len(results); i++ {
-		for j := i + 1; j < len(results); j++ {
-			if results[j].FinalScore > results[i].FinalScore {
-				results[i], results[j] = results[j], results[i]
-			}
-		}
-	}
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].FinalScore > results[j].FinalScore
+	})
 }
 
 // GetRelatedEntities returns cross-referenced entities for a given source

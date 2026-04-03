@@ -33,7 +33,9 @@ func RunConsolidation(ctx context.Context, aiRouter *ai.RouterClient, userID uui
 	defer func() {
 		now := time.Now()
 		run.FinishedAt = &now
-		db.Pool.Exec(ctx,
+		bgCtx, bgCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer bgCancel()
+		db.Pool.Exec(bgCtx,
 			`UPDATE consolidation_runs SET finished_at=$1, entries_scanned=$2, duplicates_merged=$3,
 			  stale_pruned=$4, new_crossrefs=$5, summary=$6 WHERE id=$7`,
 			run.FinishedAt, run.EntriesScanned, run.DuplicatesMerged,
@@ -72,11 +74,30 @@ func RunConsolidation(ctx context.Context, aiRouter *ai.RouterClient, userID uui
 
 // mergeDuplicates finds entries with cosine similarity > 0.95 and merges them
 func mergeDuplicates(ctx context.Context, userID uuid.UUID) (int, int, error) {
+	// Phase 0: Remove exact duplicates by content_hash (fast, no vector ops)
+	exactResult, hashErr := db.Pool.Exec(ctx,
+		`DELETE FROM cognitive_embeddings a
+		 USING cognitive_embeddings b
+		 WHERE a.user_id = $1 AND b.user_id = $1
+		   AND a.content_hash = b.content_hash
+		   AND a.source_type = b.source_type
+		   AND a.id < b.id`,
+		userID,
+	)
+	exactMerged := 0
+	if hashErr == nil {
+		exactMerged = int(exactResult.RowsAffected())
+	}
+
+	// Phase 1: Vector near-duplicate detection (time-windowed to avoid O(n^2))
 	rows, err := db.Pool.Query(ctx,
 		`SELECT a.id, b.id, a.source_type, 1 - (a.embedding <=> b.embedding) AS sim
 		 FROM cognitive_embeddings a
 		 JOIN cognitive_embeddings b ON a.user_id = b.user_id AND a.source_type = b.source_type AND a.id < b.id
-		 WHERE a.user_id = $1 AND 1 - (a.embedding <=> b.embedding) > 0.95
+		 WHERE a.user_id = $1
+		   AND a.created_at > NOW() - INTERVAL '7 days'
+		   AND b.created_at > NOW() - INTERVAL '7 days'
+		   AND 1 - (a.embedding <=> b.embedding) > 0.95
 		 ORDER BY sim DESC LIMIT 50`,
 		userID,
 	)
@@ -112,7 +133,7 @@ func mergeDuplicates(ctx context.Context, userID uuid.UUID) (int, int, error) {
 		}
 	}
 
-	return merged, scanned, nil
+	return merged + exactMerged, scanned, nil
 }
 
 // pruneStale removes old message entries that are unlikely to be relevant

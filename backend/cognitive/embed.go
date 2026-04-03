@@ -14,6 +14,8 @@ import (
 	"github.com/google/uuid"
 )
 
+var embedSem = make(chan struct{}, 20) // max 20 concurrent embedding goroutines
+
 // EmbedContent generates an embedding and stores it in cognitive_embeddings.
 // Skips if content_hash already exists (idempotent).
 func EmbedContent(ctx context.Context, userID uuid.UUID, sourceType string, sourceID uuid.UUID, content string, metadata map[string]interface{}) error {
@@ -63,6 +65,8 @@ func EmbedContent(ctx context.Context, userID uuid.UUID, sourceType string, sour
 // EmbedMessageAsync embeds a chat message in the background
 func EmbedMessageAsync(userID uuid.UUID, messageID uuid.UUID, role, content string, conversationID uuid.UUID) {
 	go func() {
+		embedSem <- struct{}{}
+		defer func() { <-embedSem }()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		meta := map[string]interface{}{
@@ -79,6 +83,8 @@ func EmbedMessageAsync(userID uuid.UUID, messageID uuid.UUID, role, content stri
 // EmbedMemoryAsync embeds a memory file in the background
 func EmbedMemoryAsync(userID uuid.UUID, memoryID uuid.UUID, memType, key, content string) {
 	go func() {
+		embedSem <- struct{}{}
+		defer func() { <-embedSem }()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		meta := map[string]interface{}{

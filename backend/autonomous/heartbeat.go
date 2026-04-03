@@ -3,6 +3,7 @@ package autonomous
 import (
 	"context"
 	"fmt"
+	"sync"
 	"log"
 	"os"
 	"time"
@@ -14,6 +15,11 @@ import (
 	"github.com/ahvholding/ahvclaw/prompts"
 	"github.com/ahvholding/ahvclaw/tools"
 	"github.com/google/uuid"
+)
+
+var (
+	heartbeatSem         = make(chan struct{}, 5) // max 5 concurrent heartbeat runs
+	consolidationRunning sync.Map
 )
 
 // DeliverFunc is the callback for delivering heartbeat output to a user channel.
@@ -90,16 +96,19 @@ func (d *Daemon) tick(ctx context.Context) {
 				`SELECT MAX(started_at) FROM consolidation_runs WHERE user_id=$1 AND started_at > NOW() - INTERVAL '20 hours'`,
 				e.userID).Scan(&lastConsolidation)
 			if lastConsolidation == nil {
-				go func(uid uuid.UUID) {
-					cogCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-					defer cancel()
-					if run, err := cognitive.RunConsolidation(cogCtx, d.router, uid); err != nil {
+				if _, loaded := consolidationRunning.LoadOrStore(e.userID, true); !loaded {
+					go func(uid uuid.UUID) {
+						defer consolidationRunning.Delete(uid)
+						cogCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+						defer cancel()
+						if run, err := cognitive.RunConsolidation(cogCtx, d.router, uid); err != nil {
 						log.Printf("[heartbeat] consolidation error for %s: %v", uid, err)
 					} else if run != nil {
-						log.Printf("[heartbeat] consolidation complete for %s: scanned=%d merged=%d pruned=%d crossrefs=%d",
-							uid, run.EntriesScanned, run.DuplicatesMerged, run.StalePruned, run.NewCrossrefs)
-					}
-				}(e.userID)
+							log.Printf("[heartbeat] consolidation complete for %s: scanned=%d merged=%d pruned=%d crossrefs=%d",
+								uid, run.EntriesScanned, run.DuplicatesMerged, run.StalePruned, run.NewCrossrefs)
+						}
+					}(e.userID)
+				}
 			}
 			log.Printf("[heartbeat] quiet hours for user %s, skipping heartbeat", e.userID)
 			continue
@@ -119,7 +128,11 @@ func (d *Daemon) tick(ctx context.Context) {
 			continue
 		}
 
-		go d.runForUser(cfg)
+		go func(c HeartbeatConfig) {
+			heartbeatSem <- struct{}{}
+			defer func() { <-heartbeatSem }()
+			d.runForUser(c)
+		}(cfg)
 	}
 }
 
