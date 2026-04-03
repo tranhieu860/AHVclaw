@@ -22,6 +22,7 @@ import (
 	"github.com/ahvholding/ahvclaw/embeddings"
 	"github.com/ahvholding/ahvclaw/engine"
 	"github.com/ahvholding/ahvclaw/handlers"
+	"github.com/ahvholding/ahvclaw/autonomous"
 	"github.com/ahvholding/ahvclaw/scheduler"
 	"github.com/ahvholding/ahvclaw/skills"
 	"github.com/ahvholding/ahvclaw/tools"
@@ -204,6 +205,20 @@ func main() {
 	)
 	taskScheduler.Start()
 	defer taskScheduler.Stop()
+
+	// Start heartbeat daemon
+	hbCtx, hbCancel := context.WithCancel(context.Background())
+	defer hbCancel()
+	hbDaemon := autonomous.NewDaemon(handlers.Router, func(userID uuid.UUID, channel, chatID, text string) {
+		// Deliver via channel adapter if available
+		if channelManager != nil && chatID != "" {
+			if adapter, ok := channelManager.GetAdapter(chatID); ok {
+				_ = adapter.SendMessage(chatID, text)
+			}
+		}
+	})
+	_ = hbDaemon
+	go hbDaemon.Start(hbCtx)
 
 
 	// Auto-start active bots after service starts
@@ -401,6 +416,31 @@ func main() {
 	protected.Delete("/projects/:id", handlers.DeleteProject)
 	protected.Post("/projects/:id/files", handlers.UploadProjectFile)
 	protected.Delete("/projects/:id/files/:fileId", handlers.DeleteProjectFile)
+
+	// Autonomous agent
+	protected.Get("/autonomous/status", handlers.GetAutonomousStatus)
+	protected.Put("/autonomous/config", handlers.UpdateAutonomousConfig)
+	protected.Post("/autonomous/stop", handlers.StopAutonomous)
+	protected.Post("/autonomous/resume", handlers.ResumeAutonomous)
+
+	// Goals
+	protected.Get("/goals", handlers.ListGoals)
+	protected.Post("/goals", handlers.CreateGoal)
+	protected.Put("/goals/:id", handlers.UpdateGoalHandler)
+	protected.Delete("/goals/:id", handlers.DeleteGoalHandler)
+
+	// Reflections
+	protected.Get("/reflections", handlers.ListReflections)
+	protected.Get("/reflections/:date", handlers.GetReflection)
+
+	// Trust
+	protected.Get("/trust", handlers.ListTrustPermissions)
+	protected.Put("/trust/:id", handlers.UpdateTrustScore)
+
+	// Patterns
+	protected.Get("/patterns", handlers.ListDetectedPatterns)
+	protected.Post("/patterns/:id/accept", handlers.AcceptPattern)
+	protected.Post("/patterns/:id/reject", handlers.RejectPattern)
 
 	// Dev+ routes (admin and dev only)
 	devRoutes := protected.Group("", auth.RequireRole("admin", "dev"))

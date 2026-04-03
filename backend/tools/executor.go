@@ -15,6 +15,7 @@ type ToolResult struct {
 type Executor struct {
 	WorkspaceDir string
 	UserID       string
+	SendFileFn   func(path, caption string) error
 }
 
 func NewExecutor(workspaceDir string, userID string) *Executor {
@@ -61,6 +62,8 @@ func (e *Executor) executeInternal(name string, argsJSON json.RawMessage) *ToolR
 		return e.delegateAgent(argsJSON)
 	case "manage_scheduled_task":
 		return e.manageScheduledTask(argsJSON)
+	case "send_file":
+		return e.sendFile(argsJSON)
 	default:
 		return &ToolResult{Name: name, Error: fmt.Sprintf("unknown tool: %s", name)}
 	}

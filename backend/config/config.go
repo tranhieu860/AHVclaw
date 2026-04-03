@@ -14,6 +14,8 @@ type Config struct {
 	DataDir         string
 	AllowedOrigins  string
 	EncryptionKey   string
+	STTURL          string
+	STTAPIKey       string
 }
 
 func Load() *Config {
@@ -26,6 +28,8 @@ func Load() *Config {
 		DataDir:        getEnv("DATA_DIR", "/data/ahvclaw"),
 		AllowedOrigins: getEnv("ALLOWED_ORIGINS", "http://localhost:3100,https://claw.ahvchat.com"),
 		EncryptionKey:  getEnv("ENCRYPTION_KEY", "ahvclaw-dev-key-32-bytes-long!!"),
+		STTURL:         getEnv("STT_URL", ""),
+		STTAPIKey:      getEnv("STT_API_KEY", ""),
 	}
 }
 

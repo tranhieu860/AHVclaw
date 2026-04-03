@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ahvholding/ahvclaw/autonomous"
 	"github.com/ahvholding/ahvclaw/channels"
 	"github.com/ahvholding/ahvclaw/db"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -77,6 +78,11 @@ func (a *Adapter) Start() error {
 		{Command: "tasks", Description: "Quản lý scheduled tasks"},
 		{Command: "projects", Description: "Chọn dự án làm việc"},
 		{Command: "status", Description: "Trạng thái hiện tại"},
+		{Command: "stop", Description: "Dừng autonomous agent"},
+		{Command: "resume", Description: "Tiếp tục autonomous agent"},
+		{Command: "goals", Description: "Xem mục tiêu"},
+		{Command: "digest", Description: "Báo cáo hôm nay"},
+		{Command: "mood", Description: "Tâm trạng hiện tại"},
 	}
 	cmdConfig := tgbotapi.NewSetMyCommands(commands...)
 	if _, err := bot.Request(cmdConfig); err != nil {
@@ -616,6 +622,105 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 		status := fmt.Sprintf("Trạng thái hiện tại:\n\nModel: %s\nAgent: %s\nTin nhắn: %d",
 			modelStr, agentStr, msgCount)
 		a.sendText(chatID, status)
+
+	case "stop":
+		userID, err := a.getBotUserID(ctx)
+		if err != nil {
+			a.sendText(chatID, "Lỗi nội bộ.")
+			return
+		}
+		cfg, err := autonomous.LoadConfig(ctx, userID)
+		if err != nil {
+			cfg = autonomous.DefaultConfig(userID)
+		}
+		cfg.Enabled = false
+		if err := autonomous.SaveConfig(ctx, cfg); err != nil {
+			a.sendText(chatID, "Không thể dừng autonomous agent.")
+			return
+		}
+		a.sendText(chatID, "⏸ Đã dừng autonomous agent. Dùng /resume để tiếp tục.")
+
+	case "resume":
+		userID, err := a.getBotUserID(ctx)
+		if err != nil {
+			a.sendText(chatID, "Lỗi nội bộ.")
+			return
+		}
+		cfg, err := autonomous.LoadConfig(ctx, userID)
+		if err != nil {
+			cfg = autonomous.DefaultConfig(userID)
+		}
+		cfg.Enabled = true
+		if err := autonomous.SaveConfig(ctx, cfg); err != nil {
+			a.sendText(chatID, "Không thể bật autonomous agent.")
+			return
+		}
+		a.sendText(chatID, "▶️ Autonomous agent đã hoạt động trở lại.")
+
+	case "goals":
+		userID, err := a.getBotUserID(ctx)
+		if err != nil {
+			a.sendText(chatID, "Lỗi nội bộ.")
+			return
+		}
+		goals, err := autonomous.ListGoals(ctx, userID)
+		if err != nil {
+			a.sendText(chatID, "Không thể lấy danh sách mục tiêu.")
+			return
+		}
+		if len(goals) == 0 {
+			a.sendText(chatID, "Chưa có mục tiêu nào.")
+			return
+		}
+		var sb strings.Builder
+		sb.WriteString("🎯 Mục tiêu hiện tại:\n\n")
+		for _, g := range goals {
+			icon := "⬜"
+			switch g.Status {
+			case "active":
+				icon = "🔵"
+			case "completed":
+				icon = "✅"
+			case "paused":
+				icon = "⏸"
+			}
+			sb.WriteString(fmt.Sprintf("%s %s [%s] %d%%\n", icon, g.Title, g.Priority, g.Progress))
+			if g.Description != nil && *g.Description != "" {
+				desc := *g.Description
+				if len(desc) > 80 {
+					desc = desc[:80] + "..."
+				}
+				sb.WriteString(fmt.Sprintf("   %s\n", desc))
+			}
+		}
+		a.sendText(chatID, sb.String())
+
+	case "digest":
+		userID, err := a.getBotUserID(ctx)
+		if err != nil {
+			a.sendText(chatID, "Lỗi nội bộ.")
+			return
+		}
+		a.sendText(chatID, "⏳ Đang tạo báo cáo...")
+		digest, err := autonomous.GenerateDigest(ctx, userID, "Asia/Ho_Chi_Minh")
+		if err != nil {
+			a.sendText(chatID, fmt.Sprintf("Không thể tạo báo cáo: %v", err))
+			return
+		}
+		a.sendText(chatID, "📊 "+digest)
+
+	case "mood":
+		userID, err := a.getBotUserID(ctx)
+		if err != nil {
+			a.sendText(chatID, "Lỗi nội bộ.")
+			return
+		}
+		moodCtx := autonomous.GetMoodContext(ctx, userID)
+		if moodCtx == "" {
+			a.sendText(chatID, "Chưa có dữ liệu tâm trạng.")
+			return
+		}
+		a.sendText(chatID, "🧠 "+moodCtx)
 	}
 }
 
