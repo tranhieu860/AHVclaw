@@ -83,6 +83,7 @@ func (d *Daemon) tick(ctx context.Context) {
 
 		// Skip quiet hours
 		if IsQuietHours(cfg) {
+			log.Printf("[heartbeat] quiet hours for user %s: start=%s end=%s tz=%s", e.userID, cfg.QuietHoursStart, cfg.QuietHoursEnd, cfg.Timezone)
 			log.Printf("[heartbeat] quiet hours for user %s, skipping", e.userID)
 			continue
 		}
@@ -148,7 +149,7 @@ func (d *Daemon) runForUser(cfg HeartbeatConfig) {
 	executor := tools.NewExecutor(workspaceDir, cfg.UserID.String())
 
 	// Look up user's preferred model
-	model := "gemini-2.0-flash"
+	model := "AHV-Holding"
 	var userModel string
 	db.Pool.QueryRow(ctx,
 		`SELECT value FROM user_settings WHERE user_id=$1 AND key='default_model'`,

@@ -95,6 +95,10 @@ func IsQuietHours(cfg HeartbeatConfig) bool {
 }
 
 func parseTimeMinutes(t string) int {
+	// Handle HH:MM:SS or HH:MM:SS.000000 from postgres TIME columns
+	if len(t) >= 5 {
+		t = t[:5]
+	}
 	parsed, err := time.Parse("15:04", t)
 	if err != nil {
 		return 0
