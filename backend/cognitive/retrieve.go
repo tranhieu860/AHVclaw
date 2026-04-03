@@ -14,13 +14,24 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	DefaultSearchLimit = 15
+	DefaultMinScore    = 0.3
+	MaxFetchMultiplier = 3
+	MaxFetchLimit      = 100
+	TimeHalfLifeDays   = 7.0
+	SimilarityWeight   = 0.7
+	RecencyWeight      = 0.3
+	TemporalMinScore   = 0.2
+)
+
 // Search performs unified contextual retrieval across all cognitive embeddings
 func Search(ctx context.Context, opts SearchOptions) ([]SearchResult, error) {
 	if opts.Limit == 0 {
-		opts.Limit = 15
+		opts.Limit = DefaultSearchLimit
 	}
 	if opts.MinScore == 0 {
-		opts.MinScore = 0.3
+		opts.MinScore = DefaultMinScore
 	}
 
 	// Generate query embedding
@@ -73,9 +84,9 @@ func Search(ctx context.Context, opts SearchOptions) ([]SearchResult, error) {
 	whereClause := strings.Join(conditions, " AND ")
 
 	// Fetch more than needed for post-processing (time weighting may reorder)
-	fetchLimit := opts.Limit * 3
-	if fetchLimit > 100 {
-		fetchLimit = 100
+	fetchLimit := opts.Limit * MaxFetchMultiplier
+	if fetchLimit > MaxFetchLimit {
+		fetchLimit = MaxFetchLimit
 	}
 
 	query := fmt.Sprintf(`
@@ -112,7 +123,7 @@ func Search(ctx context.Context, opts SearchOptions) ([]SearchResult, error) {
 
 		// Time-weighted scoring: recent items get a boost
 		timeWeight := calcTimeWeight(now, entry.CreatedAt)
-		finalScore := similarity*0.7 + timeWeight*0.3
+		finalScore := similarity*SimilarityWeight + timeWeight*RecencyWeight
 
 		if finalScore < opts.MinScore {
 			continue
@@ -184,7 +195,7 @@ func calcTimeWeight(now, created time.Time) float64 {
 	if daysSince < 0 {
 		daysSince = 0
 	}
-	halfLife := 7.0 // days
+	halfLife := TimeHalfLifeDays
 	return math.Exp(-0.693 * daysSince / halfLife)
 }
 
@@ -247,6 +258,6 @@ func SearchTemporally(ctx context.Context, userID uuid.UUID, query string, after
 		Limit:      limit,
 		TimeAfter:  &after,
 		TimeBefore: &before,
-		MinScore:   0.2, // lower threshold for temporal queries
+		MinScore:   TemporalMinScore,
 	})
 }

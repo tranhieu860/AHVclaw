@@ -14,6 +14,15 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	DuplicateThreshold   = 0.95
+	StaleMessageDays     = 90
+	MaxDuplicatePairs    = 50
+	MaxCrossRefEntries   = 20
+	MaxCrossRefRelations = 10
+	ConsolidationWindow  = 7 // days
+)
+
 // RunConsolidation performs memory consolidation for a user
 func RunConsolidation(ctx context.Context, aiRouter *ai.RouterClient, userID uuid.UUID) (*ConsolidationRun, error) {
 	run := &ConsolidationRun{
@@ -235,6 +244,11 @@ Rules:
 		Strength float64 `json:"strength"`
 	}
 	if err := json.Unmarshal([]byte(raw), &rels); err != nil {
+		trimmed := raw
+		if len(trimmed) > 200 {
+			trimmed = trimmed[:200]
+		}
+		log.Printf("[consolidate] crossref parse error: %v, raw: %s", err, trimmed)
 		return 0, nil
 	}
 

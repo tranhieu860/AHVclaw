@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ahvholding/ahvclaw/ai"
+	"github.com/ahvholding/ahvclaw/autonomous"
 	"github.com/ahvholding/ahvclaw/db"
 	"github.com/ahvholding/ahvclaw/cognitive"
 	"github.com/ahvholding/ahvclaw/embeddings"
@@ -148,8 +149,8 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 
 	// Mood detection (non-blocking)
 	go func() {
-		mood := routerAnalyzeMood(msgText)
-		routerSaveMood(context.Background(), botUserID, conv.ID, nil, mood)
+		mood := autonomous.AnalyzeMood(msgText)
+		autonomous.SaveMood(context.Background(), botUserID, conv.ID, nil, mood)
 	}()
 
 	// Broadcast inbound message to bot owner's WebSocket clients
@@ -280,7 +281,7 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 	systemPrompt += prompts.ThinkingInstructions
 
 	// Inject mood context
-	moodCtx := routerGetMoodContext(ctx, botUserID, conv.ID)
+	moodCtx := autonomous.GetMoodContextForConversation(ctx, botUserID, conv.ID)
 	if moodCtx != "" {
 		systemPrompt += moodCtx
 	}
@@ -761,117 +762,4 @@ func convertToolDefs(defs []tools.ToolDef) []ai.Tool {
 		})
 	}
 	return result
-}
-
-// ---- Inlined mood detection (avoids import cycle with autonomous package) ----
-
-type routerMoodAnalysis struct {
-	Sentiment  string
-	Urgency    string
-	Energy     string
-	Emotion    string
-	Confidence float64
-}
-
-func routerAnalyzeMood(text string) routerMoodAnalysis {
-	text = strings.ToLower(text)
-	mood := routerMoodAnalysis{
-		Sentiment:  "neutral",
-		Urgency:    "low",
-		Energy:     "normal",
-		Emotion:    "neutral",
-		Confidence: 0.6,
-	}
-
-	urgentWords := []string{"gấp", "urgent", "asap", "ngay", "khẩn", "nhanh", "immediately", "lỗi", "bug", "down", "sập"}
-	for _, w := range urgentWords {
-		if strings.Contains(text, w) {
-			mood.Urgency = "high"
-			mood.Confidence = 0.8
-			break
-		}
-	}
-
-	frustrationWords := []string{"sao lại", "tại sao", "không hiểu", "lỗi hoài", "vẫn sai", "lại bị", "wtf", "damn"}
-	for _, w := range frustrationWords {
-		if strings.Contains(text, w) {
-			mood.Sentiment = "negative"
-			mood.Emotion = "frustrated"
-			mood.Confidence = 0.75
-			break
-		}
-	}
-
-	positiveWords := []string{"tuyệt", "ngon", "ok rồi", "perfect", "great", "nice", "cảm ơn", "thanks", "good"}
-	for _, w := range positiveWords {
-		if strings.Contains(text, w) {
-			mood.Sentiment = "positive"
-			mood.Emotion = "happy"
-			mood.Confidence = 0.7
-			break
-		}
-	}
-
-	loc, _ := time.LoadLocation("Asia/Ho_Chi_Minh")
-	hour := time.Now().In(loc).Hour()
-	if hour >= 0 && hour < 6 {
-		mood.Energy = "low"
-	}
-
-	if len(text) < 20 && (strings.Contains(text, "!") || strings.HasSuffix(text, "?!")) {
-		mood.Urgency = "high"
-	}
-
-	return mood
-}
-
-func routerSaveMood(ctx context.Context, userID, convID uuid.UUID, msgID *uuid.UUID, mood routerMoodAnalysis) {
-	_, err := db.Pool.Exec(ctx,
-		`INSERT INTO mood_log (user_id, conversation_id, message_id, sentiment, urgency, energy, emotion, confidence)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-		userID, convID, msgID, mood.Sentiment, mood.Urgency, mood.Energy, mood.Emotion, mood.Confidence,
-	)
-	if err != nil {
-		log.Printf("[mood] save error: %v", err)
-	}
-}
-
-func routerGetMoodContext(ctx context.Context, userID uuid.UUID, conversationIDs ...uuid.UUID) string {
-	var sentiment, urgency, energy, emotion string
-	var err error
-	if len(conversationIDs) > 0 {
-		err = db.Pool.QueryRow(ctx,
-			`SELECT sentiment, urgency, energy, emotion FROM mood_log
-			 WHERE user_id=$1 AND conversation_id=$2 ORDER BY created_at DESC LIMIT 1`,
-			userID, conversationIDs[0],
-		).Scan(&sentiment, &urgency, &energy, &emotion)
-	} else {
-		err = db.Pool.QueryRow(ctx,
-			`SELECT sentiment, urgency, energy, emotion FROM mood_log
-			 WHERE user_id=$1 ORDER BY created_at DESC LIMIT 1`,
-			userID,
-		).Scan(&sentiment, &urgency, &energy, &emotion)
-	}
-	if err != nil {
-		return ""
-	}
-
-	hints := map[string]string{
-		"frustrated": "User seems frustrated. Be concise, solution-oriented. Acknowledge the difficulty.",
-		"stressed":   "User appears stressed. Keep responses short and actionable.",
-		"exhausted":  "User is tired (late night). Offer to handle things autonomously. Suggest rest.",
-		"happy":      "User is in a good mood. Match their energy.",
-		"curious":    "User is curious. Provide extra detail and context.",
-	}
-
-	hint := hints[emotion]
-	if hint == "" {
-		return ""
-	}
-
-	if urgency == "high" || urgency == "critical" {
-		hint += " This is URGENT - prioritize speed over completeness."
-	}
-
-	return fmt.Sprintf("\n[Mood context: %s, urgency=%s, energy=%s]\n%s", emotion, urgency, energy, hint)
 }

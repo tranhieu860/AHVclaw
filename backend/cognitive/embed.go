@@ -16,10 +16,16 @@ import (
 
 var embedSem = make(chan struct{}, 20) // max 20 concurrent embedding goroutines
 
+const (
+	MinContentLength = 10
+	PreviewMaxLength = 200
+	EmbedTimeout     = 30 * time.Second
+)
+
 // EmbedContent generates an embedding and stores it in cognitive_embeddings.
 // Skips if content_hash already exists (idempotent).
 func EmbedContent(ctx context.Context, userID uuid.UUID, sourceType string, sourceID uuid.UUID, content string, metadata map[string]interface{}) error {
-	if len(content) < 10 {
+	if len(content) < MinContentLength {
 		return nil // skip trivially short content
 	}
 
@@ -27,10 +33,12 @@ func EmbedContent(ctx context.Context, userID uuid.UUID, sourceType string, sour
 
 	// Check if already embedded with same hash
 	var exists bool
-	db.Pool.QueryRow(ctx,
+	if err := db.Pool.QueryRow(ctx,
 		`SELECT EXISTS(SELECT 1 FROM cognitive_embeddings WHERE user_id=$1 AND source_type=$2 AND source_id=$3 AND content_hash=$4)`,
 		userID, sourceType, sourceID, hash,
-	).Scan(&exists)
+	).Scan(&exists); err != nil {
+		log.Printf("[cognitive] exists check error: %v", err)
+	}
 	if exists {
 		return nil
 	}
@@ -43,11 +51,14 @@ func EmbedContent(ctx context.Context, userID uuid.UUID, sourceType string, sour
 
 	// Build preview (first 200 chars)
 	preview := content
-	if len(preview) > 200 {
-		preview = preview[:200] + "..."
+	if len(preview) > PreviewMaxLength {
+		preview = preview[:PreviewMaxLength] + "..."
 	}
 
-	metaJSON, _ := json.Marshal(metadata)
+	metaJSON, err := json.Marshal(metadata)
+	if err != nil {
+		metaJSON = []byte("{}")
+	}
 	vecStr := pgvectorString(vec)
 
 	// Upsert: update if source changed, insert if new
@@ -67,7 +78,7 @@ func EmbedMessageAsync(userID uuid.UUID, messageID uuid.UUID, role, content stri
 	go func() {
 		embedSem <- struct{}{}
 		defer func() { <-embedSem }()
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), EmbedTimeout)
 		defer cancel()
 		meta := map[string]interface{}{
 			"role":            role,
@@ -85,7 +96,7 @@ func EmbedMemoryAsync(userID uuid.UUID, memoryID uuid.UUID, memType, key, conten
 	go func() {
 		embedSem <- struct{}{}
 		defer func() { <-embedSem }()
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), EmbedTimeout)
 		defer cancel()
 		meta := map[string]interface{}{
 			"memory_type": memType,
@@ -158,6 +169,7 @@ func hashContent(content string) string {
 	return hex.EncodeToString(h[:16]) // 32-char hex
 }
 
+// pgvectorString formats a float32 slice as pgvector literal.
 func pgvectorString(vec []float32) string {
 	s := "["
 	for i, v := range vec {

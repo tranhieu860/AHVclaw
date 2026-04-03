@@ -99,6 +99,8 @@ func (d *Daemon) tick(ctx context.Context) {
 				if _, loaded := consolidationRunning.LoadOrStore(e.userID, true); !loaded {
 					go func(uid uuid.UUID) {
 						defer consolidationRunning.Delete(uid)
+						log.Printf("[heartbeat] starting consolidation for %s (background, 5m timeout)", uid)
+						// Uses context.Background() intentionally: consolidation should finish even on daemon shutdown
 						cogCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 						defer cancel()
 						if run, err := cognitive.RunConsolidation(cogCtx, d.router, uid); err != nil {

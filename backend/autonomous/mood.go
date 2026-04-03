@@ -116,6 +116,38 @@ func GetMoodContext(ctx context.Context, userID uuid.UUID) string {
 	return fmt.Sprintf("\n[Mood context: %s, urgency=%s, energy=%s]\n%s", emotion, urgency, energy, hint)
 }
 
+// GetMoodContextForConversation returns mood context scoped to a specific conversation
+func GetMoodContextForConversation(ctx context.Context, userID uuid.UUID, conversationID uuid.UUID) string {
+	var sentiment, urgency, energy, emotion string
+	err := db.Pool.QueryRow(ctx,
+		`SELECT sentiment, urgency, energy, emotion FROM mood_log
+		 WHERE user_id=$1 AND conversation_id=$2 ORDER BY created_at DESC LIMIT 1`,
+		userID, conversationID,
+	).Scan(&sentiment, &urgency, &energy, &emotion)
+	if err != nil {
+		return ""
+	}
+
+	hints := map[string]string{
+		"frustrated": "User seems frustrated. Be concise, solution-oriented. Acknowledge the difficulty.",
+		"stressed":   "User appears stressed. Keep responses short and actionable.",
+		"exhausted":  "User is tired (late night). Offer to handle things autonomously. Suggest rest.",
+		"happy":      "User is in a good mood. Match their energy.",
+		"curious":    "User is curious. Provide extra detail and context.",
+	}
+
+	hint := hints[emotion]
+	if hint == "" {
+		return ""
+	}
+
+	if urgency == "high" || urgency == "critical" {
+		hint += " This is URGENT - prioritize speed over completeness."
+	}
+
+	return fmt.Sprintf("\n[Mood context: %s, urgency=%s, energy=%s]\n%s", emotion, urgency, energy, hint)
+}
+
 // GetRecentMoodSummary returns mood stats for dashboard
 func GetRecentMoodSummary(ctx context.Context, userID uuid.UUID) (map[string]interface{}, error) {
 	rows, err := db.Pool.Query(ctx,

@@ -18,6 +18,7 @@ var (
 	routerURL string
 	apiKey    string
 	dimension = 1536
+	apiSem    = make(chan struct{}, 10) // max 10 concurrent embedding API calls
 )
 
 func Init(url, key string) {
@@ -51,6 +52,9 @@ func GenerateEmbeddings(texts []string) ([][]float32, error) {
 }
 
 func apiEmbedding(text string) ([]float32, error) {
+	apiSem <- struct{}{}
+	defer func() { <-apiSem }()
+
 	body, _ := json.Marshal(map[string]interface{}{
 		"input": text,
 		"model": "text-embedding-3-small",
