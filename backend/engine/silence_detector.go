@@ -18,17 +18,22 @@ type FallbackFunc func(channel string, chatID string, botID uuid.UUID, text stri
 
 // SilenceDetector periodically checks for unanswered user messages
 // and triggers retry or sends fallback.
+// IsProcessingFunc checks if a chat is currently being processed.
+type IsProcessingFunc func(chatID string) bool
+
 type SilenceDetector struct {
-	retryFn    RetryFunc
-	fallbackFn FallbackFunc
-	stopCh     chan struct{}
+	retryFn        RetryFunc
+	fallbackFn     FallbackFunc
+	isProcessingFn IsProcessingFunc
+	stopCh         chan struct{}
 }
 
-func NewSilenceDetector(retryFn RetryFunc, fallbackFn FallbackFunc) *SilenceDetector {
+func NewSilenceDetector(retryFn RetryFunc, fallbackFn FallbackFunc, isProcessingFn IsProcessingFunc) *SilenceDetector {
 	return &SilenceDetector{
-		retryFn:    retryFn,
-		fallbackFn: fallbackFn,
-		stopCh:     make(chan struct{}),
+		retryFn:        retryFn,
+		fallbackFn:     fallbackFn,
+		isProcessingFn: isProcessingFn,
+		stopCh:         make(chan struct{}),
 	}
 }
 
@@ -72,14 +77,14 @@ func (s *SilenceDetector) check() {
 		JOIN conversations c ON m.conversation_id = c.id
 		WHERE m.role = 'user'
 		  AND m.created_at > now() - interval '5 minutes'
-		  AND m.created_at < now() - interval '90 seconds'
+		  AND m.created_at < now() - interval '3 minutes'
 		  AND NOT EXISTS (
 		      SELECT 1 FROM messages m2
 		      WHERE m2.conversation_id = m.conversation_id
 		        AND m2.role = 'assistant'
 		        AND m2.created_at > m.created_at
 		  )
-		  AND m.retry_count < 2
+		  AND m.retry_count < 3
 	`)
 	if err != nil {
 		log.Printf("[silence-detector] query error: %v", err)
@@ -98,12 +103,18 @@ func (s *SilenceDetector) check() {
 			continue
 		}
 
+		// Skip if this chat is currently being processed by HandleInbound
+		if s.isProcessingFn != nil && s.isProcessingFn(chatID) {
+			log.Printf("[silence-detector] message %s chat %s still processing, skipping", msgID, chatID)
+			continue
+		}
+
 		log.Printf("[silence-detector] unanswered message %s (retry %d) in conv %s", msgID, retryCount, convID)
 
 		// Increment retry count
 		db.Pool.Exec(ctx, "UPDATE messages SET retry_count = retry_count + 1 WHERE id = $1", msgID)
 
-		if retryCount >= 1 {
+		if retryCount >= 2 {
 			// Max retries reached — send fallback
 			log.Printf("[silence-detector] max retries for message %s, sending fallback", msgID)
 			if s.fallbackFn != nil && chatID != "" {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"runtime/debug"
+	"sync"
 	"strings"
 	"time"
 
@@ -25,6 +26,16 @@ type BroadcastFn func(userID string, eventType string, data interface{})
 
 // Router handles inbound channel messages: contact resolution,
 // conversation management, AI processing, and response delivery.
+// processingConvs tracks conversations currently being processed by HandleInbound.
+// The silence-detector checks this before retrying to avoid duplicate processing.
+var processingConvs sync.Map
+
+// IsConversationProcessing returns true if a conversation is currently being handled.
+func IsConversationProcessing(convID string) bool {
+	_, ok := processingConvs.Load(convID)
+	return ok
+}
+
 type Router struct {
 	aiRouter    *ai.RouterClient
 	BroadcastTo BroadcastFn // optional; set by main.go to avoid import cycle
@@ -47,6 +58,10 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 	}()
 
 	ctx := context.Background()
+
+	// Track this conversation as in-flight (prevents silence-detector from retrying)
+	processingConvs.Store(msg.ChatID, true)
+	defer processingConvs.Delete(msg.ChatID)
 
 	// 1. Load bot config
 	var botUserID uuid.UUID

@@ -283,6 +283,7 @@ func main() {
 				log.Printf("[silence-detector] fallback send error: %v", err)
 			}
 		},
+		channels.IsConversationProcessing,
 	)
 	silenceDetector.Start()
 	defer silenceDetector.Stop()
