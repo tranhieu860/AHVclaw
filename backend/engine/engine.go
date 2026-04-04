@@ -9,6 +9,7 @@ import (
 
 	"github.com/ahvholding/ahvclaw/ai"
 	"github.com/ahvholding/ahvclaw/tools"
+	"github.com/google/uuid"
 )
 
 // ChatConfig holds all parameters for a unified AI chat processing loop.
@@ -21,6 +22,10 @@ type ChatConfig struct {
 	Executor         *tools.Executor
 	MaxToolRounds    int // default 10
 	MaxContextTokens int // default 8000
+
+	// Connection-pool fields (optional)
+	APIFormat    string    // e.g. "openai" or "anthropic"; defaults to "openai"
+	ConnectionID uuid.UUID // non-nil when using a user connection (for health tracking)
 
 	// Real-time callbacks (all optional)
 	OnDelta      func(content string)
@@ -94,7 +99,11 @@ func ProcessChat(ctx context.Context, cfg ChatConfig) (*ChatResult, error) {
 			Tools:    cfg.Tools,
 		}
 
-		err := RetryableStreamChat(cfg.AIRouter, aiReq, func(chunk ai.StreamChunk) {
+		apiFormat := cfg.APIFormat
+		if apiFormat == "" {
+			apiFormat = "openai"
+		}
+		err := RetryableStreamChatWithContext(ctx, cfg.AIRouter, apiFormat, aiReq, func(chunk ai.StreamChunk) {
 			if len(chunk.Choices) > 0 {
 				delta := chunk.Choices[0].Delta
 				if delta.Content != "" {

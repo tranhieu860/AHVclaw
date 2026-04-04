@@ -1,9 +1,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Settings, User, Palette, HardDrive, Shield, Cpu, Plus, Trash2, Copy, Eye, EyeOff, Check, Zap } from 'lucide-react';
+import { Settings, User, Palette, HardDrive, Shield, Cpu, Plus, Trash2, Copy, Eye, EyeOff, Check, Zap, Network } from 'lucide-react';
 import { ModelSearch } from '@/components/ModelSearch';
+import { ConnectionList } from '@/components/ConnectionList';
+import HealthDashboard from '@/components/HealthDashboard';
+import { ConnectionForm } from '@/components/ConnectionForm';
+import { ComboForm } from '@/components/ComboForm';
+import { AudioSettings } from '@/components/AudioSettings';
 import { useStore } from '@/lib/store';
+import { api } from '@/lib/api';
+import { ModelCombo, parseModels } from '@/lib/providerRegistry';
 
 interface Provider {
   id: string;
@@ -27,9 +34,10 @@ interface AdminUser {
 const baseTabsConfig = [
   { id: 'profile', label: 'Hồ sơ', icon: User },
   { id: 'preferences', label: 'Tùy chọn', icon: Palette },
+  { id: 'connections', label: 'Kết nối AI', icon: Network },
   { id: 'storage', label: 'Lưu trữ', icon: HardDrive },
   { id: 'security', label: 'Bảo mật', icon: Shield },
-  { id: 'providers', label: 'Nhà cung cấp model', icon: Cpu },
+  { id: 'providers', label: 'Nhà cung cấp', icon: Cpu },
   { id: 'autonomous', label: 'Tự động', icon: Zap },
 ] as const;
 
@@ -57,6 +65,7 @@ export default function SettingsPage() {
   const [provName, setProvName] = useState('');
   const [provUrl, setProvUrl] = useState('');
   const [provKey, setProvKey] = useState('');
+
   // Autonomous config state
   const [autoEnabled, setAutoEnabled] = useState(false);
   const [autoInterval, setAutoInterval] = useState(30);
@@ -74,6 +83,14 @@ export default function SettingsPage() {
   const [theme, setTheme] = useState('dark');
   const [language, setLanguage] = useState('vi');
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // Connections tab state
+  const [showConnForm, setShowConnForm] = useState(false);
+  const [editConn, setEditConn] = useState<any>(null);
+  const [showComboForm, setShowComboForm] = useState(false);
+  const [editCombo, setEditCombo] = useState<ModelCombo | null>(null);
+  const [combos, setCombos] = useState<ModelCombo[]>([]);
+  const [connRefresh, setConnRefresh] = useState(0);
 
   const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3101';
   const headers = () => ({
@@ -122,6 +139,13 @@ export default function SettingsPage() {
     } catch {}
   };
 
+  const loadCombos = async () => {
+    try {
+      const data = await api.getCombos();
+      setCombos(Array.isArray(data) ? data : []);
+    } catch { setCombos([]); }
+  };
+
   useEffect(() => {
     loadSettings();
     loadStorage();
@@ -154,12 +178,9 @@ export default function SettingsPage() {
   };
 
   useEffect(() => {
-    if (activeTab === 'admin') {
-      loadAdminUsers();
-    }
-    if (activeTab === 'autonomous') {
-      loadAutonomous();
-    }
+    if (activeTab === 'admin') loadAdminUsers();
+    if (activeTab === 'autonomous') loadAutonomous();
+    if (activeTab === 'connections') loadCombos();
   }, [activeTab]);
 
   const savePreferences = async () => {
@@ -254,6 +275,26 @@ export default function SettingsPage() {
     return `${(b / 1073741824).toFixed(1)} GB`;
   };
 
+  const handleConnSaved = () => {
+    setShowConnForm(false);
+    setEditConn(null);
+    setConnRefresh(r => r + 1);
+  };
+
+  const handleComboSaved = () => {
+    setShowComboForm(false);
+    setEditCombo(null);
+    loadCombos();
+  };
+
+  const deleteCombo = async (id: string) => {
+    if (!confirm('Xóa combo này?')) return;
+    try {
+      await api.deleteCombo(id);
+      loadCombos();
+    } catch {}
+  };
+
   const inputCls = "w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none";
 
   return (
@@ -262,12 +303,12 @@ export default function SettingsPage() {
         <Settings size={20} /> Cài đặt
       </h1>
 
-      <div className="flex gap-1 mb-6 border-b border-zinc-800 pb-px">
+      <div className="flex gap-1 mb-6 border-b border-zinc-800 pb-px overflow-x-auto">
         {tabs.map(tab => {
           const Icon = tab.icon;
           return (
             <button key={tab.id} onClick={() => setActiveTab(tab.id as any)}
-              className={`flex items-center gap-1.5 px-3 py-2 text-sm rounded-t transition ${
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm rounded-t transition whitespace-nowrap ${
                 activeTab === tab.id ? 'text-white border-b-2 border-blue-500' : 'text-zinc-500 hover:text-zinc-300'
               }`}>
               <Icon size={14} /> {tab.label}
@@ -331,6 +372,120 @@ export default function SettingsPage() {
             </div>
             {saveSuccess && <p className="text-green-400 text-xs mb-2">Đã lưu!</p>}
             <button onClick={savePreferences} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">Lưu tùy chọn</button>
+          </div>
+        )}
+
+        {activeTab === 'connections' && (
+          <div className="space-y-6">
+            {/* Connection Form overlay */}
+            {(showConnForm || editConn) ? (
+              <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-4">
+                <ConnectionForm
+                  editConn={editConn}
+                  onSave={handleConnSaved}
+                  onCancel={() => { setShowConnForm(false); setEditConn(null); }}
+                />
+              </div>
+            ) : (
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h3 className="text-white font-medium text-sm">Kết nối nhà cung cấp AI</h3>
+                    <p className="text-xs text-zinc-500 mt-0.5">Quản lý API keys và kết nối đến các nhà cung cấp AI</p>
+                  </div>
+                </div>
+                <HealthDashboard />
+              <div className="mt-6" />
+              <ConnectionList
+                  onAdd={() => setShowConnForm(true)}
+                  onEdit={(conn) => { setEditConn(conn); setShowConnForm(false); }}
+                  refreshTrigger={connRefresh}
+                />
+              </div>
+            )}
+
+            {/* Combos section */}
+            <div className="border-t border-zinc-800 pt-5">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h3 className="text-white font-medium text-sm">Combo model</h3>
+                  <p className="text-xs text-zinc-500 mt-0.5">Nhóm nhiều model với chiến lược dự phòng hoặc luân phiên</p>
+                </div>
+              </div>
+
+              {showComboForm || editCombo ? (
+                <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-4">
+                  <ComboForm
+                    editCombo={editCombo}
+                    onSave={handleComboSaved}
+                    onCancel={() => { setShowComboForm(false); setEditCombo(null); }}
+                  />
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {combos.length === 0 ? (
+                    <div className="text-center py-6 text-zinc-500">
+                      <div className="text-2xl mb-1">🔀</div>
+                      <p className="text-sm">Chưa có combo nào.</p>
+                    </div>
+                  ) : (
+                    combos.map(combo => {
+                      let modelList: string[] = [];
+                      try { modelList = JSON.parse(combo.models) || []; } catch {}
+                      return (
+                        <div key={combo.id} className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-base">🔀</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium text-white">{combo.name}</span>
+                                <span className="text-xs px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                                  {combo.strategy === 'fallback' ? 'dự phòng' : 'luân phiên'}
+                                </span>
+                                {!combo.is_active && (
+                                  <span className="text-xs text-zinc-600">tắt</span>
+                                )}
+                              </div>
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {modelList.slice(0, 5).map((m, i) => (
+                                  <span key={i} className="text-xs text-zinc-500">
+                                    {i > 0 && <span className="text-zinc-700 mr-1">{combo.strategy === 'fallback' ? '→' : '↻'}</span>}
+                                    {m}
+                                  </span>
+                                ))}
+                                {modelList.length > 5 && <span className="text-xs text-zinc-600">+{modelList.length - 5}</span>}
+                              </div>
+                            </div>
+                            <div className="flex gap-1">
+                              <button onClick={() => setEditCombo(combo)}
+                                className="p-1.5 rounded hover:bg-zinc-700 text-zinc-400 hover:text-white transition">
+                                <Cpu size={13} />
+                              </button>
+                              <button onClick={() => deleteCombo(combo.id)}
+                                className="p-1.5 rounded hover:bg-zinc-700 text-red-400 hover:text-red-300 transition">
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                  <button
+                    onClick={() => setShowComboForm(true)}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-dashed border-zinc-700 text-zinc-400 hover:border-blue-500 hover:text-blue-400 transition text-sm"
+                  >
+                    <Plus size={14} /> Tạo combo mới
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Separator */}
+            <div className="border-t border-zinc-700/50 my-6" />
+
+            {/* Audio Settings */}
+            <AudioSettings />
           </div>
         )}
 
@@ -571,4 +726,3 @@ export default function SettingsPage() {
     </div>
   );
 }
-

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"encoding/json"
+	"github.com/ahvholding/ahvclaw/security"
 	"fmt"
 	"time"
 )
@@ -42,6 +43,8 @@ func (e *Executor) executeInternal(name string, argsJSON json.RawMessage) *ToolR
 		return e.memorySave(argsJSON)
 	case "memory_search":
 		return e.memorySearch(argsJSON)
+	case "server_list":
+		return e.serverList(argsJSON)
 	case "server_ssh_exec":
 		return e.serverSSHExec(argsJSON)
 	case "server_status":
@@ -64,12 +67,32 @@ func (e *Executor) executeInternal(name string, argsJSON json.RawMessage) *ToolR
 		return e.manageScheduledTask(argsJSON)
 	case "send_file":
 		return e.sendFile(argsJSON)
+	case "skill_install":
+		return e.skillInstall(argsJSON)
 	default:
 		return &ToolResult{Name: name, Error: fmt.Sprintf("unknown tool: %s", name)}
 	}
 }
 
 func (e *Executor) Execute(name string, argsJSON json.RawMessage) *ToolResult {
+	// Security: check shell commands and file paths
+	if name == "terminal_exec" {
+		var args struct{ Command string `json:"command"` }
+		if json.Unmarshal(argsJSON, &args) == nil {
+			if blocked, reason := security.CheckShellCommand(args.Command); blocked {
+				return &ToolResult{Name: name, Error: "Security: " + reason}
+			}
+		}
+	}
+	if name == "file_read" || name == "file_write" || name == "file_list" {
+		var args struct{ Path string `json:"path"` }
+		if json.Unmarshal(argsJSON, &args) == nil {
+			if blocked, reason := security.CheckFilePath(args.Path); blocked {
+				return &ToolResult{Name: name, Error: "Security: " + reason}
+			}
+		}
+	}
+
 	timeout := 30 * time.Second
 	switch name {
 	case "browser_navigate", "browser_extract", "browser_screenshot":

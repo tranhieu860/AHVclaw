@@ -675,6 +675,64 @@ var migrations = []string{
 	// 057: Unique index for cognitive upsert
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_cognitive_embeddings_unique_source ON cognitive_embeddings(user_id, source_type, source_id)`,
 
+	// =============================================
+	// Phase 10 Migrations - Provider Connections & Model Combos
+	// =============================================
+
+	// 058: provider_connections table
+	`CREATE TABLE IF NOT EXISTS provider_connections (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+		provider_type VARCHAR(30) NOT NULL,
+		auth_type VARCHAR(20) DEFAULT 'api_key',
+		name VARCHAR(255) NOT NULL,
+		priority INT DEFAULT 1,
+		api_url TEXT NOT NULL,
+		api_format VARCHAR(20) DEFAULT 'openai',
+		api_key_encrypted TEXT DEFAULT '',
+		access_token_encrypted TEXT DEFAULT '',
+		refresh_token_encrypted TEXT DEFAULT '',
+		token_expires_at TIMESTAMPTZ,
+		oauth_scope TEXT DEFAULT '',
+		is_active BOOLEAN DEFAULT true,
+		test_status VARCHAR(20) DEFAULT 'unknown',
+		error_code INT DEFAULT 0,
+		last_error TEXT DEFAULT '',
+		last_error_at TIMESTAMPTZ,
+		backoff_level INT DEFAULT 0,
+		models JSONB DEFAULT '[]',
+		provider_data JSONB DEFAULT '{}',
+		created_at TIMESTAMPTZ DEFAULT now(),
+		updated_at TIMESTAMPTZ DEFAULT now()
+	)`,
+
+	// 059: provider_connections indexes
+	`CREATE INDEX IF NOT EXISTS idx_provider_connections_user ON provider_connections(user_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_provider_connections_type ON provider_connections(user_id, provider_type)`,
+
+	// 060: model_combos table
+	`CREATE TABLE IF NOT EXISTS model_combos (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+		name VARCHAR(255) NOT NULL,
+		models JSONB NOT NULL DEFAULT '[]',
+		strategy VARCHAR(20) DEFAULT 'fallback',
+		is_active BOOLEAN DEFAULT true,
+		created_at TIMESTAMPTZ DEFAULT now(),
+		updated_at TIMESTAMPTZ DEFAULT now()
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_model_combos_user ON model_combos(user_id)`,
+
+	// 061: migrate existing model_providers data into provider_connections
+	`INSERT INTO provider_connections (id, user_id, provider_type, auth_type, name, api_url, api_format, api_key_encrypted, models, is_active, created_at, updated_at)
+SELECT id, user_id, 'custom', 'api_key', name, api_url, 'openai', api_key_encrypted, models, is_active, created_at, updated_at
+FROM model_providers
+ON CONFLICT (id) DO NOTHING`,
+
+	// 062: Add goal_id to scheduled_tasks for goal-task linkage
+	`ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS goal_id UUID REFERENCES goals(id) ON DELETE SET NULL`,
+	`CREATE INDEX IF NOT EXISTS idx_tasks_goal ON scheduled_tasks(goal_id) WHERE goal_id IS NOT NULL`,
+
 }
 
 func RunMigrations() error {

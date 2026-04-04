@@ -83,3 +83,28 @@ func (e *Executor) serverStatus(argsJSON json.RawMessage) *ToolResult {
 
 	return &ToolResult{Name: "server_status", Content: status}
 }
+
+func (e *Executor) serverList(argsJSON json.RawMessage) *ToolResult {
+	rows, err := db.Pool.Query(context.Background(),
+		"SELECT name, host, port, environment, status FROM servers WHERE user_id = $1 ORDER BY name", e.UserID)
+	if err != nil {
+		return &ToolResult{Name: "server_list", Error: err.Error()}
+	}
+	defer rows.Close()
+
+	var result string
+	count := 0
+	for rows.Next() {
+		var name, host, env, status string
+		var port int
+		if err := rows.Scan(&name, &host, &port, &env, &status); err != nil {
+			continue
+		}
+		count++
+		result += fmt.Sprintf("%d. %s — %s:%d [%s] (%s)\n", count, name, host, port, env, status)
+	}
+	if count == 0 {
+		return &ToolResult{Name: "server_list", Content: "No servers registered."}
+	}
+	return &ToolResult{Name: "server_list", Content: fmt.Sprintf("Found %d server(s):\n\n%s", count, result)}
+}

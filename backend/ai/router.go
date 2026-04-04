@@ -159,3 +159,11 @@ func (r *RouterClient) ListModels() (json.RawMessage, error) {
 	body, err := io.ReadAll(resp.Body)
 	return body, err
 }
+
+// StreamWithFormat dispatches to the correct streaming client based on API format.
+func (r *RouterClient) StreamWithFormat(ctx context.Context, format string, req ChatCompletionRequest, onChunk func(StreamChunk)) error {
+	if format == "anthropic" {
+		return r.StreamAnthropicChat(ctx, req, onChunk)
+	}
+	return r.StreamChatWithContext(ctx, req, onChunk)
+}

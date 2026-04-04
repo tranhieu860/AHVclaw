@@ -2,6 +2,7 @@ package autonomous
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"log"
@@ -9,6 +10,8 @@ import (
 	"time"
 
 	"github.com/ahvholding/ahvclaw/ai"
+	"strings"
+
 	"github.com/ahvholding/ahvclaw/cognitive"
 	"github.com/ahvholding/ahvclaw/db"
 	"github.com/ahvholding/ahvclaw/engine"
@@ -20,6 +23,7 @@ import (
 var (
 	heartbeatSem         = make(chan struct{}, 5) // max 5 concurrent heartbeat runs
 	consolidationRunning sync.Map
+	reflectionRunning    sync.Map
 )
 
 // DeliverFunc is the callback for delivering heartbeat output to a user channel.
@@ -96,15 +100,18 @@ func (d *Daemon) tick(ctx context.Context) {
 				`SELECT MAX(created_at) FROM reflections WHERE user_id=$1 AND created_at > NOW() - INTERVAL '20 hours'`,
 				e.userID).Scan(&lastReflection)
 			if lastReflection == nil {
-				go func(uid uuid.UUID, tz string) {
-					refCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-					defer cancel()
-					if err := RunReflection(refCtx, uid, tz, d.router); err != nil {
-						log.Printf("[heartbeat] reflection error for %s: %v", uid, err)
-					} else {
-						log.Printf("[heartbeat] reflection complete for %s", uid)
-					}
-				}(e.userID, cfg.Timezone)
+				if _, loaded := reflectionRunning.LoadOrStore(e.userID, true); !loaded {
+					go func(uid uuid.UUID, tz string) {
+						defer reflectionRunning.Delete(uid)
+						refCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+						defer cancel()
+						if err := RunReflection(refCtx, uid, tz, d.router); err != nil {
+							log.Printf("[heartbeat] reflection error for %s: %v", uid, err)
+						} else {
+							log.Printf("[heartbeat] reflection complete for %s", uid)
+						}
+					}(e.userID, cfg.Timezone)
+				}
 			}
 
 			// Run cognitive consolidation once per day during quiet hours
@@ -131,6 +138,59 @@ func (d *Daemon) tick(ctx context.Context) {
 			}
 			log.Printf("[heartbeat] quiet hours for user %s, skipping heartbeat", e.userID)
 			continue
+		}
+
+		// Catch-up: run reflection if it was missed during quiet hours
+		{
+			var reflToday int
+			db.Pool.QueryRow(ctx,
+				`SELECT COUNT(*) FROM reflections WHERE user_id=$1 AND date=CURRENT_DATE`,
+				e.userID).Scan(&reflToday)
+			if reflToday == 0 {
+				catchupLoc, _ := time.LoadLocation(cfg.Timezone)
+				nowLocal := time.Now().In(catchupLoc)
+				if nowLocal.Hour() >= 8 { // Past morning — reflection should have run
+					if _, loaded := reflectionRunning.LoadOrStore(e.userID, true); !loaded {
+						go func(uid uuid.UUID, tz string) {
+							defer reflectionRunning.Delete(uid)
+							refCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+							defer cancel()
+							if err := RunReflection(refCtx, uid, tz, d.router); err != nil {
+								log.Printf("[heartbeat] catch-up reflection error for %s: %v", uid, err)
+							} else {
+								log.Printf("[heartbeat] catch-up reflection complete for %s", uid)
+							}
+						}(e.userID, cfg.Timezone)
+					}
+				}
+			}
+		}
+
+		// Catch-up: run consolidation if missed
+		{
+			var consolToday int
+			db.Pool.QueryRow(ctx,
+				`SELECT COUNT(*) FROM consolidation_runs WHERE user_id=$1 AND started_at > CURRENT_DATE`,
+				e.userID).Scan(&consolToday)
+			if consolToday == 0 {
+				catchupLoc, _ := time.LoadLocation(cfg.Timezone)
+				nowLocal := time.Now().In(catchupLoc)
+				if nowLocal.Hour() >= 9 {
+					if _, loaded := consolidationRunning.LoadOrStore(e.userID, true); !loaded {
+						go func(uid uuid.UUID) {
+							defer consolidationRunning.Delete(uid)
+							cogCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+							defer cancel()
+							if run, err := cognitive.RunConsolidation(cogCtx, d.router, uid); err != nil {
+								log.Printf("[heartbeat] catch-up consolidation error for %s: %v", uid, err)
+							} else if run != nil {
+								log.Printf("[heartbeat] catch-up consolidation for %s: scanned=%d merged=%d",
+									uid, run.EntriesScanned, run.DuplicatesMerged)
+							}
+						}(e.userID)
+					}
+				}
+			}
 		}
 
 		// Check rate limit
@@ -223,15 +283,31 @@ func (d *Daemon) runForUser(cfg HeartbeatConfig) {
 
 	var outputBuf string
 	tokensIn, tokensOut := 0, 0
+	var actionCount int
 
 	result, err := engine.ProcessChat(ctx, engine.ChatConfig{
-		AIRouter:      d.router,
-		Model:         model,
+		AIRouter:       d.router,
+		Model:          model,
 		FallbackModels: fallbackModels,
-		Messages:      messages,
-		Tools:         safeAITools,
-		Executor:      executor,
-		MaxToolRounds: 5,
+		Messages:       messages,
+		Tools:          safeAITools,
+		Executor:       executor,
+		MaxToolRounds:  5,
+		OnToolCall: func(name, args string) {
+			log.Printf("[heartbeat] tool call: %s", name)
+		},
+		OnToolResult: func(name, content, errStr string) {
+			actionCount++
+			status := "success"
+			if errStr != "" {
+				status = "error"
+			}
+			db.Pool.Exec(context.Background(),
+				`INSERT INTO tool_logs (user_id, tool_name, input, output, status, duration_ms, source)
+				 VALUES ($1, $2, '{}'::jsonb, to_jsonb($3::text), $4, 0, 'heartbeat')`,
+				cfg.UserID, name, truncateStr(content, 2000), status)
+			log.Printf("[heartbeat] tool result: %s (status=%s)", name, status)
+		},
 		OnDone: func(in, out int) {
 			tokensIn = in
 			tokensOut = out
@@ -257,15 +333,37 @@ func (d *Daemon) runForUser(cfg HeartbeatConfig) {
 	}
 
 	// Update run record
-	db.Pool.Exec(context.Background(),
-		`UPDATE heartbeat_runs SET finished_at=NOW(), tokens_used=$1, summary=$2 WHERE id=$3`,
-		tokensOut, summarize(outputBuf, 500), runID,
+	_, updateErr := db.Pool.Exec(context.Background(),
+		`UPDATE heartbeat_runs SET finished_at=NOW(), tokens_used=$1, summary=$2, actions_taken=$3 WHERE id=$4`,
+		tokensOut, summarize(outputBuf, 500), actionCount, runID,
 	)
+	if updateErr != nil {
+		log.Printf("[heartbeat] failed to update run %s: %v", runID, updateErr)
+	} else {
+		log.Printf("[heartbeat] updated run %s: actions=%d tokens=%d", runID, actionCount, tokensOut)
+	}
 
 	// Log as action
 	status := "executed"
 	LogAction(context.Background(), cfg.UserID, &runID,
 		"read", "heartbeat", "Heartbeat autonomous check", 10, status, ptr(outputBuf), nil)
+
+	// Evaluate alerts from heartbeat results
+	if outputBuf != "" {
+		alerts := EvaluateAlerts(cfg.UserID, "heartbeat", outputBuf)
+		for _, alert := range alerts {
+			if d.deliverFunc != nil && cfg.DeliveryChatID != "" {
+				emoji := "\u2139\ufe0f"
+				if alert.Severity == "critical" {
+					emoji = "\U0001f6a8"
+				} else if alert.Severity == "warning" {
+					emoji = "\u26a0\ufe0f"
+				}
+				msg := fmt.Sprintf("%s *[%s] %s*\n%s", emoji, strings.ToUpper(alert.Severity), alert.Rule, alert.Message)
+				d.deliverFunc(cfg.UserID, cfg.DeliveryChannel, cfg.DeliveryChatID, msg)
+			}
+		}
+	}
 
 	log.Printf("[heartbeat] run %s complete for user %s (%d tokens)", runID, cfg.UserID, tokensOut)
 }
@@ -288,16 +386,53 @@ func toAITools(defs []tools.ToolDef) []ai.Tool {
 
 // buildHeartbeatPrompt builds the system prompt for heartbeat runs.
 func buildHeartbeatPrompt(cfg HeartbeatConfig) string {
-	return prompts.DefaultSystemPrompt + fmt.Sprintf(`
+	prompt := prompts.DefaultSystemPrompt + fmt.Sprintf(`
 
-## Autonomous Heartbeat Mode
-You are running in fully autonomous mode. The user is not present.
-Your job: proactively check on things, surface insights, and take low-risk actions.
-- Only use safe read/low-risk tools (file_read, file_list, file_search, http_request, memory_save, memory_search, server_status, knowledge_search)
-- Do NOT write files, execute commands, or make external changes unless explicitly trusted
-- Keep output concise (2-5 sentences or a short bullet list)
-- Delivery channel: %s
+## Autonomous Heartbeat Mode — TOOL EXECUTION REQUIRED
+You are running autonomously. The user is not present.
+
+CRITICAL INSTRUCTION: You MUST use at least one tool in every heartbeat run.
+Do NOT just describe what you would do — actually DO it by calling tools.
+
+Available tools and when to use them:
+- memory_search: Search your long-term memory (USE THIS FIRST to recall context)
+- knowledge_search: Search knowledge base
+- server_status: Check server health metrics (CPU, memory, disk)
+- http_request: Make HTTP requests to check services
+- file_list: List files in workspace
+- file_read: Read file contents
+- file_search: Search for files by pattern
+- memory_save: Save important findings to memory
+
+WORKFLOW:
+1. Read your active goals below
+2. Pick the highest priority goal
+3. Call memory_search or knowledge_search to gather relevant context
+4. Take a concrete action toward the goal
+5. If you find something important, call memory_save to remember it
+6. Report findings briefly (2-5 sentences)
+
+If no goals exist, proactively check server health using server_status.
+
+Delivery channel: %s
 `, cfg.DeliveryChannel)
+
+	// Load and inject prompt suggestions from reflections
+	var suggestionsJSON string
+	db.Pool.QueryRow(context.Background(),
+		`SELECT value FROM user_settings WHERE user_id=$1 AND key='active_prompt_suggestions'`,
+		cfg.UserID).Scan(&suggestionsJSON)
+	if suggestionsJSON != "" {
+		var suggestions []string
+		if json.Unmarshal([]byte(suggestionsJSON), &suggestions) == nil && len(suggestions) > 0 {
+			prompt += "\n## Self-improvement notes from reflection:\n"
+			for _, s := range suggestions {
+				prompt += "- " + s + "\n"
+			}
+		}
+	}
+
+	return prompt
 }
 
 // buildHeartbeatTask builds the user-turn prompt for a heartbeat run.
@@ -376,6 +511,13 @@ func summarize(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+func truncateStr(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max]
 }
 
 // ptr returns a pointer to the given string.

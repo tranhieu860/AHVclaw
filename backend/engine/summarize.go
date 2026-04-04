@@ -18,7 +18,7 @@ const (
 
 // CheckAndSummarize checks if a conversation needs summarization and triggers it.
 // Call this after saving a new message.
-func CheckAndSummarize(ctx context.Context, convID uuid.UUID, messageCount int, aiRouter *ai.RouterClient, model string) {
+func CheckAndSummarize(ctx context.Context, convID uuid.UUID, messageCount int, aiRouter *ai.RouterClient, model string, apiFormat ...string) {
 	var summaryAt *time.Time
 	db.Pool.QueryRow(ctx, "SELECT summary_at FROM conversations WHERE id = $1", convID).Scan(&summaryAt)
 
@@ -42,13 +42,17 @@ func CheckAndSummarize(ctx context.Context, convID uuid.UUID, messageCount int, 
 	go func() {
 		summarizeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := generateSummary(summarizeCtx, convID, aiRouter, model); err != nil {
+		af := "openai"
+		if len(apiFormat) > 0 && apiFormat[0] != "" {
+			af = apiFormat[0]
+		}
+		if err := generateSummary(summarizeCtx, convID, aiRouter, model, af); err != nil {
 			log.Printf("[summarize] failed for conversation %s: %v", convID, err)
 		}
 	}()
 }
 
-func generateSummary(ctx context.Context, convID uuid.UUID, aiRouter *ai.RouterClient, model string) error {
+func generateSummary(ctx context.Context, convID uuid.UUID, aiRouter *ai.RouterClient, model string, apiFormat string) error {
 	rows, err := db.Pool.Query(ctx,
 		`SELECT role, content FROM messages
 		 WHERE conversation_id = $1 AND role IN ('user', 'assistant') AND content != ''
@@ -81,7 +85,7 @@ func generateSummary(ctx context.Context, convID uuid.UUID, aiRouter *ai.RouterC
 	}
 
 	var summary string
-	err = aiRouter.StreamChat(ai.ChatCompletionRequest{
+	err = aiRouter.StreamWithFormat(ctx, apiFormat, ai.ChatCompletionRequest{
 		Model:    model,
 		Messages: messages,
 		Stream:   true,

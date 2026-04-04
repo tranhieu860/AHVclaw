@@ -20,7 +20,8 @@ func VerifyResponse(thinking ThinkingBlock, response string, toolsUsed []string,
 	}
 
 	// Check 1: Low confidence without disclaimer
-	if thinking.Confidence == "thấp" {
+	// Skip this check if tools were used — tool results are factual data
+	if thinking.Confidence == "thấp" && len(toolsUsed) == 0 {
 		hasDisclaimer := strings.Contains(response, "không chắc") ||
 			strings.Contains(response, "chưa chắc") ||
 			strings.Contains(response, "không rõ") ||

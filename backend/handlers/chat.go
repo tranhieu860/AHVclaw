@@ -260,6 +260,41 @@ func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
 		}
 	}
 
+	// Load server context if conversation is linked to a server
+	var serverID *uuid.UUID
+	db.Pool.QueryRow(ctx,
+		"SELECT server_id FROM conversations WHERE id = $1", *convID,
+	).Scan(&serverID)
+	if serverID != nil {
+		var serverName, serverHost, serverEnv string
+		var serverPort int
+		err := db.Pool.QueryRow(ctx,
+			`SELECT name, host, port, environment FROM servers WHERE id = $1`,
+			*serverID,
+		).Scan(&serverName, &serverHost, &serverPort, &serverEnv)
+		if err == nil {
+			// Sanitize server name to prevent prompt injection
+			safeName := sanitizeForPrompt(serverName)
+			safeHost := sanitizeForPrompt(serverHost)
+			safeEnv := sanitizeForPrompt(serverEnv)
+			systemPrompt += fmt.Sprintf(`
+
+## Server Context — ISOLATED SERVER CONVERSATION
+You are managing server: %s (%s:%d)
+Environment: %s
+
+This conversation is EXCLUSIVELY about this server. You have full access to:
+- server_ssh_exec: Execute any command on this server
+- server_status: Check CPU, memory, disk, processes
+- All other tools for development, deployment, and management
+
+Use server_ssh_exec with server_name="%s" for all remote operations.
+For destructive operations (rm -rf, DROP, format, systemctl stop critical services),
+always confirm with the user first.
+`, safeName, safeHost, serverPort, safeEnv, safeName)
+		}
+	}
+
 	// Load memories via semantic search with fallback to recent
 	var memoryContext strings.Builder
 	semanticResults, semErr := embeddings.SearchByEmbedding(userID.String(), req.Content, 10)
@@ -471,4 +506,20 @@ func sendWSJSON(conn *websocket.Conn, msgType string, data interface{}) {
 
 func sendWSError(conn *websocket.Conn, errMsg string) {
 	sendWSJSON(conn, "error", map[string]string{"message": errMsg})
+}
+
+// sanitizeForPrompt strips characters that could be used for prompt injection.
+func sanitizeForPrompt(s string) string {
+	var sb strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
+			r == ' ' || r == '-' || r == '_' || r == '.' || r == '#' || r == ':' || r == '(' || r == ')' {
+			sb.WriteRune(r)
+		}
+	}
+	result := sb.String()
+	if len(result) > 100 {
+		result = result[:100]
+	}
+	return result
 }

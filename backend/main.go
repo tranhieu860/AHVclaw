@@ -19,6 +19,7 @@ import (
 	"github.com/ahvholding/ahvclaw/config"
 	"github.com/ahvholding/ahvclaw/crypto"
 	"github.com/ahvholding/ahvclaw/db"
+	"github.com/ahvholding/ahvclaw/cognitive"
 	"github.com/ahvholding/ahvclaw/embeddings"
 	"github.com/ahvholding/ahvclaw/engine"
 	"github.com/ahvholding/ahvclaw/handlers"
@@ -220,6 +221,53 @@ func main() {
 	_ = hbDaemon
 	go hbDaemon.Start(hbCtx)
 
+	// Cognitive backfill: ensure all messages have embeddings
+	go func() {
+		time.Sleep(10 * time.Second) // Wait for services to initialize
+		bfCtx, bfCancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer bfCancel()
+		rows, err := db.Pool.Query(bfCtx,
+			`SELECT COUNT(*) FROM messages WHERE role IN ('user','assistant')`)
+		if err == nil {
+			var msgCount int
+			if rows.Next() {
+				rows.Scan(&msgCount)
+			}
+			rows.Close()
+			var embCount int
+			db.Pool.QueryRow(bfCtx, `SELECT COUNT(*) FROM cognitive_embeddings`).Scan(&embCount)
+			if embCount < msgCount/2 {
+				log.Printf("[cognitive] backfill needed: %d messages, %d embeddings — triggering", msgCount, embCount)
+				if stats, err := func() (int, error) {
+					total := 0
+					uRows, uErr := db.Pool.Query(bfCtx, `SELECT DISTINCT id FROM users`)
+					if uErr != nil {
+						return 0, uErr
+					}
+					defer uRows.Close()
+					for uRows.Next() {
+						var uid uuid.UUID
+						if uRows.Scan(&uid) == nil {
+							n, err := cognitive.BackfillMessages(bfCtx, uid, 200)
+							if err != nil {
+								log.Printf("[cognitive] backfill error for user %s: %v", uid, err)
+							} else {
+								total += n
+							}
+						}
+					}
+					return total, nil
+				}(); err != nil {
+					log.Printf("[cognitive] backfill error: %v", err)
+				} else {
+					log.Printf("[cognitive] backfill complete: %v", stats)
+				}
+			} else {
+				log.Printf("[cognitive] backfill not needed: %d messages, %d embeddings", msgCount, embCount)
+			}
+		}
+	}()
+
 
 	// Auto-start active bots after service starts
 	go func() {
@@ -406,6 +454,29 @@ func main() {
 	protected.Put("/providers/:id", handlers.UpdateProvider)
 	protected.Delete("/providers/:id", handlers.DeleteProvider)
 	protected.Post("/providers/:id/test", handlers.TestProvider)
+	// Connections
+	protected.Get("/connections", handlers.ListConnections)
+	protected.Post("/connections", handlers.CreateConnection)
+	protected.Put("/connections/:id", handlers.UpdateConnection)
+	protected.Delete("/connections/:id", handlers.DeleteConnection)
+	protected.Post("/connections/:id/test", handlers.TestConnection)
+	protected.Post("/connections/:id/reset", handlers.ResetConnection)
+	protected.Get("/connections/health", handlers.ConnectionHealthStats)
+	// Combos
+	protected.Get("/combos", handlers.ListCombos)
+	protected.Post("/combos", handlers.CreateCombo)
+	protected.Put("/combos/:id", handlers.UpdateCombo)
+	protected.Delete("/combos/:id", handlers.DeleteCombo)
+	// Registry and aggregated models
+	protected.Get("/provider-types", handlers.ListProviderTypes)
+	protected.Get("/models/available", handlers.ListAvailableModels)
+	// Voice / Audio
+	protected.Get("/voice/settings", handlers.GetVoiceSettings)
+	protected.Put("/voice/settings", handlers.UpdateVoiceSettings)
+	protected.Post("/voice/test-tts", handlers.TestTTS)
+	protected.Post("/voice/test-stt", handlers.TestSTT)
+	protected.Post("/voice/transcribe", handlers.TranscribeAudioHandler)
+	protected.Post("/voice/synthesize", handlers.SynthesizeAudioHandler)
 	protected.Post("/upload", handlers.UploadFile)
 	protected.Get("/uploads/:id", handlers.ServeUpload)
 	protected.Delete("/uploads/:id", handlers.DeleteUpload)
@@ -459,6 +530,7 @@ func main() {
 	devRoutes.Delete("/servers/:id", handlers.DeleteServer)
 	devRoutes.Post("/servers/:id/exec", handlers.ServerExec)
 	devRoutes.Get("/servers/:id/status", handlers.ServerStatus)
+	devRoutes.Get("/servers/:id/conversation", handlers.ServerConversation)
 
 	// Bot management (dev+ only)
 	devRoutes.Get("/bots", handlers.ListBots)
@@ -469,6 +541,14 @@ func main() {
 	devRoutes.Post("/bots/:id/start", handlers.StartBot)
 	devRoutes.Post("/bots/:id/stop", handlers.StopBot)
 	devRoutes.Get("/bots/:id/status", handlers.BotStatus)
+
+	// MCP (dev+ only)
+	devRoutes.Post("/mcp", handlers.MCPEndpoint)
+	devRoutes.Post("/mcp/sse", handlers.MCPEndpointSSE)
+	devRoutes.Get("/mcp/bridges", handlers.MCPBridgeList)
+	devRoutes.Post("/mcp/bridges", handlers.MCPBridgeAdd)
+	devRoutes.Delete("/mcp/bridges/:id", handlers.MCPBridgeRemove)
+	devRoutes.Get("/mcp/bridges/:id/tools", handlers.MCPBridgeTools)
 
 	// Admin only routes
 	adminRoutes := protected.Group("", auth.RequireRole("admin"))
@@ -491,7 +571,7 @@ func main() {
 		_ = app.Shutdown()
 	}()
 
-	addr := fmt.Sprintf(":%d", cfg.Port)
+	addr := fmt.Sprintf("127.0.0.1:%d", cfg.Port)
 	log.Printf("AHVclaw API starting on %s", addr)
 	if err := app.Listen(addr); err != nil {
 		log.Fatal(err)

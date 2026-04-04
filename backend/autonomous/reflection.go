@@ -212,6 +212,32 @@ func applyLessons(ctx context.Context, userID uuid.UUID, res ReflectionResult, d
 			log.Printf("[reflection] failed to save pattern '%s': %v", p.Description, err)
 		}
 	}
+
+	// Auto-accept high-confidence patterns (>= 0.80)
+	for _, p := range res.DetectedPatterns {
+		if p.Confidence >= 0.80 {
+			db.Pool.Exec(ctx,
+				`UPDATE detected_patterns SET status='accepted', updated_at=NOW()
+				 WHERE user_id=$1 AND description=$2 AND status='detected'`,
+				userID, p.Description)
+			log.Printf("[reflection] auto-accepted pattern: %s (confidence=%.2f)", p.Description, p.Confidence)
+		}
+	}
+
+	// Apply prompt suggestions to user settings for injection into future prompts
+	if len(res.PromptSuggestions) > 0 {
+		sugJSON, _ := json.Marshal(res.PromptSuggestions)
+		db.Pool.Exec(ctx,
+			`INSERT INTO user_settings (user_id, key, value) VALUES ($1, 'active_prompt_suggestions', $2)
+			 ON CONFLICT (user_id, key) DO UPDATE SET value=$2`,
+			userID, string(sugJSON))
+		log.Printf("[reflection] saved %d prompt suggestions for user %s", len(res.PromptSuggestions), userID)
+		// Log suggestion count for observability
+		db.Pool.Exec(ctx,
+			`UPDATE heartbeat_runs SET summary = COALESCE(summary,'') || ' [reflection: ' || $1 || ' suggestions]'
+			 WHERE user_id=$2 AND started_at = (SELECT MAX(started_at) FROM heartbeat_runs WHERE user_id=$2)`,
+			fmt.Sprintf("%d", len(res.PromptSuggestions)), userID)
+	}
 }
 
 // getUserModel fetches the user's preferred AI model from settings
@@ -325,6 +351,9 @@ Be concise. Return only valid JSON.`
 
 	// 7. Auto-apply lessons and patterns
 	applyLessons(ctx, userID, reflection, today)
+
+	// Extract/update goals from reflection
+	ExtractGoalsFromReflection(ctx, userID, reflection, router)
 
 	log.Printf("[reflection] user %s reflection complete: score=%.1f lessons=%d patterns=%d",
 		userID, reflection.PerformanceScore, len(reflection.Lessons), len(reflection.DetectedPatterns))

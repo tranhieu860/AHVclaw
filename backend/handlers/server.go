@@ -173,3 +173,54 @@ func ServerStatus(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{"status": status})
 }
+
+// ServerConversation returns or creates the conversation linked to a server.
+func ServerConversation(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(uuid.UUID)
+	serverID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid server ID"})
+	}
+
+	// Verify server ownership
+	var serverName, serverHost, serverEnv string
+	var serverPort int
+	err = db.Pool.QueryRow(context.Background(),
+		"SELECT name, host, port, environment FROM servers WHERE id = $1 AND user_id = $2",
+		serverID, userID).Scan(&serverName, &serverHost, &serverPort, &serverEnv)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "server not found"})
+	}
+
+	// Find existing conversation for this server
+	var convID uuid.UUID
+	var convTitle *string
+	err = db.Pool.QueryRow(context.Background(),
+		"SELECT id, title FROM conversations WHERE user_id = $1 AND server_id = $2 ORDER BY updated_at DESC LIMIT 1",
+		userID, serverID).Scan(&convID, &convTitle)
+
+	if err != nil {
+		// Create new conversation for this server
+		convID = uuid.New()
+		title := serverName + " (" + serverHost + ")"
+		_, err = db.Pool.Exec(context.Background(),
+			"INSERT INTO conversations (id, user_id, server_id, title, model) VALUES ($1, $2, $3, $4, $5)",
+			convID, userID, serverID, title, "AHV-Holding-TroLy")
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "failed to create conversation: " + err.Error()})
+		}
+		convTitle = &title
+	}
+
+	return c.JSON(fiber.Map{
+		"conversation_id": convID,
+		"title":           convTitle,
+		"server": fiber.Map{
+			"id":          serverID,
+			"name":        serverName,
+			"host":        serverHost,
+			"port":        serverPort,
+			"environment": serverEnv,
+		},
+	})
+}

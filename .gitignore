@@ -1,6 +1,40 @@
+# Binaries
 backend/ahvclaw-api
+backend/ahvclaw
+backend/ahvclaw-backend
+
+# Environment
 .env
-*.log
+.env.local
+.env.bak
 backend/.env
 backend/.env.bak
-backend/ahvclaw-backend
+frontend/.env.local
+
+# Dependencies
+node_modules/
+frontend/node_modules/
+backend/browser/node_modules/
+
+# Build
+frontend/.next/
+*.exe
+
+# Logs
+*.log
+
+# Backups
+*.bak
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Workspace
+workspace/
+.npm/
+*.bak

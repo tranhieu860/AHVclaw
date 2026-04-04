@@ -140,6 +140,38 @@ func Search(ctx context.Context, opts SearchOptions) ([]SearchResult, error) {
 	// Sort by final score descending
 	sortByScore(results)
 
+	// Cross-reference boost: entries connected via knowledge graph get a score bump
+	if len(results) > 0 {
+		topN := len(results)
+		if topN > 10 {
+			topN = 10
+		}
+		for i := 0; i < topN; i++ {
+			refs, refErr := GetRelatedEntities(ctx, opts.UserID, results[i].Entry.SourceType, results[i].Entry.SourceID)
+			if refErr != nil || len(refs) == 0 {
+				continue
+			}
+			for _, ref := range refs {
+				targetID := ref.TargetID
+				if ref.SourceID != results[i].Entry.SourceID {
+					targetID = ref.SourceID
+				}
+				for j := range results {
+					if j == i {
+						continue
+					}
+					if results[j].Entry.SourceID == targetID {
+						boost := 0.05 * ref.Strength
+						results[j].FinalScore += boost
+						break
+					}
+				}
+			}
+		}
+		// Re-sort after cross-ref boost
+		sortByScore(results)
+	}
+
 	// Trim to limit
 	if len(results) > opts.Limit {
 		results = results[:opts.Limit]

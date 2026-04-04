@@ -2,12 +2,15 @@ package autonomous
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
 	"time"
 
+	"github.com/ahvholding/ahvclaw/ai"
 	"github.com/ahvholding/ahvclaw/db"
+	"github.com/ahvholding/ahvclaw/engine"
 	"github.com/google/uuid"
 )
 
@@ -67,6 +70,55 @@ func AnalyzeMood(text string) MoodAnalysis {
 
 	if len(text) < 20 && (strings.Contains(text, "!") || strings.HasSuffix(text, "?!")) {
 		mood.Urgency = "high"
+	}
+
+	return mood
+}
+
+
+// AnalyzeMoodLLM uses AI for more accurate mood detection.
+// Falls back to keyword-based AnalyzeMood for short messages or on error.
+func AnalyzeMoodLLM(ctx context.Context, text string, router *ai.RouterClient, userID uuid.UUID) MoodAnalysis {
+	// Short messages: use fast keyword analysis
+	if len(text) < 30 {
+		return AnalyzeMood(text)
+	}
+
+	prompt := `Analyze the emotional tone of this message (may be Vietnamese or English). Return JSON only:
+{"sentiment": "positive|negative|neutral", "urgency": "low|medium|high|critical", "energy": "low|normal|high", "emotion": "happy|frustrated|stressed|curious|excited|grateful|confused|neutral", "confidence": 0.0-1.0}
+
+Message: ` + text
+
+	model := getUserModel(ctx, userID)
+	result, err := engine.ProcessChat(ctx, engine.ChatConfig{
+		AIRouter:      router,
+		Model:         model,
+		Messages:      []ai.ChatMessage{{Role: "user", Content: prompt}},
+		MaxToolRounds: 0,
+	})
+	if err != nil {
+		log.Printf("[mood] LLM analysis error, falling back to keyword: %v", err)
+		return AnalyzeMood(text)
+	}
+
+	raw := strings.TrimSpace(result.Content)
+	if idx := strings.Index(raw, "{"); idx >= 0 {
+		raw = raw[idx:]
+	}
+	if idx := strings.LastIndex(raw, "}"); idx >= 0 {
+		raw = raw[:idx+1]
+	}
+
+	var mood MoodAnalysis
+	if err := json.Unmarshal([]byte(raw), &mood); err != nil {
+		log.Printf("[mood] LLM parse error, falling back to keyword: %v", err)
+		return AnalyzeMood(text)
+	}
+
+	// Validate
+	validEmotions := map[string]bool{"happy": true, "frustrated": true, "stressed": true, "curious": true, "excited": true, "grateful": true, "confused": true, "neutral": true, "exhausted": true}
+	if !validEmotions[mood.Emotion] {
+		mood.Emotion = "neutral"
 	}
 
 	return mood

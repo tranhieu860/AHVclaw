@@ -17,12 +17,14 @@ var AllTools = []ToolDef{
 	httpRequestDef(),
 	memorySaveDef(),
 	memorySearchDef(),
+	serverListDef(),
 	serverSSHExecDef(),
 	serverStatusDef(),
 	browserNavigateDef(), browserScreenshotDef(), browserClickDef(), browserTypeDef(), browserExtractDef(),
 	knowledgeSearchDef(),
 	delegateAgentDef(),
 	manageScheduledTaskDef(),
+	skillInstallDef(),
 }
 
 func fileReadDef() ToolDef {
@@ -114,6 +116,12 @@ func makeTool(name, desc, params string) ToolDef {
 	return t
 }
 
+func serverListDef() ToolDef {
+	return makeTool("server_list", "List all registered servers with their status", `{
+		"type":"object","properties":{},"required":[]
+	}`)
+}
+
 func serverSSHExecDef() ToolDef {
 	return makeTool("server_ssh_exec", "Execute a command on a registered remote server via SSH", `{
 		"type":"object","properties":{
@@ -203,4 +211,10 @@ func manageScheduledTaskDef() ToolDef {
 			"agent_id":{"type":"string","description":"Agent ID to use for execution (optional)"}
 		},"required":["action"]
 	}`)
+}
+
+func skillInstallDef() ToolDef {
+	return makeTool("skill_install",
+		"Create or update a skill file (SKILL.md) for the bot. Use this to teach yourself new capabilities by writing skill definitions with YAML frontmatter and markdown instructions.",
+		`{"type":"object","properties":{"slug":{"type":"string","description":"Skill identifier (lowercase, numbers, hyphens). Example: data-pipeline"},"content":{"type":"string","description":"Full SKILL.md content starting with YAML frontmatter (---). Include name, description, max_tool_rounds."}},"required":["slug","content"]}`)
 }

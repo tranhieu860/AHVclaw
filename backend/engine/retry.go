@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"errors"
 	"log"
 	"time"
@@ -34,6 +35,22 @@ func RetryableStreamChat(
 	onChunk func(ai.StreamChunk),
 	cfg RetryConfig,
 ) error {
+	return RetryableStreamChatWithContext(context.Background(), aiRouter, "openai", req, onChunk, cfg)
+}
+
+// RetryableStreamChatWithContext is like RetryableStreamChat but respects a
+// caller-supplied context and API format (for non-OpenAI providers).
+func RetryableStreamChatWithContext(
+	ctx context.Context,
+	aiRouter *ai.RouterClient,
+	apiFormat string,
+	req ai.ChatCompletionRequest,
+	onChunk func(ai.StreamChunk),
+	cfg RetryConfig,
+) error {
+	if apiFormat == "" {
+		apiFormat = "openai"
+	}
 	primaryModel := req.Model
 	attempts := cfg.MaxRetries + 1
 
@@ -49,7 +66,7 @@ func RetryableStreamChat(
 			time.Sleep(delay)
 		}
 
-		lastErr = aiRouter.StreamChat(req, onChunk)
+		lastErr = aiRouter.StreamWithFormat(ctx, apiFormat, req, onChunk)
 		if lastErr == nil {
 			return nil
 		}
@@ -67,7 +84,7 @@ func RetryableStreamChat(
 	for _, model := range cfg.FallbackModels {
 		log.Printf("[retry] falling back to model %q", model)
 		req.Model = model
-		err := aiRouter.StreamChat(req, onChunk)
+		err := aiRouter.StreamWithFormat(ctx, apiFormat, req, onChunk)
 		if err == nil {
 			return nil
 		}

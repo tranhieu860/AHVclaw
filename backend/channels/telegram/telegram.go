@@ -293,48 +293,7 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 		}
 
 	case "models":
-		userID, err := a.getBotUserID(ctx)
-		if err != nil {
-			a.sendText(chatID, "Lỗi nội bộ.")
-			return
-		}
-		rows, err := db.Pool.Query(ctx,
-			`SELECT DISTINCT model FROM conversations
-			 WHERE user_id=$1 AND model IS NOT NULL AND model != ''
-			 LIMIT 10`,
-			userID,
-		)
-		if err != nil {
-			a.sendText(chatID, "Không thể lấy danh sách model.")
-			return
-		}
-		defer rows.Close()
-
-		var models []string
-		for rows.Next() {
-			var m string
-			if rows.Scan(&m) == nil && m != "" {
-				models = append(models, m)
-			}
-		}
-
-		if len(models) == 0 {
-			a.sendText(chatID, "Chưa có model nào được sử dụng.")
-			return
-		}
-
-		var kbRows [][]tgbotapi.InlineKeyboardButton
-		for _, m := range models {
-			label := m
-			if len(label) > 30 {
-				label = label[:30] + "..."
-			}
-			kbRows = append(kbRows, tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData(label, "model:"+m),
-			))
-		}
-		keyboard := tgbotapi.NewInlineKeyboardMarkup(kbRows...)
-		a.sendTextWithKeyboard(chatID, "Chọn model AI:", keyboard)
+		a.showProviderList(chatID, 0)
 
 	case "help":
 		help := "Danh sách lệnh:\n\n" +
@@ -760,16 +719,52 @@ func (a *Adapter) handleCallbackQuery(cq *tgbotapi.CallbackQuery) {
 
 	if strings.HasPrefix(data, "model:") {
 		newModel := strings.TrimPrefix(data, "model:")
+
+		// Handle noop separator buttons
+		if newModel == "noop" || strings.HasPrefix(newModel, "─") {
+			return
+		}
+
+		// Handle reset to default
+		if newModel == "reset" {
+			tag, err := db.Pool.Exec(ctx,
+				`UPDATE conversations SET model='', updated_at=now()
+				 WHERE bot_id=$1 AND channel_chat_id=$2 AND status='active'`,
+				botUUID, chatIDStr,
+			)
+			if err != nil || tag.RowsAffected() == 0 {
+				a.sendText(chatID, "Không thể cập nhật model.")
+				return
+			}
+			a.sendText(chatID, "✅ Đã đặt lại về model mặc định của agent.")
+			return
+		}
+
+		// For combo: store "combo/Name" format, for normal model store model name
+		storeModel := newModel
+		displayName := newModel
+		if strings.HasPrefix(newModel, "combo/") {
+			comboName := strings.TrimPrefix(newModel, "combo/")
+			storeModel = comboName
+			displayName = "🔀 " + comboName
+		}
+
 		tag, err := db.Pool.Exec(ctx,
-			`UPDATE conversations SET model=$1
+			`UPDATE conversations SET model=$1, updated_at=now()
 			 WHERE bot_id=$2 AND channel_chat_id=$3 AND status='active'`,
-			newModel, botUUID, chatIDStr,
+			storeModel, botUUID, chatIDStr,
 		)
 		if err != nil || tag.RowsAffected() == 0 {
 			a.sendText(chatID, "Không thể cập nhật model.")
 			return
 		}
-		a.sendText(chatID, fmt.Sprintf("Đã chuyển sang model: %s", newModel))
+		a.sendText(chatID, fmt.Sprintf("✅ Đã chuyển sang: %s", displayName))
+		// Remove the inline keyboard from the original message
+		if cq.Message != nil {
+			removeKb := tgbotapi.NewEditMessageReplyMarkup(chatID, cq.Message.MessageID,
+				tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}})
+			a.api.Send(removeKb)
+		}
 
 	} else if strings.HasPrefix(data, "agent:") {
 		agentIDStr := strings.TrimPrefix(data, "agent:")
@@ -862,6 +857,71 @@ func (a *Adapter) handleCallbackQuery(cq *tgbotapi.CallbackQuery) {
 		taskUUID, _ := uuid.Parse(taskIDStr)
 		_, _ = db.Pool.Exec(ctx, "DELETE FROM scheduled_tasks WHERE id=$1", taskUUID)
 		a.sendText(chatID, "Đã xóa task.")
+
+	} else if strings.HasPrefix(data, "mprov:") {
+		provType := strings.TrimPrefix(data, "mprov:")
+		botUserID, bErr := a.getBotUserID(ctx)
+		if bErr != nil {
+			return
+		}
+		var currentModel string
+		db.Pool.QueryRow(ctx,
+			`SELECT COALESCE(model, '') FROM conversations
+			 WHERE bot_id=$1 AND channel_chat_id=$2 AND status='active'
+			 ORDER BY updated_at DESC LIMIT 1`,
+			botUUID, chatIDStr).Scan(&currentModel)
+
+		rows, qErr := db.Pool.Query(ctx,
+			`SELECT name, models FROM provider_connections
+			 WHERE user_id=$1 AND provider_type=$2 AND is_active=true
+			 ORDER BY priority ASC`, botUserID, provType)
+		if qErr != nil {
+			a.sendText(chatID, "Lỗi nội bộ.")
+			return
+		}
+		defer rows.Close()
+
+		icon := providerIcon(provType)
+		var kbRows [][]tgbotapi.InlineKeyboardButton
+		for rows.Next() {
+			var connName string
+			var modelsJSON []byte
+			if rows.Scan(&connName, &modelsJSON) != nil {
+				continue
+			}
+			var modelList []string
+			json.Unmarshal(modelsJSON, &modelList)
+			for _, m := range modelList {
+				check := ""
+				if currentModel == m {
+					check = " ✅"
+				}
+				label := icon + " " + m + check
+				r := []rune(label)
+				if len(r) > 35 {
+					label = string(r[:32]) + "..."
+				}
+				kbRows = append(kbRows, tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData(label, "model:"+m),
+				))
+			}
+		}
+		if len(kbRows) == 0 {
+			a.sendText(chatID, "Không có model nào cho "+provType)
+			return
+		}
+		kbRows = append(kbRows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("⬅️ Quay lại", "models_back"),
+		))
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(kbRows...)
+		editMsg := tgbotapi.NewEditMessageTextAndMarkup(chatID, cq.Message.MessageID,
+			fmt.Sprintf("%s %s Models:", icon, strings.ToUpper(provType[:1])+provType[1:]), keyboard)
+		if _, eErr := a.api.Send(editMsg); eErr != nil {
+			a.sendTextWithKeyboard(chatID, fmt.Sprintf("%s %s Models:", icon, provType), keyboard)
+		}
+
+	} else if data == "models_back" {
+		a.showProviderList(chatID, cq.Message.MessageID)
 
 	} else if strings.HasPrefix(data, "project_select:") {
 		projectIDStr := strings.TrimPrefix(data, "project_select:")
@@ -1069,3 +1129,176 @@ func (a *Adapter) downloadFileBase64(fileID string) (string, error) {
 
 	return base64.StdEncoding.EncodeToString(data), nil
 }
+
+// showProviderList sends (or edits) the provider selection menu.
+// If editMsgID > 0, it edits the existing message; otherwise sends a new one.
+func (a *Adapter) showProviderList(chatID int64, editMsgID int) {
+	ctx := context.Background()
+	botUserID, err := a.getBotUserID(ctx)
+	if err != nil {
+		a.sendText(chatID, "Lỗi nội bộ.")
+		return
+	}
+
+	botUUID, _ := uuid.Parse(a.botID)
+	chatIDStr := strconv.FormatInt(chatID, 10)
+	var currentModel string
+	db.Pool.QueryRow(ctx,
+		`SELECT COALESCE(model, '') FROM conversations
+		 WHERE bot_id=$1 AND channel_chat_id=$2 AND status='active'
+		 ORDER BY updated_at DESC LIMIT 1`,
+		botUUID, chatIDStr).Scan(&currentModel)
+
+	var kbRows [][]tgbotapi.InlineKeyboardButton
+
+	// Section 1: Combos
+	comboRows, comboErr := db.Pool.Query(ctx,
+		`SELECT name FROM model_combos
+		 WHERE user_id = $1 AND is_active = true
+		 ORDER BY name ASC LIMIT 10`, botUserID)
+	if comboErr == nil && comboRows != nil {
+		defer comboRows.Close()
+		var combos []string
+		for comboRows.Next() {
+			var name string
+			if comboRows.Scan(&name) == nil {
+				combos = append(combos, name)
+			}
+		}
+		if len(combos) > 0 {
+			for _, c := range combos {
+				check := ""
+				if currentModel == c {
+					check = " ✅"
+				}
+				label := "🔀 " + c + check
+				r := []rune(label)
+				if len(r) > 40 {
+					label = string(r[:37]) + "..."
+				}
+				kbRows = append(kbRows, tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData(label, "model:combo/"+c),
+				))
+			}
+		}
+	}
+
+	// Section 2: Provider types (grouped)
+	provRows, provErr := db.Pool.Query(ctx,
+		`SELECT provider_type, models FROM provider_connections
+		 WHERE user_id = $1 AND is_active = true
+		 ORDER BY priority ASC`, botUserID)
+	if provErr == nil && provRows != nil {
+		defer provRows.Close()
+		provGroups := make(map[string]int)
+		var provOrder []string
+		for provRows.Next() {
+			var provType string
+			var modelsJSON []byte
+			if provRows.Scan(&provType, &modelsJSON) != nil {
+				continue
+			}
+			var modelList []string
+			json.Unmarshal(modelsJSON, &modelList)
+			if _, exists := provGroups[provType]; !exists {
+				provOrder = append(provOrder, provType)
+			}
+			provGroups[provType] += len(modelList)
+		}
+		if len(provOrder) > 0 {
+			if len(kbRows) > 0 {
+				kbRows = append(kbRows, tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("─────────────", "noop"),
+				))
+			}
+			var provBtns []tgbotapi.InlineKeyboardButton
+			for _, pt := range provOrder {
+				count := provGroups[pt]
+				icon := providerIcon(pt)
+				label := fmt.Sprintf("%s %s (%d)", icon, pt, count)
+				r := []rune(label)
+				if len(r) > 25 {
+					label = string(r[:22]) + "..."
+				}
+				provBtns = append(provBtns, tgbotapi.NewInlineKeyboardButtonData(label, "mprov:"+pt))
+			}
+			for i := 0; i < len(provBtns); i += 2 {
+				if i+1 < len(provBtns) {
+					kbRows = append(kbRows, tgbotapi.NewInlineKeyboardRow(provBtns[i], provBtns[i+1]))
+				} else {
+					kbRows = append(kbRows, tgbotapi.NewInlineKeyboardRow(provBtns[i]))
+				}
+			}
+		}
+	}
+
+	// Fallback if nothing configured
+	if len(kbRows) == 0 {
+		for _, m := range []string{"AHV-Holding-TroLy", "AHV-Holding-Nhanh", "AHV-Holding-Manh"} {
+			check := ""
+			if currentModel == m {
+				check = " ✅"
+			}
+			kbRows = append(kbRows, tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("🔀 "+m+check, "model:"+m),
+			))
+		}
+	}
+
+	// Reset button
+	kbRows = append(kbRows, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("─────────────", "noop"),
+	))
+	resetLabel := "🔄 Mặc định (agent model)"
+	if currentModel == "" {
+		resetLabel += " ✅"
+	}
+	kbRows = append(kbRows, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData(resetLabel, "model:reset"),
+	))
+
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(kbRows...)
+	text := "🤖 Chọn nhà cung cấp AI:"
+	if currentModel != "" {
+		text = fmt.Sprintf("🤖 Model hiện tại: *%s*\nChọn nhà cung cấp AI:", currentModel)
+
+	}
+
+	if editMsgID > 0 {
+		editMsg := tgbotapi.NewEditMessageTextAndMarkup(chatID, editMsgID, text, keyboard)
+		editMsg.ParseMode = "Markdown"
+		if _, eErr := a.api.Send(editMsg); eErr != nil {
+			a.sendTextWithKeyboard(chatID, text, keyboard)
+		}
+	} else {
+		msg := tgbotapi.NewMessage(chatID, text)
+		msg.ParseMode = "Markdown"
+		msg.ReplyMarkup = keyboard
+		a.api.Send(msg)
+	}
+}
+
+// providerIcon returns an emoji icon for a given provider type.
+func providerIcon(provType string) string {
+	switch strings.ToLower(provType) {
+	case "openai":
+		return "🟢"
+	case "anthropic", "claude":
+		return "🟠"
+	case "google", "gemini":
+		return "🔵"
+	case "minimax":
+		return "⚡"
+	case "deepseek":
+		return "🔮"
+	case "groq":
+		return "🚀"
+	case "ollama":
+		return "🦙"
+	case "9router", "ahv":
+		return "🔀"
+	default:
+		return "🤖"
+	}
+}
+
