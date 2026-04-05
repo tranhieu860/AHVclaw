@@ -18,7 +18,7 @@ const maxUnproductiveRuns = 5
 func IsGoalStuck(ctx context.Context, userID uuid.UUID, goalTitle string) bool {
 	var totalRuns int
 	var distinctToolSets int
-	var newMemories int
+	var distinctNewKeys int
 
 	err := db.Pool.QueryRow(ctx, `
 		WITH recent_runs AS (
@@ -36,18 +36,19 @@ func IsGoalStuck(ctx context.Context, userID uuid.UUID, goalTitle string) bool {
 		SELECT
 			(SELECT COUNT(*) FROM recent_runs),
 			(SELECT COUNT(DISTINCT tool_set) FROM run_tools),
-			(SELECT COUNT(*) FROM memories WHERE user_id = $1 AND created_at > now() - interval '24 hours')
-	`, userID, maxUnproductiveRuns).Scan(&totalRuns, &distinctToolSets, &newMemories)
+			(SELECT COUNT(DISTINCT key) FROM memories WHERE user_id = $1 AND type = 'knowledge' AND created_at > now() - interval '24 hours')
+	`, userID, maxUnproductiveRuns).Scan(&totalRuns, &distinctToolSets, &distinctNewKeys)
 
 	if err != nil {
 		log.Printf("[loop_breaker] outcome query error for user %s: %v", userID, err)
 		return false
 	}
 
-	// Stuck = many runs + same tool pattern + no new memories
-	if totalRuns >= maxUnproductiveRuns && distinctToolSets <= 2 && newMemories <= 1 {
-		log.Printf("[loop_breaker] user %s is stuck: %d runs, %d distinct tool sets, %d new memories",
-			userID, totalRuns, distinctToolSets, newMemories)
+	// Stuck = many runs + same tool pattern + few distinct new memory keys
+	// Using DISTINCT keys so saving the same "cpu-goal" 100 times counts as 1
+	if totalRuns >= maxUnproductiveRuns && distinctToolSets <= 2 && distinctNewKeys <= 3 {
+		log.Printf("[loop_breaker] user %s is stuck: %d runs, %d distinct tool sets, %d distinct new memory keys",
+			userID, totalRuns, distinctToolSets, distinctNewKeys)
 		return true
 	}
 	return false

@@ -439,6 +439,10 @@ always confirm with the user first.
 
 	// Parse thinking and send as WS event
 	thinking, cleanResponse := engine.ParseThinking(result.Content)
+	// Safety: if ParseThinking stripped everything but original had content, keep original
+	if cleanResponse == "" && result.Content != "" {
+		cleanResponse = result.Content
+	}
 	if thinking.Raw != "" {
 		sendWSJSON(conn, "thinking", fiber.Map{
 			"content": thinking.Raw,

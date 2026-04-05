@@ -36,7 +36,12 @@ Với mọi câu hỏi, BẮT BUỘC suy nghĩ trước theo format:
 `
 
 const ThinkingInstructions = `
-IMPORTANT: When you learn something new about the user (name, preferences, etc.), use the memory_save tool to remember it. When asked about past conversations, use memory_search.
+
+## Tool Requirements (BẮT BUỘC)
+- Khi user nói "nhớ", "lưu", "save", "remember", "ghi nhớ", hoặc yêu cầu lưu thông tin: BẮT BUỘC gọi memory_save TRƯỚC khi trả lời. KHÔNG ĐƯỢC nói "tớ sẽ nhớ" mà không gọi tool.
+- Khi user hỏi về thông tin cũ, cuộc trò chuyện trước: BẮT BUỘC gọi memory_search TRƯỚC.
+- Khi biết thêm thông tin mới về user (tên, sở thích, công việc): gọi memory_save ngay.
+- Khi user sửa sai thông tin: gọi memory_save với type "correction" để ghi đè bản cũ.
 `
 
 // SummarizePrompt is used to generate conversation summaries.

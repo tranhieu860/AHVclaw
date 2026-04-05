@@ -23,14 +23,17 @@ func (e *Executor) memorySave(argsJSON json.RawMessage) *ToolResult {
 		return &ToolResult{Name: "memory_save", Error: "type, key, and content are required"}
 	}
 
-	validTypes := map[string]bool{"profile": true, "preference": true, "knowledge": true, "correction": true}
+	validTypes := map[string]bool{"user": true, "profile": true, "preference": true, "knowledge": true, "correction": true, "feedback": true}
 	if !validTypes[args.Type] {
 		return &ToolResult{Name: "memory_save", Error: "type must be one of: profile, preference, knowledge, correction"}
 	}
 
 	var memoryID string
 	err := db.Pool.QueryRow(context.Background(),
-		"INSERT INTO memories (user_id, type, key, content) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING RETURNING id",
+		`INSERT INTO memories (user_id, type, key, content, updated_at)
+		 VALUES ($1, $2, $3, $4, now())
+		 ON CONFLICT (user_id, type, key) DO UPDATE SET content = $4, updated_at = now()
+		 RETURNING id`,
 		e.UserID, args.Type, args.Key, args.Content).Scan(&memoryID)
 	if err != nil {
 		_ = db.Pool.QueryRow(context.Background(),

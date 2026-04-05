@@ -25,6 +25,29 @@ const (
 
 // RunConsolidation performs memory consolidation for a user
 func RunConsolidation(ctx context.Context, aiRouter *ai.RouterClient, userID uuid.UUID) (*ConsolidationRun, error) {
+	// Phase -1: Clean duplicate memories (same user+type+key, keep newest)
+	memDedup, _ := db.Pool.Exec(ctx, `
+		DELETE FROM memories a USING memories b
+		WHERE a.user_id = $1 AND b.user_id = $1
+		  AND a.type = b.type AND a.key = b.key
+		  AND a.updated_at < b.updated_at`, userID)
+	if memDedup.RowsAffected() > 0 {
+		log.Printf("[consolidation] deduplicated %d memory rows for user %s", memDedup.RowsAffected(), userID)
+	}
+
+	// Phase -1b: Prune heartbeat log memories (keep max 10)
+	hbPrune, _ := db.Pool.Exec(ctx, `
+		DELETE FROM memories
+		WHERE user_id = $1 AND type = 'knowledge' AND key LIKE 'heartbeat-%'
+		  AND id NOT IN (
+			SELECT id FROM memories
+			WHERE user_id = $1 AND type = 'knowledge' AND key LIKE 'heartbeat-%'
+			ORDER BY updated_at DESC LIMIT 10
+		  )`, userID)
+	if hbPrune.RowsAffected() > 0 {
+		log.Printf("[consolidation] pruned %d old heartbeat memories for user %s", hbPrune.RowsAffected(), userID)
+	}
+
 	run := &ConsolidationRun{
 		UserID:    userID,
 		StartedAt: time.Now(),

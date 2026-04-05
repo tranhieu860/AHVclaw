@@ -139,6 +139,21 @@ func ProcessChat(ctx context.Context, cfg ChatConfig) (*ChatResult, error) {
 		if finishReason != "tool_calls" || len(accumulatedToolCalls) == 0 {
 			content := SanitizeUTF8(fullContent.String())
 
+			// Guard: empty response with stop reason likely means model returned
+			// only thinking tags or had a streaming issue. Retry once.
+			if content == "" && round < cfg.MaxToolRounds-1 {
+				log.Printf("[engine] WARNING: empty response on round %d, retrying once", round+1)
+				messages = append(messages, ai.ChatMessage{
+					Role:    "assistant",
+					Content: "",
+				})
+				messages = append(messages, ai.ChatMessage{
+					Role:    "user",
+					Content: "Your previous response was empty. Please provide your answer.",
+				})
+				continue
+			}
+
 			// Add assistant message to history.
 			messages = append(messages, ai.ChatMessage{
 				Role:    "assistant",
