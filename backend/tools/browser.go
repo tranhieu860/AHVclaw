@@ -3,6 +3,7 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"github.com/ahvholding/ahvclaw/browser"
 	"github.com/ahvholding/ahvclaw/computeruse"
@@ -207,8 +208,9 @@ func (e *Executor) browserType(argsJSON json.RawMessage) *ToolResult {
 }
 
 func (e *Executor) browserExtract(argsJSON json.RawMessage) *ToolResult {
-	// Try extension first
-	if computeruse.Hub.IsOnline(e.UserID) {
+	// Skip extension for extract — always use Playwright which has the navigated page
+	// Extension reads the user's REAL browser which may be on a different tab
+	if false && computeruse.Hub.IsOnline(e.UserID) {
 		cmd := computeruse.CUCommand{ID: uuid.New().String(), Action: "read_page"}
 		result, err := computeruse.Hub.SendCommand(e.UserID, cmd)
 		if err == nil {
@@ -232,13 +234,17 @@ func (e *Executor) browserExtract(argsJSON json.RawMessage) *ToolResult {
 	}
 
 	// Playwright fallback
+	log.Printf("[browser_extract] using Playwright fallback for user %s", e.UserID)
 	result, err := browser.Execute(browser.BrowserRequest{
 		Action: "extract",
 		UserID: e.UserID,
 	})
 	if err != nil {
+		log.Printf("[browser_extract] Playwright error: %v", err)
 		return &ToolResult{Name: "browser_extract", Error: err.Error()}
 	}
+
+	log.Printf("[browser_extract] Playwright returned: url=%s title=%s content_len=%d", result.URL, result.Title, len(result.Content))
 
 	screenshot := e.playwrightScreenshot()
 	e.broadcastBrowserUpdate("playwright", screenshot, result.URL, result.Title, "Page content extracted")

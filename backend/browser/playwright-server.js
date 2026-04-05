@@ -57,6 +57,8 @@ const server = http.createServer(async (req, res) => {
         case 'navigate': {
           const page = await getPage(userId);
           await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+          // Wait for JS to render dynamic content (gold prices, tables)
+          await page.waitForTimeout(3000);
           result = { url: page.url(), title: await page.title() };
           break;
         }
