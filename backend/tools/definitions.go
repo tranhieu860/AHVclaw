@@ -25,6 +25,7 @@ var AllTools = []ToolDef{
 	delegateAgentDef(),
 	manageScheduledTaskDef(),
 	skillInstallDef(),
+	browserScrollDef(), browserTabListDef(), browserTabSwitchDef(),
 }
 
 func fileReadDef() ToolDef {
@@ -154,10 +155,11 @@ func browserScreenshotDef() ToolDef {
 }
 
 func browserClickDef() ToolDef {
-	return makeTool("browser_click", "Click an element on the page by CSS selector", `{
+	return makeTool("browser_click", "Click an element on the page by CSS selector or visible text", `{
 		"type":"object","properties":{
-			"selector":{"type":"string","description":"CSS selector of element to click"}
-		},"required":["selector"]
+			"selector":{"type":"string","description":"CSS selector of element to click"},
+			"text":{"type":"string","description":"Visible text of element to click (alternative to selector)"}
+		}
 	}`)
 }
 
@@ -217,4 +219,52 @@ func skillInstallDef() ToolDef {
 	return makeTool("skill_install",
 		"Create or update a skill file (SKILL.md) for the bot. Use this to teach yourself new capabilities by writing skill definitions with YAML frontmatter and markdown instructions.",
 		`{"type":"object","properties":{"slug":{"type":"string","description":"Skill identifier (lowercase, numbers, hyphens). Example: data-pipeline"},"content":{"type":"string","description":"Full SKILL.md content starting with YAML frontmatter (---). Include name, description, max_tool_rounds."}},"required":["slug","content"]}`)
+}
+
+func browserScrollDef() ToolDef {
+	return makeTool("browser_scroll", "Scroll the browser page (requires extension, otherwise not available)", `{
+		"type":"object","properties":{
+			"direction":{"type":"string","enum":["up","down","left","right"],"description":"Scroll direction","default":"down"},
+			"amount":{"type":"integer","description":"Pixels to scroll (default 500)"}
+		}
+	}`)
+}
+
+func browserTabListDef() ToolDef {
+	return makeTool("browser_tab_list", "List all open tabs in the user's browser (requires extension)", `{
+		"type":"object","properties":{}
+	}`)
+}
+
+func browserTabSwitchDef() ToolDef {
+	return makeTool("browser_tab_switch", "Switch to a specific tab in the user's browser (requires extension)", `{
+		"type":"object","properties":{
+			"tab_id":{"type":"integer","description":"Tab ID to switch to"}
+		},"required":["tab_id"]
+	}`)
+}
+
+func cuScreenshotDef() ToolDef {
+	return makeTool("cu_screenshot", "Take a screenshot of the user's active browser tab (requires extension)", `{"type":"object","properties":{}}`)
+}
+func cuClickDef() ToolDef {
+	return makeTool("cu_click", "Click an element on the user's browser page by CSS selector or visible text", `{"type":"object","properties":{"selector":{"type":"string","description":"CSS selector of element to click"},"text":{"type":"string","description":"Visible text of element to click (alternative to selector)"}}}`)
+}
+func cuTypeDef() ToolDef {
+	return makeTool("cu_type", "Type text into an input field on the user's browser page", `{"type":"object","properties":{"selector":{"type":"string","description":"CSS selector of the input field"},"text":{"type":"string","description":"Text to type"}},"required":["selector","text"]}`)
+}
+func cuScrollDef() ToolDef {
+	return makeTool("cu_scroll", "Scroll the user's browser page", `{"type":"object","properties":{"direction":{"type":"string","enum":["up","down","left","right"],"description":"Scroll direction"},"amount":{"type":"integer","description":"Pixels to scroll (default 500)"}}}`)
+}
+func cuNavigateDef() ToolDef {
+	return makeTool("cu_navigate", "Navigate the user's browser to a URL", `{"type":"object","properties":{"url":{"type":"string","description":"URL to navigate to"}},"required":["url"]}`)
+}
+func cuReadPageDef() ToolDef {
+	return makeTool("cu_read_page", "Extract text content from the user's active browser tab", `{"type":"object","properties":{}}`)
+}
+func cuTabListDef() ToolDef {
+	return makeTool("cu_tab_list", "List all open tabs in the user's browser", `{"type":"object","properties":{}}`)
+}
+func cuTabSwitchDef() ToolDef {
+	return makeTool("cu_tab_switch", "Switch to a specific tab in the user's browser", `{"type":"object","properties":{"tab_id":{"type":"integer","description":"Tab ID to switch to (from cu_tab_list)"}},"required":["tab_id"]}`)
 }

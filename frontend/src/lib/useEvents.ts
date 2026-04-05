@@ -1,5 +1,12 @@
 'use client';
 
+// Global cache for last browser update so BrowserPanel can show it when opened
+let lastBrowserUpdate: any = null;
+export function getLastBrowserUpdate() { return lastBrowserUpdate; }
+
+let extensionOnline = false;
+export function isExtensionOnline() { return extensionOnline; }
+
 import { useEffect, useRef, useCallback } from 'react';
 import { api } from './api';
 import { useStore } from './store';
@@ -39,6 +46,20 @@ export function useEvents() {
             case 'conversation_updated':
               loadConversations();
               break;
+            case 'browser_update': {
+              lastBrowserUpdate = evt;
+              window.dispatchEvent(new CustomEvent('ahvclaw-event', {
+                detail: evt
+              }));
+              break;
+            }
+            case 'extension_status': {
+              extensionOnline = evt.data?.online || false;
+              window.dispatchEvent(new CustomEvent('ahvclaw-extension-status', {
+                detail: { online: extensionOnline }
+              }));
+              break;
+            }
           }
         } catch {}
       };

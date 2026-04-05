@@ -6,6 +6,9 @@ import (
 	"github.com/ahvholding/ahvclaw/crypto"
 	"github.com/ahvholding/ahvclaw/db"
 	"github.com/ahvholding/ahvclaw/models"
+	"fmt"
+	"os"
+	"strings"
 	sshpkg "github.com/ahvholding/ahvclaw/ssh"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -75,6 +78,7 @@ func CreateServer(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "failed to create server: " + err.Error()})
 	}
 
+	go SyncServersToFile(userID)
 	return c.Status(201).JSON(s)
 }
 
@@ -91,6 +95,7 @@ func DeleteServer(c *fiber.Ctx) error {
 		return c.Status(404).JSON(fiber.Map{"error": "server not found"})
 	}
 
+	go SyncServersToFile(userID)
 	return c.JSON(fiber.Map{"deleted": true})
 }
 
@@ -223,4 +228,50 @@ func ServerConversation(c *fiber.Ctx) error {
 			"environment": serverEnv,
 		},
 	})
+}
+
+
+// SyncServersToFile writes the user's server list to /data/ahvclaw/users/{userID}/servers.md
+// so the AI bot can read and reference it proactively.
+func SyncServersToFile(userID uuid.UUID) {
+	rows, err := db.Pool.Query(context.Background(),
+		"SELECT id, name, host, port, username, environment, tags FROM servers WHERE user_id = $1 ORDER BY name", userID)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	var sb strings.Builder
+	sb.WriteString("# Servers\n\n")
+	sb.WriteString("Danh sách máy chủ được quản lý. Bot có thể đọc, thêm, sửa, xóa file này.\n\n")
+
+	count := 0
+	for rows.Next() {
+		var id uuid.UUID
+		var name, host, username, env string
+		var port int
+		var tags *string
+		if rows.Scan(&id, &name, &host, &port, &username, &env, &tags) != nil {
+			continue
+		}
+		count++
+		sb.WriteString(fmt.Sprintf("## %s\n\n", name))
+		sb.WriteString(fmt.Sprintf("- **Host:** %s\n", host))
+		sb.WriteString(fmt.Sprintf("- **Port:** %d\n", port))
+		sb.WriteString(fmt.Sprintf("- **User:** %s\n", username))
+		sb.WriteString(fmt.Sprintf("- **Environment:** %s\n", env))
+		if tags != nil && *tags != "" {
+			sb.WriteString(fmt.Sprintf("- **Tags:** %s\n", *tags))
+		}
+		sb.WriteString(fmt.Sprintf("- **ID:** %s\n", id.String()))
+		sb.WriteString("\n")
+	}
+
+	if count == 0 {
+		sb.WriteString("_Chưa có server nào được đăng ký._\n")
+	}
+
+	dir := fmt.Sprintf("/data/ahvclaw/users/%s", userID.String())
+	os.MkdirAll(dir, 0755)
+	os.WriteFile(fmt.Sprintf("%s/servers.md", dir), []byte(sb.String()), 0644)
 }

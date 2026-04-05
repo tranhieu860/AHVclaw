@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { MessageSquare, Plus, Settings, Server, Puzzle, Bot, LogOut, Radio, Users, Clock, Trash2, FolderOpen, Brain } from 'lucide-react';
+import { MessageSquare, Plus, Settings, Server, Puzzle, Bot, LogOut, Radio, Users, Clock, Trash2, FolderOpen, Brain, Network, Shield, Inbox, BookOpen } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { ThemeToggle } from './ThemeToggle';
 import { api } from '@/lib/api';
@@ -56,7 +56,7 @@ export function Sidebar({ onNavigate }: SidebarProps) {
 
   const handleDeleteConversation = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (!confirm('Xoa cuoc tro chuyen nay?')) return;
+    if (!confirm('Xóa cuộc trò chuyện này?')) return;
     try {
       await api.deleteConversation(id);
       removeConversation(id);
@@ -119,7 +119,7 @@ export function Sidebar({ onNavigate }: SidebarProps) {
             <button
               onClick={(e) => handleDeleteConversation(e, conv.id)}
               className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-red-600/20 text-zinc-500 hover:text-red-400 transition"
-              title="Xoa"
+              title="Xóa"
             >
               <Trash2 size={12} />
             </button>
@@ -136,7 +136,13 @@ export function Sidebar({ onNavigate }: SidebarProps) {
         <SidebarLink icon={<FolderOpen size={16} />} label="Dự án" href="/projects" />
         <SidebarLink icon={<Puzzle size={16} />} label="Kỹ năng" href="/skills" />
         <SidebarLink icon={<Server size={16} />} label="Máy chủ" href="/servers" />
+        <SidebarLink icon={<Network size={16} />} label="Kết nối AI" href="/connections" />
+        <SidebarLink icon={<Inbox size={16} />} label="Hộp thư" href="/inbox" />
+        <SidebarLink icon={<BookOpen size={16} />} label="Tri thức" href="/knowledge" />
         <SidebarLink icon={<Settings size={16} />} label="Cài đặt" href="/settings" />
+        {user?.role === 'admin' && (
+          <SidebarLink icon={<Shield size={16} />} label="Admin" href="/admin" />
+        )}
         <button
           onClick={handleLogout}
           className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-red-400 hover:bg-zinc-800/50 transition"

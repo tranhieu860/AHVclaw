@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/ahvholding/ahvclaw/sandbox"
 )
 
 // blockedCommands that should never be run
@@ -50,6 +52,21 @@ func (e *Executor) terminalExec(argsJSON json.RawMessage) *ToolResult {
 		if strings.Contains(cmdLower, pattern) {
 			return &ToolResult{Name: "terminal_exec", Error: fmt.Sprintf("command blocked for safety: contains '%s'", pattern)}
 		}
+	}
+
+	// If autonomous mode, use sandboxed execution
+	if e.IsAutonomous && e.WorkspaceDir != "" {
+		output, err := sandbox.SandboxedExec(context.Background(), e.WorkspaceDir, args.Command, args.Timeout)
+		if err != nil {
+			if output != "" {
+				return &ToolResult{Name: "terminal_exec", Content: output + "\nError: " + err.Error()}
+			}
+			return &ToolResult{Name: "terminal_exec", Error: err.Error()}
+		}
+		if len(output) > 100*1024 {
+			output = output[:100*1024] + "\n... (truncated)"
+		}
+		return &ToolResult{Name: "terminal_exec", Content: output}
 	}
 
 	timeout := args.Timeout

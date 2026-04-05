@@ -245,6 +245,9 @@ class ApiClient {
   async deleteConnection(id: string): Promise<void> { return this.fetchJSON(`/api/connections/${id}`, { method: "DELETE" }); }
   async testConnection(id: string): Promise<{ success: boolean; message: string }> { return this.fetchJSON(`/api/connections/${id}/test`, { method: "POST" }); }
   async resetConnection(id: string): Promise<void> { return this.fetchJSON(`/api/connections/${id}/reset`, { method: "POST" }); }
+  async startOAuth(provider: string): Promise<{ auth_url: string; provider: string; paste_url?: boolean }> { return this.fetchJSON(`/api/oauth/authorize/${provider}`); }
+  async fetchRemoteModels(connId: string): Promise<{ models: { id: string; owned_by: string }[]; provider_type: string }> { return this.fetchJSON(`/api/connections/${connId}/models`); }
+  async exchangeOAuth(url: string): Promise<{ ok: boolean; provider: string; account: string }> { return this.fetchJSON("/api/oauth/exchange", { method: "POST", body: JSON.stringify({ url }) }); }
 
   // Combos
   async getCombos(): Promise<any[]> { return this.fetchJSON("/api/combos"); }
@@ -270,6 +273,26 @@ class ApiClient {
   // Registry
   async getProviderTypes(): Promise<any[]> { return this.fetchJSON("/api/provider-types"); }
   async getAvailableModels(): Promise<any[]> { return this.fetchJSON("/api/models/available"); }
+  // Admin CP endpoints
+  async getAdminDashboard() { return this.fetchJSON("/api/admin/dashboard"); }
+  async getAdminSystem() { return this.fetchJSON("/api/admin/system"); }
+  async getAdminUsersDetailed() { return this.fetchJSON("/api/admin/users/detailed"); }
+  async adminCreateUser(data: { email: string; name: string; password: string; role: string }) {
+    return this.fetchJSON("/api/admin/users", { method: "POST", body: JSON.stringify(data) });
+  }
+  async adminUpdateUser(id: string, data: Record<string, unknown>) {
+    return this.fetchJSON("/api/admin/users/" + id, { method: "PUT", body: JSON.stringify(data) });
+  }
+  async getAdminActivity(limit?: number) {
+    return this.fetchJSON("/api/admin/activity?limit=" + (limit || 50));
+  }
+  async getAdminHeartbeat() { return this.fetchJSON("/api/admin/heartbeat"); }
+  async getAdminDBStats() { return this.fetchJSON("/api/admin/db-stats"); }
+  async getAdminSettings() { return this.fetchJSON("/api/admin/settings"); }
+  async updateAdminSetting(key: string, value: string) {
+    return this.fetchJSON("/api/admin/settings", { method: "PUT", body: JSON.stringify({ key, value }) });
+  }
+
 }
 
 export const api = new ApiClient();

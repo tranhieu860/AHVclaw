@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -286,18 +287,24 @@ func TestConnection(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid connection ID"})
 	}
 
-	var apiURL, apiKeyEnc, apiFormat, providerType string
+	var apiURL, apiKeyEnc, accessTokenEnc, apiFormat, providerType string
 	err = db.Pool.QueryRow(context.Background(),
-		`SELECT api_url, api_key_encrypted, api_format, provider_type
+		`SELECT api_url, COALESCE(api_key_encrypted,''), COALESCE(access_token_encrypted,''), api_format, provider_type
 		 FROM provider_connections WHERE id = $1 AND user_id = $2`,
-		connID, userID).Scan(&apiURL, &apiKeyEnc, &apiFormat, &providerType)
+		connID, userID).Scan(&apiURL, &apiKeyEnc, &accessTokenEnc, &apiFormat, &providerType)
 	if err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "connection not found"})
 	}
 
-	apiKey, err := crypto.Decrypt(apiKeyEnc)
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "failed to decrypt API key"})
+	var apiKey string
+	if apiKeyEnc != "" {
+		apiKey, _ = crypto.Decrypt(apiKeyEnc)
+	}
+	if apiKey == "" && accessTokenEnc != "" {
+		apiKey, _ = crypto.Decrypt(accessTokenEnc)
+	}
+	if apiKey == "" {
+		return c.Status(500).JSON(fiber.Map{"error": "no credentials found"})
 	}
 
 	client := &http.Client{Timeout: 15 * time.Second}
@@ -697,4 +704,134 @@ func ConnectionHealthStats(c *fiber.Ctx) error {
 		stats = []fiber.Map{}
 	}
 	return c.JSON(stats)
+}
+
+
+// FetchRemoteModels fetches available models from a provider's API using the connection's credentials
+func FetchRemoteModels(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(uuid.UUID)
+	connID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid connection ID"})
+	}
+
+	var apiURL, apiKeyEnc, accessTokenEnc, apiFormat, providerType string
+	err = db.Pool.QueryRow(context.Background(),
+		`SELECT api_url, COALESCE(api_key_encrypted,''), COALESCE(access_token_encrypted,''), api_format, provider_type
+		 FROM provider_connections WHERE id = $1 AND user_id = $2`,
+		connID, userID).Scan(&apiURL, &apiKeyEnc, &accessTokenEnc, &apiFormat, &providerType)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "connection not found"})
+	}
+
+	// Determine auth token
+	var authToken string
+	if apiKeyEnc != "" {
+		authToken, _ = crypto.Decrypt(apiKeyEnc)
+	}
+	if authToken == "" && accessTokenEnc != "" {
+		authToken, _ = crypto.Decrypt(accessTokenEnc)
+	}
+	if authToken == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "no credentials found"})
+	}
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	var models []fiber.Map
+
+	switch apiFormat {
+	case "openai":
+		baseURL := strings.TrimRight(apiURL, "/")
+		baseURL = strings.TrimSuffix(baseURL, "/v1")
+		req, _ := http.NewRequest("GET", baseURL+"/v1/models", nil)
+		req.Header.Set("Authorization", "Bearer "+authToken)
+		resp, err := client.Do(req)
+		if err != nil {
+			return c.Status(502).JSON(fiber.Map{"error": "failed to reach provider: " + err.Error()})
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if resp.StatusCode != 200 {
+			return c.Status(resp.StatusCode).JSON(fiber.Map{"error": string(body)})
+		}
+		var result struct {
+			Data []struct {
+				ID      string `json:"id"`
+				OwnedBy string `json:"owned_by"`
+			} `json:"data"`
+		}
+		json.Unmarshal(body, &result)
+		// Filter to chat models only
+		for _, m := range result.Data {
+			id := m.ID
+			// Skip embedding, tts, whisper, dall-e, moderation models
+			if strings.HasPrefix(id, "text-embedding") || strings.HasPrefix(id, "tts-") ||
+				strings.HasPrefix(id, "whisper-") || strings.HasPrefix(id, "dall-e") ||
+				strings.HasPrefix(id, "davinci") || strings.HasPrefix(id, "babbage") ||
+				strings.Contains(id, "moderation") || strings.Contains(id, "embedding") ||
+				strings.HasPrefix(id, "canary-") || strings.HasPrefix(id, "codex-") {
+				continue
+			}
+			models = append(models, fiber.Map{"id": id, "owned_by": m.OwnedBy})
+		}
+		// Sort: gpt-4.1 and o-series first
+		sort.Slice(models, func(i, j int) bool {
+			a := models[i]["id"].(string)
+			b := models[j]["id"].(string)
+			aPri := modelPriority(a)
+			bPri := modelPriority(b)
+			if aPri != bPri {
+				return aPri < bPri
+			}
+			return a < b
+		})
+
+	case "anthropic":
+		// Anthropic doesn't have a /models endpoint, return known models
+		knownModels := []string{
+			"claude-opus-4-20250514", "claude-sonnet-4-20250514",
+			"claude-sonnet-4-5-20250514",
+			"claude-haiku-4-5-20251001", "claude-3-5-sonnet-20241022",
+		}
+		for _, m := range knownModels {
+			models = append(models, fiber.Map{"id": m, "owned_by": "anthropic"})
+		}
+
+	case "google":
+		// Google Gemini - use known models
+		knownModels := []string{
+			"gemini-2.5-pro", "gemini-2.5-flash",
+			"gemini-2.0-flash", "gemini-2.0-flash-lite",
+		}
+		for _, m := range knownModels {
+			models = append(models, fiber.Map{"id": m, "owned_by": "google"})
+		}
+
+	default:
+		return c.Status(400).JSON(fiber.Map{"error": "unsupported provider format"})
+	}
+
+	if models == nil {
+		models = []fiber.Map{}
+	}
+	return c.JSON(fiber.Map{"models": models, "provider_type": providerType})
+}
+
+func modelPriority(id string) int {
+	switch {
+	case strings.HasPrefix(id, "gpt-4.1"):
+		return 0
+	case strings.HasPrefix(id, "gpt-4o"):
+		return 1
+	case strings.HasPrefix(id, "o3") || strings.HasPrefix(id, "o4"):
+		return 2
+	case strings.HasPrefix(id, "o1"):
+		return 3
+	case strings.HasPrefix(id, "gpt-4"):
+		return 4
+	case strings.HasPrefix(id, "gpt-3"):
+		return 8
+	default:
+		return 5
+	}
 }

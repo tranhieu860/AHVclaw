@@ -1,16 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Settings, User, Palette, HardDrive, Shield, Cpu, Plus, Trash2, Copy, Eye, EyeOff, Check, Zap, Network } from 'lucide-react';
+import { Settings, User, Palette, HardDrive, Shield, Plus, Trash2, Copy, Eye, EyeOff, Check, Zap, Download, Globe } from 'lucide-react';
 import { ModelSearch } from '@/components/ModelSearch';
-import { ConnectionList } from '@/components/ConnectionList';
-import HealthDashboard from '@/components/HealthDashboard';
-import { ConnectionForm } from '@/components/ConnectionForm';
-import { ComboForm } from '@/components/ComboForm';
 import { AudioSettings } from '@/components/AudioSettings';
 import { useStore } from '@/lib/store';
 import { api } from '@/lib/api';
-import { ModelCombo, parseModels } from '@/lib/providerRegistry';
 
 interface Provider {
   id: string;
@@ -34,11 +29,12 @@ interface AdminUser {
 const baseTabsConfig = [
   { id: 'profile', label: 'Hồ sơ', icon: User },
   { id: 'preferences', label: 'Tùy chọn', icon: Palette },
-  { id: 'connections', label: 'Kết nối AI', icon: Network },
+
   { id: 'storage', label: 'Lưu trữ', icon: HardDrive },
   { id: 'security', label: 'Bảo mật', icon: Shield },
-  { id: 'providers', label: 'Nhà cung cấp', icon: Cpu },
+
   { id: 'autonomous', label: 'Tự động', icon: Zap },
+  { id: 'extension', label: 'Tiện ích', icon: Globe },
 ] as const;
 
 type BaseTabId = typeof baseTabsConfig[number]['id'];
@@ -48,7 +44,6 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<BaseTabId | 'admin'>('profile');
   const [settings, setSettings] = useState<Record<string, string | undefined>>({});
   const [storage, setStorage] = useState<StorageInfo | null>(null);
-  const [providers, setProviders] = useState<Provider[]>([]);
   const [showApiKey, setShowApiKey] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -62,9 +57,6 @@ export default function SettingsPage() {
   const [pwMsg, setPwMsg] = useState('');
 
   // Provider form
-  const [provName, setProvName] = useState('');
-  const [provUrl, setProvUrl] = useState('');
-  const [provKey, setProvKey] = useState('');
 
   // Autonomous config state
   const [autoEnabled, setAutoEnabled] = useState(false);
@@ -85,12 +77,7 @@ export default function SettingsPage() {
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   // Connections tab state
-  const [showConnForm, setShowConnForm] = useState(false);
-  const [editConn, setEditConn] = useState<any>(null);
-  const [showComboForm, setShowComboForm] = useState(false);
-  const [editCombo, setEditCombo] = useState<ModelCombo | null>(null);
-  const [combos, setCombos] = useState<ModelCombo[]>([]);
-  const [connRefresh, setConnRefresh] = useState(0);
+  
 
   const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3101';
   const headers = () => ({
@@ -125,12 +112,7 @@ export default function SettingsPage() {
     } catch {}
   };
 
-  const loadProviders = async () => {
-    try {
-      const res = await fetch(`${baseUrl}/api/providers`, { headers: headers() });
-      if (res.ok) setProviders(await res.json());
-    } catch {}
-  };
+
 
   const loadAdminUsers = async () => {
     try {
@@ -139,17 +121,11 @@ export default function SettingsPage() {
     } catch {}
   };
 
-  const loadCombos = async () => {
-    try {
-      const data = await api.getCombos();
-      setCombos(Array.isArray(data) ? data : []);
-    } catch { setCombos([]); }
-  };
+
 
   useEffect(() => {
     loadSettings();
     loadStorage();
-    loadProviders();
   }, []);
 
   const loadAutonomous = async () => {
@@ -180,8 +156,11 @@ export default function SettingsPage() {
   useEffect(() => {
     if (activeTab === 'admin') loadAdminUsers();
     if (activeTab === 'autonomous') loadAutonomous();
-    if (activeTab === 'connections') loadCombos();
+
   }, [activeTab]);
+
+
+
 
   const savePreferences = async () => {
     try {
@@ -221,25 +200,9 @@ export default function SettingsPage() {
     } catch {}
   };
 
-  const addProvider = async () => {
-    if (!provName || !provUrl) return;
-    try {
-      await fetch(`${baseUrl}/api/providers`, {
-        method: 'POST',
-        headers: headers(),
-        body: JSON.stringify({ name: provName, api_url: provUrl, api_key: provKey || undefined }),
-      });
-      setProvName(''); setProvUrl(''); setProvKey('');
-      loadProviders();
-    } catch {}
-  };
 
-  const deleteProvider = async (id: string) => {
-    try {
-      await fetch(`${baseUrl}/api/providers/${id}`, { method: 'DELETE', headers: headers() });
-      loadProviders();
-    } catch {}
-  };
+
+
 
   const updateUserRole = async (id: string, role: string) => {
     try {
@@ -275,25 +238,9 @@ export default function SettingsPage() {
     return `${(b / 1073741824).toFixed(1)} GB`;
   };
 
-  const handleConnSaved = () => {
-    setShowConnForm(false);
-    setEditConn(null);
-    setConnRefresh(r => r + 1);
-  };
 
-  const handleComboSaved = () => {
-    setShowComboForm(false);
-    setEditCombo(null);
-    loadCombos();
-  };
 
-  const deleteCombo = async (id: string) => {
-    if (!confirm('Xóa combo này?')) return;
-    try {
-      await api.deleteCombo(id);
-      loadCombos();
-    } catch {}
-  };
+
 
   const inputCls = "w-full bg-zinc-800 text-white rounded px-3 py-2 text-sm border border-zinc-700 focus:border-blue-500 outline-none";
 
@@ -375,120 +322,6 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {activeTab === 'connections' && (
-          <div className="space-y-6">
-            {/* Connection Form overlay */}
-            {(showConnForm || editConn) ? (
-              <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-4">
-                <ConnectionForm
-                  editConn={editConn}
-                  onSave={handleConnSaved}
-                  onCancel={() => { setShowConnForm(false); setEditConn(null); }}
-                />
-              </div>
-            ) : (
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <h3 className="text-white font-medium text-sm">Kết nối nhà cung cấp AI</h3>
-                    <p className="text-xs text-zinc-500 mt-0.5">Quản lý API keys và kết nối đến các nhà cung cấp AI</p>
-                  </div>
-                </div>
-                <HealthDashboard />
-              <div className="mt-6" />
-              <ConnectionList
-                  onAdd={() => setShowConnForm(true)}
-                  onEdit={(conn) => { setEditConn(conn); setShowConnForm(false); }}
-                  refreshTrigger={connRefresh}
-                />
-              </div>
-            )}
-
-            {/* Combos section */}
-            <div className="border-t border-zinc-800 pt-5">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <h3 className="text-white font-medium text-sm">Combo model</h3>
-                  <p className="text-xs text-zinc-500 mt-0.5">Nhóm nhiều model với chiến lược dự phòng hoặc luân phiên</p>
-                </div>
-              </div>
-
-              {showComboForm || editCombo ? (
-                <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-4">
-                  <ComboForm
-                    editCombo={editCombo}
-                    onSave={handleComboSaved}
-                    onCancel={() => { setShowComboForm(false); setEditCombo(null); }}
-                  />
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {combos.length === 0 ? (
-                    <div className="text-center py-6 text-zinc-500">
-                      <div className="text-2xl mb-1">🔀</div>
-                      <p className="text-sm">Chưa có combo nào.</p>
-                    </div>
-                  ) : (
-                    combos.map(combo => {
-                      let modelList: string[] = [];
-                      try { modelList = JSON.parse(combo.models) || []; } catch {}
-                      return (
-                        <div key={combo.id} className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
-                          <div className="flex items-center gap-2">
-                            <span className="text-base">🔀</span>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium text-white">{combo.name}</span>
-                                <span className="text-xs px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
-                                  {combo.strategy === 'fallback' ? 'dự phòng' : 'luân phiên'}
-                                </span>
-                                {!combo.is_active && (
-                                  <span className="text-xs text-zinc-600">tắt</span>
-                                )}
-                              </div>
-                              <div className="flex flex-wrap gap-1 mt-1">
-                                {modelList.slice(0, 5).map((m, i) => (
-                                  <span key={i} className="text-xs text-zinc-500">
-                                    {i > 0 && <span className="text-zinc-700 mr-1">{combo.strategy === 'fallback' ? '→' : '↻'}</span>}
-                                    {m}
-                                  </span>
-                                ))}
-                                {modelList.length > 5 && <span className="text-xs text-zinc-600">+{modelList.length - 5}</span>}
-                              </div>
-                            </div>
-                            <div className="flex gap-1">
-                              <button onClick={() => setEditCombo(combo)}
-                                className="p-1.5 rounded hover:bg-zinc-700 text-zinc-400 hover:text-white transition">
-                                <Cpu size={13} />
-                              </button>
-                              <button onClick={() => deleteCombo(combo.id)}
-                                className="p-1.5 rounded hover:bg-zinc-700 text-red-400 hover:text-red-300 transition">
-                                <Trash2 size={13} />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                  <button
-                    onClick={() => setShowComboForm(true)}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-dashed border-zinc-700 text-zinc-400 hover:border-blue-500 hover:text-blue-400 transition text-sm"
-                  >
-                    <Plus size={14} /> Tạo combo mới
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Separator */}
-            <div className="border-t border-zinc-700/50 my-6" />
-
-            {/* Audio Settings */}
-            <AudioSettings />
-          </div>
-        )}
-
         {activeTab === 'storage' && (
           <div className="space-y-4">
             {storage ? (
@@ -532,36 +365,7 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {activeTab === 'providers' && (
-          <div className="space-y-4">
-            <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 space-y-3">
-              <h3 className="text-white text-sm font-medium">Thêm nhà cung cấp</h3>
-              <input value={provName} onChange={e => setProvName(e.target.value)} placeholder="Tên nhà cung cấp" className={inputCls} />
-              <input value={provUrl} onChange={e => setProvUrl(e.target.value)} placeholder="API URL (e.g. https://api.example.com/v1)" className={inputCls} />
-              <input value={provKey} onChange={e => setProvKey(e.target.value)} placeholder="API Key (optional)" className={inputCls} />
-              <button onClick={addProvider} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm flex items-center gap-1">
-                <Plus size={14} /> Add Provider
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              {providers.map(p => (
-                <div key={p.id} className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 flex items-center justify-between">
-                  <div>
-                    <h4 className="text-white text-sm font-medium">{p.name}</h4>
-                    <p className="text-xs text-zinc-500">{p.api_url}</p>
-                  </div>
-                  <button onClick={() => deleteProvider(p.id)} className="p-1.5 rounded hover:bg-zinc-800 text-red-400">
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              ))}
-              {providers.length === 0 && (
-                <p className="text-zinc-500 text-sm text-center py-4">Chưa cấu hình nhà cung cấp nào.</p>
-              )}
-            </div>
-          </div>
-        )}
+        
 
         {activeTab === 'autonomous' && (
           <div className="space-y-6">
@@ -682,6 +486,60 @@ export default function SettingsPage() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {activeTab === 'extension' && (
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-lg font-medium text-white mb-1">AHVclaw Browser Extension</h3>
+              <p className="text-sm text-zinc-400">Cho phép AGI điều khiển trình duyệt của bạn.</p>
+            </div>
+            <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center shrink-0">
+                  <Globe size={24} className="text-white" />
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-white font-medium">Chrome Extension v1.0.0</h4>
+                  <p className="text-sm text-zinc-400 mt-1">Hỗ trợ Google Chrome, Microsoft Edge và các trình duyệt Chromium.</p>
+                  <a href="/downloads/ahvclaw-extension.zip" download className="inline-flex items-center gap-2 mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors">
+                    <Download size={16} />
+                    Tải Extension
+                  </a>
+                </div>
+              </div>
+            </div>
+            <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6">
+              <h4 className="text-white font-medium mb-3">Hướng dẫn cài đặt</h4>
+              <ol className="space-y-2 text-sm text-zinc-400">
+                <li>1. Tải file zip và giải nén</li>
+                <li>2. Mở Chrome, vào chrome://extensions</li>
+                <li>3. Bật Developer Mode (góc trên bên phải)</li>
+                <li>4. Nhấn Load unpacked, chọn thư mục đã giải nén</li>
+                <li>5. Mở extension, nhập Server URL và Token, bật ON</li>
+              </ol>
+            </div>
+            <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6">
+              <h4 className="text-white font-medium mb-3">Thông tin kết nối</h4>
+              <div className="space-y-3 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-zinc-400">Server URL</span>
+                  <div className="flex items-center gap-2">
+                    <code className="text-zinc-300 bg-zinc-800 px-2 py-0.5 rounded">wss://api.ahvclaw.com/ws/computer-use</code>
+                    <button onClick={() => { navigator.clipboard.writeText('wss://api.ahvclaw.com/ws/computer-use'); }} className="p-1 text-zinc-500 hover:text-white transition-colors" title="Sao chép"><Copy size={14} /></button>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-zinc-400">Token</span>
+                  <div className="flex items-center gap-2">
+                    <code className="text-zinc-300 bg-zinc-800 px-2 py-0.5 rounded max-w-[200px] truncate">{typeof window !== 'undefined' ? localStorage.getItem('access_token')?.slice(0, 20) + '...' : '...'}</code>
+                    <button onClick={() => { const t = localStorage.getItem('access_token'); if (t) { navigator.clipboard.writeText(t); setCopied(true); setTimeout(() => setCopied(false), 2000); } }} className="p-1 text-zinc-500 hover:text-white transition-colors" title="Sao chép token">{copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}</button>
+                  </div>
+                </div>
+                <p className="text-zinc-500 text-xs mt-2">Mở extension popup, dán Server URL và Token, rồi bật ON.</p>
+              </div>
+            </div>
           </div>
         )}
 

@@ -22,6 +22,9 @@ import (
 	"github.com/google/uuid"
 )
 
+// BroadcastFunc is set by handlers package to broadcast events to frontend.
+var BroadcastFunc func(userID string, eventType string, data interface{})
+
 // BroadcastFn is a function type for broadcasting events to a user's WebSocket connections.
 type BroadcastFn func(userID string, eventType string, data interface{})
 
@@ -480,6 +483,10 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 		fmt.Sprintf("/data/ahvclaw/workspaces/%s", botUserID.String()),
 		botUserID.String(),
 	)
+	if BroadcastFunc != nil {
+		executor.BroadcastFn = BroadcastFunc
+	}
+
 
 	// Remember original message count to identify new messages later
 	originalMsgCount := len(messages)

@@ -1,17 +1,18 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, Trash2, RefreshCw, Zap, AlertTriangle, ChevronDown, ChevronRight, Edit2 } from 'lucide-react';
+import { Plus, Trash2, RefreshCw, Zap, AlertTriangle, ChevronDown, ChevronRight, Edit2, List } from 'lucide-react';
 import { api } from '@/lib/api';
 import { ProviderConnection, ProviderTypeDef, PROVIDER_ICONS, PROVIDER_COLORS, parseModels, getStatusDot, getStatusColor } from '@/lib/providerRegistry';
 
 interface ConnectionListProps {
   onAdd: () => void;
   onEdit: (conn: ProviderConnection) => void;
+  onPickModels?: (connId: string) => void;
   refreshTrigger?: number;
 }
 
-export function ConnectionList({ onAdd, onEdit, refreshTrigger }: ConnectionListProps) {
+export function ConnectionList({ onAdd, onEdit, onPickModels, refreshTrigger }: ConnectionListProps) {
   const [connections, setConnections] = useState<ProviderConnection[]>([]);
   const [providerTypes, setProviderTypes] = useState<ProviderTypeDef[]>([]);
   const [loading, setLoading] = useState(true);
@@ -181,6 +182,15 @@ export function ConnectionList({ onAdd, onEdit, refreshTrigger }: ConnectionList
                             >
                               <RefreshCw size={13} className={resettingId === conn.id ? 'animate-spin' : ''} />
                             </button>
+                            {onPickModels && (
+                              <button
+                                onClick={() => onPickModels(conn.id)}
+                                title="Chọn model"
+                                className="p-1.5 rounded hover:bg-zinc-700 text-blue-400 hover:text-blue-300 transition"
+                              >
+                                <List size={13} />
+                              </button>
+                            )}
                             <button
                               onClick={() => onEdit(conn)}
                               title="Chỉnh sửa"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/ahvholding/ahvclaw/ai"
@@ -73,8 +74,19 @@ func RetryableStreamChatWithContext(
 
 		var aiErr *ai.AIError
 		if errors.As(lastErr, &aiErr) && !aiErr.Retryable {
-			log.Printf("[retry] non-retryable error from model %q: %v", primaryModel, aiErr)
-			return lastErr
+			// Upstream provider auth errors (OAuth expired, token invalid) should be retried
+			// as the router may fall back to a different provider on retry
+			msg := strings.ToLower(aiErr.Message)
+			isUpstreamAuth := strings.Contains(msg, "oauth token has expired") ||
+				strings.Contains(msg, "token has expired") ||
+				strings.Contains(msg, "invalid_api_key") ||
+				strings.Contains(msg, "authentication_error")
+			if isUpstreamAuth {
+				log.Printf("[retry] upstream auth error from model %q (will retry): %v", primaryModel, aiErr)
+			} else {
+				log.Printf("[retry] non-retryable error from model %q: %v", primaryModel, aiErr)
+				return lastErr
+			}
 		}
 
 		log.Printf("[retry] retryable error from model %q (attempt %d/%d): %v", primaryModel, i+1, attempts, lastErr)

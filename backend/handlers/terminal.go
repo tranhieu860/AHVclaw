@@ -26,6 +26,9 @@ func TerminalExec(c *fiber.Ctx) error {
 		fmt.Sprintf("/data/ahvclaw/workspaces/%s", userID.String()),
 		userID.String(),
 	)
+	executor.BroadcastFn = func(uid string, eventType string, data interface{}) {
+		Hub.BroadcastToUser(uid, Event{Type: eventType, Data: data})
+	}
 
 	argsJSON, _ := json.Marshal(map[string]interface{}{"command": req.Command})
 	result := executor.Execute("terminal_exec", argsJSON)

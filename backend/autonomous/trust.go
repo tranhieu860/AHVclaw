@@ -2,6 +2,7 @@ package autonomous
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"github.com/ahvholding/ahvclaw/db"
@@ -120,4 +121,44 @@ func DecayUnusedTrust(ctx context.Context) error {
 		`UPDATE action_trust SET trust_score = GREATEST(trust_score - 1, 0), updated_at = NOW()
 		 WHERE last_used_at < NOW() - INTERVAL '30 days' AND trust_score > 0`)
 	return err
+}
+
+// SeedDefaultTrust creates default trust entries for a new user if none exist.
+func SeedDefaultTrust(ctx context.Context, userID uuid.UUID) error {
+	var count int
+	db.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM action_trust WHERE user_id=$1", userID).Scan(&count)
+	if count > 0 {
+		return nil
+	}
+
+	defaults := []struct {
+		actionType string
+		pattern    string
+		score      int
+	}{
+		{"read", "memory_search", 10},
+		{"read", "memory_list", 10},
+		{"read", "knowledge_search", 10},
+		{"read", "file_read", 10},
+		{"read", "file_list", 10},
+		{"read", "file_search", 10},
+		{"write_low", "memory_save", 8},
+		{"write_low", "file_write", 5},
+		{"write_low", "send_file", 5},
+		{"write_low", "scheduled_task_create", 4},
+		{"write_high", "terminal_exec", 1},
+		{"write_high", "http_request", 3},
+		{"critical", "server_exec", 0},
+		{"critical", "delegate", 0},
+	}
+
+	for _, d := range defaults {
+		db.Pool.Exec(ctx,
+			`INSERT INTO action_trust (id, user_id, action_type, action_pattern, trust_score, created_at, updated_at)
+			 VALUES (gen_random_uuid(), $1, $2, $3, $4, now(), now())
+			 ON CONFLICT DO NOTHING`,
+			userID, d.actionType, d.pattern, d.score)
+	}
+	log.Printf("[trust] seeded default trust entries for user %s", userID)
+	return nil
 }

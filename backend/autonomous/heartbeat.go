@@ -234,6 +234,9 @@ func (d *Daemon) runForUser(cfg HeartbeatConfig) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
+	// Seed default trust entries if none exist
+	SeedDefaultTrust(ctx, cfg.UserID)
+
 	runID := uuid.New()
 	startedAt := time.Now()
 
@@ -250,12 +253,23 @@ func (d *Daemon) runForUser(cfg HeartbeatConfig) {
 	log.Printf("[heartbeat] starting run %s for user %s", runID, cfg.UserID)
 
 	// Build safe tool list converted to ai.Tool
-	safeAITools := toAITools(tools.SafeToolsOnly())
+	safeAITools := toAITools(tools.AutonomousToolsOnly())
 
 	// Build executor for user workspace
 	workspaceDir := fmt.Sprintf("/data/ahvclaw/workspaces/%s", cfg.UserID.String())
 	os.MkdirAll(workspaceDir, 0755)
 	executor := tools.NewExecutor(workspaceDir, cfg.UserID.String())
+	executor.IsAutonomous = true
+	userID := cfg.UserID
+	executor.TrustCheckFunc = func(category, toolName string) (string, error) {
+		decision, _, err := CheckTrust(context.Background(), userID, category, toolName)
+		return decision, err
+	}
+	if d.deliverFunc != nil && cfg.DeliveryChatID != "" {
+		executor.DeliverFunc = func(text string) {
+			d.deliverFunc(cfg.UserID, cfg.DeliveryChannel, cfg.DeliveryChatID, text)
+		}
+	}
 
 	// Look up user's preferred model
 	model := "AHV-Holding"
@@ -273,8 +287,28 @@ func (d *Daemon) runForUser(cfg HeartbeatConfig) {
 		`SELECT value FROM user_settings WHERE user_id=$1 AND key='fallback_models'`,
 		cfg.UserID).Scan(&fallbackModels)
 
+	// Check for stuck goals before building prompt (loop breaker)
+	stuckCount := CheckAndSkipStuckGoals(ctx, cfg.UserID)
+	if stuckCount > 0 {
+		log.Printf("[heartbeat] loop_breaker marked %d stuck goals for user %s", stuckCount, cfg.UserID)
+	}
+
 	// Build system prompt
 	systemPrompt := buildHeartbeatPrompt(cfg)
+
+	// Check for active execution plan and inject context
+	plan, planErr := GetActivePlan(ctx, cfg.UserID)
+	if planErr == nil && plan != nil && plan.CurrentStep < len(plan.Steps) {
+		step := plan.Steps[plan.CurrentStep]
+		log.Printf("[heartbeat] active plan for user %s: step %d/%d - %s (tool: %s)",
+			cfg.UserID, plan.CurrentStep+1, len(plan.Steps), step.Description, step.ToolName)
+		plan.Status = "running"
+		savePlanState(ctx, plan)
+		systemPrompt += fmt.Sprintf(
+			"\n\nKẾ HOẠCH ĐANG THỰC HIỆN: %s\nBước tiếp theo (%d/%d): %s\nTool: %s\nArgs: %s\nHãy thực hiện bước này ngay.",
+			plan.Title, plan.CurrentStep+1, len(plan.Steps),
+			step.Description, step.ToolName, step.ToolArgs)
+	}
 
 	messages := []ai.ChatMessage{
 		{Role: "system", Content: systemPrompt},

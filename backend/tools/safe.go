@@ -22,3 +22,35 @@ func SafeToolsOnly() []ToolDef {
 	}
 	return safe
 }
+
+// SafeToolNames returns just the names of safe tools.
+func SafeToolNames() []string {
+	var names []string
+	for name := range safeToolNames {
+		names = append(names, name)
+	}
+	return names
+}
+
+// AutonomousToolNames returns tool names available in autonomous mode.
+// Write tools are gated by the trust system at execution time.
+func AutonomousToolNames() []string {
+	names := SafeToolNames()
+	names = append(names, "file_write", "terminal_exec", "send_file", "manage_scheduled_task")
+	return names
+}
+
+// AutonomousToolsOnly returns tool definitions for autonomous mode (safe + trust-gated write tools).
+func AutonomousToolsOnly() []ToolDef {
+	autoNames := map[string]bool{}
+	for _, n := range AutonomousToolNames() {
+		autoNames[n] = true
+	}
+	var result []ToolDef
+	for _, t := range AllTools {
+		if autoNames[t.Function.Name] {
+			result = append(result, t)
+		}
+	}
+	return result
+}

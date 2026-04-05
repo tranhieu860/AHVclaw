@@ -144,6 +144,11 @@ func main() {
 	handlers.Router = ai.NewRouterClient(cfg.RouterURL, cfg.RouterAPIKey)
 
 	// Init channel manager
+	// Wire broadcast function for channels package (avoids import cycle)
+	channels.BroadcastFunc = func(uid string, eventType string, data interface{}) {
+		handlers.Hub.BroadcastToUser(uid, handlers.Event{Type: eventType, Data: data})
+	}
+
 	channelRouter := channels.NewRouter(handlers.Router)
 	channelRouter.BroadcastTo = func(userID string, eventType string, data interface{}) {
 		handlers.Hub.BroadcastToUser(userID, handlers.Event{Type: eventType, Data: data})
@@ -176,6 +181,9 @@ func main() {
 				{Role: "user", Content: prompt},
 			}
 			executor := tools.NewExecutor(fmt.Sprintf("/data/ahvclaw/workspaces/%s", userID.String()), userID.String())
+			executor.BroadcastFn = func(uid string, eventType string, data interface{}) {
+				handlers.Hub.BroadcastToUser(uid, handlers.Event{Type: eventType, Data: data})
+			}
 			result, err := engine.ProcessChat(ctx, engine.ChatConfig{
 				AIRouter:         handlers.Router,
 				Model:            model,
@@ -220,6 +228,19 @@ func main() {
 	})
 	_ = hbDaemon
 	go hbDaemon.Start(hbCtx)
+
+	// Session cleanup - runs every hour
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			tag, err := db.Pool.Exec(context.Background(),
+				"DELETE FROM sessions WHERE expires_at < now()")
+			if err == nil {
+				log.Printf("[cleanup] deleted %d expired sessions", tag.RowsAffected())
+			}
+		}
+	}()
 
 	// Cognitive backfill: ensure all messages have embeddings
 	go func() {
@@ -371,6 +392,7 @@ func main() {
 	api.Post("/auth/register", authLimiter, handlers.Register)
 	api.Post("/auth/login", authLimiter, handlers.Login)
 	api.Post("/auth/refresh", authLimiter, handlers.RefreshToken)
+	api.Get("/oauth/callback/:provider", handlers.OAuthCallback)
 
 	api.Get("/models", func(c *fiber.Ctx) error {
 		data, err := handlers.Router.ListModels()
@@ -462,6 +484,11 @@ func main() {
 	protected.Post("/connections/:id/test", handlers.TestConnection)
 	protected.Post("/connections/:id/reset", handlers.ResetConnection)
 	protected.Get("/connections/health", handlers.ConnectionHealthStats)
+	protected.Get("/connections/:id/models", handlers.FetchRemoteModels)
+
+	// OAuth
+	protected.Get("/oauth/authorize/:provider", handlers.OAuthAuthorize)
+	protected.Post("/oauth/exchange", handlers.OAuthPasteExchange)
 	// Combos
 	protected.Get("/combos", handlers.ListCombos)
 	protected.Post("/combos", handlers.CreateCombo)
@@ -495,6 +522,9 @@ func main() {
 	protected.Put("/autonomous/config", handlers.UpdateAutonomousConfig)
 	protected.Post("/autonomous/stop", handlers.StopAutonomous)
 	protected.Post("/autonomous/resume", handlers.ResumeAutonomous)
+
+	// Computer Use
+	protected.Get("/computer-use/status", handlers.ComputerUseStatus)
 
 	// Goals
 	protected.Get("/goals", handlers.ListGoals)
@@ -552,15 +582,26 @@ func main() {
 
 	// Admin only routes
 	adminRoutes := protected.Group("", auth.RequireRole("admin"))
+	adminRoutes.Get("/admin/dashboard", handlers.AdminDashboard)
+	adminRoutes.Get("/admin/system", handlers.AdminSystemInfo)
 	adminRoutes.Get("/admin/users", handlers.AdminListUsers)
+	adminRoutes.Get("/admin/users/detailed", handlers.AdminListUsersDetailed)
+	adminRoutes.Post("/admin/users", handlers.AdminCreateUser)
+	adminRoutes.Put("/admin/users/:id", handlers.AdminUpdateUser)
 	adminRoutes.Put("/admin/users/:id/role", handlers.AdminUpdateUserRole)
 	adminRoutes.Delete("/admin/users/:id", handlers.AdminDeleteUser)
+	adminRoutes.Get("/admin/settings", handlers.AdminGetSettings)
+	adminRoutes.Put("/admin/settings", handlers.AdminUpdateSetting)
+	adminRoutes.Get("/admin/activity", handlers.AdminActivityLog)
+	adminRoutes.Get("/admin/heartbeat", handlers.AdminHeartbeatStatus)
+	adminRoutes.Get("/admin/db-stats", handlers.AdminDBStats)
 	adminRoutes.Get("/admin/stats", handlers.AdminSystemStats)
 
 	// WebSocket chat
 	app.Use("/ws", handlers.WSUpgrade())
 	app.Get("/ws/chat", handlers.WSChat())
 	app.Get("/ws/events", websocket.New(handlers.WSEvents()))
+	app.Get("/ws/computer-use", websocket.New(handlers.WSComputerUse()))
 
 	go func() {
 		sigChan := make(chan os.Signal, 1)

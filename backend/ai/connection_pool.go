@@ -229,7 +229,7 @@ func (cp *ConnectionPool) isHealthy(connID uuid.UUID) bool {
 
 func (cp *ConnectionPool) findConnectionByModel(ctx context.Context, userID uuid.UUID, model string) *ResolvedConnection {
 	rows, err := db.Pool.Query(ctx,
-		`SELECT id, api_url, api_key_encrypted, api_format, provider_type, models, backoff_level
+		`SELECT id, api_url, api_key_encrypted, access_token_encrypted, api_format, provider_type, models, backoff_level
 		 FROM provider_connections
 		 WHERE user_id = $1 AND is_active = true
 		 ORDER BY priority ASC, created_at ASC`, userID)
@@ -240,10 +240,10 @@ func (cp *ConnectionPool) findConnectionByModel(ctx context.Context, userID uuid
 
 	for rows.Next() {
 		var id uuid.UUID
-		var apiURL, keyEnc, format, provType string
+		var apiURL, keyEnc, tokenEnc, format, provType string
 		var modelsRaw json.RawMessage
 		var backoff int
-		if rows.Scan(&id, &apiURL, &keyEnc, &format, &provType, &modelsRaw, &backoff) != nil {
+		if rows.Scan(&id, &apiURL, &keyEnc, &tokenEnc, &format, &provType, &modelsRaw, &backoff) != nil {
 			continue
 		}
 		if backoff > 5 {
@@ -255,7 +255,11 @@ func (cp *ConnectionPool) findConnectionByModel(ctx context.Context, userID uuid
 		}
 		for _, m := range models {
 			if strings.EqualFold(m, model) {
+				// Use api_key if available, otherwise use access_token (OAuth)
 				apiKey := decryptKey(keyEnc)
+				if apiKey == "" {
+					apiKey = decryptKey(tokenEnc)
+				}
 				regDef := ProviderRegistry[provType]
 				authHeader := regDef.AuthHeader
 				if authHeader == "" {

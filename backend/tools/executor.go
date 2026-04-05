@@ -2,21 +2,27 @@ package tools
 
 import (
 	"encoding/json"
-	"github.com/ahvholding/ahvclaw/security"
 	"fmt"
 	"time"
+
+	"github.com/ahvholding/ahvclaw/security"
 )
 
 type ToolResult struct {
 	Name    string `json:"name"`
 	Content string `json:"content"`
 	Error   string `json:"error,omitempty"`
+	Image   string `json:"image,omitempty"`
 }
 
 type Executor struct {
-	WorkspaceDir string
-	UserID       string
-	SendFileFn   func(path, caption string) error
+	WorkspaceDir   string
+	UserID         string
+	SendFileFn     func(path, caption string) error
+	BroadcastFn    func(userID string, eventType string, data interface{})
+	IsAutonomous   bool
+	TrustCheckFunc func(category, toolName string) (string, error)
+	DeliverFunc    func(text string)
 }
 
 func NewExecutor(workspaceDir string, userID string) *Executor {
@@ -69,8 +75,58 @@ func (e *Executor) executeInternal(name string, argsJSON json.RawMessage) *ToolR
 		return e.sendFile(argsJSON)
 	case "skill_install":
 		return e.skillInstall(argsJSON)
+	case "cu_screenshot":
+		return e.cuScreenshot(argsJSON)
+	case "cu_click":
+		return e.cuClick(argsJSON)
+	case "cu_type":
+		return e.cuType(argsJSON)
+	case "cu_scroll":
+		return e.cuScroll(argsJSON)
+	case "cu_navigate":
+		return e.cuNavigate(argsJSON)
+	case "cu_read_page":
+		return e.cuReadPage(argsJSON)
+	case "cu_tab_list":
+		return e.cuTabList(argsJSON)
+	case "cu_tab_switch":
+		return e.cuTabSwitch(argsJSON)
+	case "browser_scroll":
+		return e.browserScroll(argsJSON)
+	case "browser_tab_list":
+		return e.browserTabList(argsJSON)
+	case "browser_tab_switch":
+		return e.browserTabSwitch(argsJSON)
 	default:
 		return &ToolResult{Name: name, Error: fmt.Sprintf("unknown tool: %s", name)}
+	}
+}
+
+
+func (e *Executor) checkTrust(toolName string) string {
+	if !e.IsAutonomous || e.TrustCheckFunc == nil {
+		return "execute"
+	}
+	category := toolCategory(toolName)
+	decision, err := e.TrustCheckFunc(category, toolName)
+	if err != nil {
+		return "execute"
+	}
+	return decision
+}
+
+func toolCategory(name string) string {
+	switch name {
+	case "memory_search", "memory_list", "knowledge_search", "file_read", "file_list", "file_search":
+		return "read"
+	case "memory_save", "file_write", "send_file", "scheduled_task_create":
+		return "write_low"
+	case "terminal_exec", "http_request":
+		return "write_high"
+	case "server_exec", "delegate":
+		return "critical"
+	default:
+		return "write_low"
 	}
 }
 
@@ -93,9 +149,27 @@ func (e *Executor) Execute(name string, argsJSON json.RawMessage) *ToolResult {
 		}
 	}
 
+	// Trust gate for autonomous mode
+	decision := e.checkTrust(name)
+	switch decision {
+	case "block":
+		return &ToolResult{Name: name, Error: fmt.Sprintf("Action '%s' blocked by trust system.", name)}
+	case "ask":
+		if e.DeliverFunc != nil {
+			e.DeliverFunc(fmt.Sprintf("AGI requests permission: %s - Use /approve %s to allow.", name, name))
+		}
+		return &ToolResult{Name: name, Error: fmt.Sprintf("Awaiting approval for '%s'.", name)}
+	case "notify":
+		if e.DeliverFunc != nil {
+			e.DeliverFunc(fmt.Sprintf("AGI auto-executing: %s", name))
+		}
+	}
+
 	timeout := 30 * time.Second
 	switch name {
 	case "browser_navigate", "browser_extract", "browser_screenshot":
+		timeout = 45 * time.Second
+	case "browser_scroll", "browser_click", "browser_type", "browser_tab_list", "browser_tab_switch":
 		timeout = 45 * time.Second
 	case "terminal_exec":
 		timeout = 120 * time.Second

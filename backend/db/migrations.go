@@ -733,6 +733,25 @@ ON CONFLICT (id) DO NOTHING`,
 	`ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS goal_id UUID REFERENCES goals(id) ON DELETE SET NULL`,
 	`CREATE INDEX IF NOT EXISTS idx_tasks_goal ON scheduled_tasks(goal_id) WHERE goal_id IS NOT NULL`,
 
+	// 063: Add rotation tracking columns for multi-account support
+	`ALTER TABLE provider_connections ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ`,
+	`ALTER TABLE provider_connections ADD COLUMN IF NOT EXISTS consecutive_use_count INTEGER DEFAULT 0`,
+
+	// 064: execution plans for multi-step autonomous actions
+	`CREATE TABLE IF NOT EXISTS execution_plans (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		user_id UUID NOT NULL REFERENCES users(id),
+		goal_id UUID REFERENCES goals(id),
+		title TEXT NOT NULL,
+		steps JSONB NOT NULL DEFAULT '[]',
+		current_step INT NOT NULL DEFAULT 0,
+		status VARCHAR(20) NOT NULL DEFAULT 'pending',
+		result TEXT,
+		created_at TIMESTAMPTZ DEFAULT now(),
+		updated_at TIMESTAMPTZ DEFAULT now()
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_execution_plans_user_status ON execution_plans(user_id, status)`,
+
 }
 
 func RunMigrations() error {

@@ -83,6 +83,7 @@ func (a *Adapter) Start() error {
 		{Command: "goals", Description: "Xem mục tiêu"},
 		{Command: "digest", Description: "Báo cáo hôm nay"},
 		{Command: "mood", Description: "Tâm trạng hiện tại"},
+		{Command: "server", Description: "Chọn server để quản lý"},
 	}
 	cmdConfig := tgbotapi.NewSetMyCommands(commands...)
 	if _, err := bot.Request(cmdConfig); err != nil {
@@ -299,12 +300,13 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 		help := "Danh sách lệnh:\n\n" +
 			"/start - Bắt đầu trò chuyện\n" +
 			"/new - Tạo cuộc trò chuyện mới\n" +
-			"/models - Chon model AI\n" +
-			"/agents - Chon agent\n" +
+			"/models - Chọn model AI\n" +
+			"/agents - Chọn agent\n" +
 			"/skills - Xem danh sách skill\n" +
 			"/memory - Xem memory đã lưu\n" +
 			"/tasks - Quản lý scheduled tasks\n" +
 			"/status - Trạng thái hiện tại\n" +
+			"/server - Chọn server để quản lý\n" +
 			"/help - Hướng dẫn sử dụng"
 		a.sendText(chatID, help)
 
@@ -616,7 +618,58 @@ func (a *Adapter) handleCommand(msg *tgbotapi.Message) {
 		}
 		a.sendText(chatID, "▶️ Autonomous agent đã hoạt động trở lại.")
 
-	case "goals":
+	case "server":
+		userID, err := a.getBotUserID(ctx)
+		if err != nil {
+			a.sendText(chatID, "Lỗi nội bộ.")
+			return
+		}
+		rows, err := db.Pool.Query(ctx,
+			"SELECT id, name, host, environment FROM servers WHERE user_id = $1 ORDER BY name",
+			userID)
+		if err != nil {
+			a.sendText(chatID, "Không thể lấy danh sách server.")
+			return
+		}
+		defer rows.Close()
+
+		type srvRow struct {
+			id, name, host, env string
+		}
+		var srvList []srvRow
+		for rows.Next() {
+			var id uuid.UUID
+			var name, host, env string
+			if rows.Scan(&id, &name, &host, &env) == nil {
+				srvList = append(srvList, srvRow{id: id.String(), name: name, host: host, env: env})
+			}
+		}
+
+		if len(srvList) == 0 {
+			a.sendText(chatID, "Chưa có server nào. Thêm server tại web hoặc nhắn: Thêm server [tên], host [IP], user [user], pass [pass]")
+			return
+		}
+
+		var kbRows [][]tgbotapi.InlineKeyboardButton
+		for _, srv := range srvList {
+			label := fmt.Sprintf("🖥 %s (%s) [%s]", srv.name, srv.host, srv.env)
+			if len(label) > 60 {
+				label = label[:57] + "..."
+			}
+			cbData := "server:" + srv.id
+			kbRows = append(kbRows, tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData(label, cbData),
+			))
+		}
+		kbRows = append(kbRows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("❌ Bỏ chọn server (chat chung)", "server:none"),
+		))
+
+		reply := tgbotapi.NewMessage(chatID, "Chọn server để quản lý. Chat sẽ đồng bộ với web:")
+		reply.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(kbRows...)
+		a.api.Send(reply)
+
+		case "goals":
 		userID, err := a.getBotUserID(ctx)
 		if err != nil {
 			a.sendText(chatID, "Lỗi nội bộ.")
@@ -789,6 +842,85 @@ func (a *Adapter) handleCallbackQuery(cq *tgbotapi.CallbackQuery) {
 			agentName = agentIDStr
 		}
 		a.sendText(chatID, fmt.Sprintf("Đã chuyển sang agent: %s", agentName))
+	} else if strings.HasPrefix(data, "server:") {
+		serverIDStr := strings.TrimPrefix(data, "server:")
+
+		userID, err := a.getBotUserID(ctx)
+		if err != nil {
+			a.sendText(chatID, "Lỗi nội bộ.")
+			return
+		}
+
+		if serverIDStr == "none" {
+			// Unlink server from conversation
+			tag, err := db.Pool.Exec(ctx,
+				`UPDATE conversations SET server_id = NULL, updated_at = now()
+				 WHERE bot_id=$1 AND channel_chat_id=$2 AND status='active'`,
+				botUUID, chatIDStr)
+			if err != nil || tag.RowsAffected() == 0 {
+				a.sendText(chatID, "Không thể cập nhật.")
+				return
+			}
+			a.sendText(chatID, "✅ Đã bỏ chọn server. Chat chung không gắn server nào.")
+		} else {
+			serverUUID, err := uuid.Parse(serverIDStr)
+			if err != nil {
+				a.sendText(chatID, "Server không hợp lệ.")
+				return
+			}
+
+			// Verify ownership
+			var serverName, serverHost string
+			err = db.Pool.QueryRow(ctx,
+				"SELECT name, host FROM servers WHERE id = $1 AND user_id = $2",
+				serverUUID, userID).Scan(&serverName, &serverHost)
+			if err != nil {
+				a.sendText(chatID, "Server không tồn tại.")
+				return
+			}
+
+			// Find or create conversation with this server_id
+			var convID uuid.UUID
+			err = db.Pool.QueryRow(ctx,
+				"SELECT id FROM conversations WHERE user_id = $1 AND server_id = $2 ORDER BY updated_at DESC LIMIT 1",
+				userID, serverUUID).Scan(&convID)
+			if err != nil {
+				// Create new conversation for this server
+				convID = uuid.New()
+				title := serverName + " (" + serverHost + ")"
+				_, err = db.Pool.Exec(ctx,
+					`INSERT INTO conversations (id, user_id, server_id, title, model, bot_id, channel, channel_chat_id, status)
+					 VALUES ($1, $2, $3, $4, $5, $6, 'telegram', $7, 'active')`,
+					convID, userID, serverUUID, title, "AHV-Holding-TroLy", botUUID, chatIDStr)
+				if err != nil {
+					a.sendText(chatID, "Không thể tạo conversation cho server.")
+					return
+				}
+			} else {
+				// Link existing conversation to this telegram chat
+				db.Pool.Exec(ctx,
+					`UPDATE conversations SET bot_id=$1, channel='telegram', channel_chat_id=$2, status='active', updated_at=now()
+					 WHERE id=$3`,
+					botUUID, chatIDStr, convID)
+			}
+
+			// Also update current active conversation to point to this server
+			db.Pool.Exec(ctx,
+				`UPDATE conversations SET server_id=$1, updated_at=now()
+				 WHERE bot_id=$2 AND channel_chat_id=$3 AND status='active'
+				 AND id != $4`,
+				serverUUID, botUUID, chatIDStr, convID)
+
+			a.sendText(chatID, fmt.Sprintf("✅ Đã chọn server: %s (%s)\n\nTất cả tin nhắn tiếp theo sẽ liên quan đến server này. Chat đồng bộ với web.\n\nDùng /server để đổi hoặc bỏ chọn.", serverName, serverHost))
+		}
+
+		// Remove inline keyboard
+		if cq.Message != nil {
+			removeKb := tgbotapi.NewEditMessageReplyMarkup(chatID, cq.Message.MessageID,
+				tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{}})
+			a.api.Send(removeKb)
+		}
+
 	} else if strings.HasPrefix(data, "task:") {
 		taskIDStr := strings.TrimPrefix(data, "task:")
 		taskUUID, err := uuid.Parse(taskIDStr)

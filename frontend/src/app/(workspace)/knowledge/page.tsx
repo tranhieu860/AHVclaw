@@ -85,7 +85,7 @@ export default function KnowledgePage() {
   };
 
   const handleDeleteKb = async (kb: KnowledgeBase) => {
-    if (!confirm('Xoa kho kien thuc "' + kb.name + '"? Hanh dong nay khong the hoan tac.')) return;
+    if (!confirm('Xóa kho kiến thức "' + kb.name + '"? Hành động này không thể hoàn tác.')) return;
     try {
       await api.deleteKnowledgeBase(kb.id);
       if (selectedKb?.id === kb.id) {

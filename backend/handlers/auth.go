@@ -42,22 +42,32 @@ func Register(c *fiber.Ctx) error {
 
 	apiKey, _ := auth.GenerateAPIKey()
 
-	// First registered user becomes admin
+	// First registered user becomes admin — use transaction to prevent race condition
+	tx, txErr := db.Pool.Begin(context.Background())
+	if txErr != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "internal error"})
+	}
+	defer tx.Rollback(context.Background())
+
 	var count int
-	db.Pool.QueryRow(context.Background(), "SELECT COUNT(*) FROM users").Scan(&count)
+	tx.QueryRow(context.Background(), "SELECT COUNT(*) FROM users").Scan(&count)
 	role := "user"
 	if count == 0 {
 		role = "admin"
 	}
 
 	var user models.User
-	err = db.Pool.QueryRow(context.Background(),
+	err = tx.QueryRow(context.Background(),
 		"INSERT INTO users (email, password_hash, name, role, api_key) VALUES ($1, $2, $3, $4, $5) RETURNING id, email, name, role, avatar_url, api_key, settings, created_at, updated_at",
 		req.Email, string(hash), req.Name, role, apiKey,
 	).Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.AvatarURL,
 		&user.APIKey, &user.Settings, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		return c.Status(409).JSON(fiber.Map{"error": "email already exists"})
+	}
+
+	if err := tx.Commit(context.Background()); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "internal error"})
 	}
 
 	return respondWithTokens(c, user)

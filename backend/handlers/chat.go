@@ -295,6 +295,20 @@ always confirm with the user first.
 		}
 	}
 
+	// Load servers.md for bot context
+	serversMdPath := fmt.Sprintf("/data/ahvclaw/users/%s/servers.md", userID.String())
+	if serversData, err := os.ReadFile(serversMdPath); err == nil && len(serversData) > 0 {
+		systemPrompt += "\n\n## Your Managed Servers\n"
+		systemPrompt += "You can read/write this file at: " + serversMdPath + "\n"
+		systemPrompt += "Use server_ssh_exec with the server name to execute commands.\n"
+		systemPrompt += "Use server_list to see all registered servers.\n\n"
+		serversMd := string(serversData)
+		if len(serversMd) > 2000 {
+			serversMd = serversMd[:2000] + "\n...(truncated)"
+		}
+		systemPrompt += serversMd
+	}
+
 	// Load memories via semantic search with fallback to recent
 	var memoryContext strings.Builder
 	semanticResults, semErr := embeddings.SearchByEmbedding(userID.String(), req.Content, 10)
@@ -341,6 +355,9 @@ always confirm with the user first.
 
 	// Create executor for user workspace
 	executor := tools.NewExecutor(fmt.Sprintf("/data/ahvclaw/workspaces/%s", userID.String()), userID.String())
+	executor.BroadcastFn = func(uid string, eventType string, data interface{}) {
+		Hub.BroadcastToUser(uid, Event{Type: eventType, Data: data})
+	}
 
 	// Ensure workspace exists
 	os.MkdirAll(executor.WorkspaceDir, 0755)
