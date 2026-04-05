@@ -11,13 +11,15 @@ import (
 )
 
 func (e *Executor) memorySave(argsJSON json.RawMessage) *ToolResult {
+	log.Printf("[memory_save] raw args: %s", string(argsJSON))
 	var args struct {
 		Type    string `json:"type"`
 		Key     string `json:"key"`
 		Content string `json:"content"`
 	}
 	if err := json.Unmarshal(argsJSON, &args); err != nil {
-		return &ToolResult{Name: "memory_save", Error: "invalid arguments"}
+		log.Printf("[memory_save] unmarshal error: %v, raw: %s", err, string(argsJSON))
+		return &ToolResult{Name: "memory_save", Error: "invalid arguments: " + err.Error()}
 	}
 	if args.Type == "" || args.Key == "" || args.Content == "" {
 		return &ToolResult{Name: "memory_save", Error: "type, key, and content are required"}
@@ -54,6 +56,7 @@ func (e *Executor) memorySave(argsJSON json.RawMessage) *ToolResult {
 }
 
 func (e *Executor) memorySearch(argsJSON json.RawMessage) *ToolResult {
+	log.Printf("[memory_search] raw args: %s", string(argsJSON))
 	var args struct {
 		Query string `json:"query"`
 	}

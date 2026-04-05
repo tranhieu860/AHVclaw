@@ -200,7 +200,7 @@ func ProcessChat(ctx context.Context, cfg ChatConfig) (*ChatResult, error) {
 
 		// Execute each tool call.
 		for _, tc := range toolCalls {
-			log.Printf("[engine] executing tool: %s", tc.Function.Name)
+			log.Printf("[engine] executing tool: %s, args_raw: %s", tc.Function.Name, string(tc.Function.Arguments))
 
 			if cfg.OnToolCall != nil {
 				cfg.OnToolCall(tc.Function.Name, string(tc.Function.Arguments))
@@ -322,7 +322,15 @@ func mergeToolCallDeltas(deltas []json.RawMessage) json.RawMessage {
 			Type: entry.Type,
 		}
 		tc.Function.Name = entry.Name
-		tc.Function.Arguments = json.RawMessage(entry.Arguments.String())
+		argStr := entry.Arguments.String()
+		// Fix: if arguments are double-encoded as a JSON string, unwrap them
+		if len(argStr) > 1 && argStr[0] == '"' {
+			var unwrapped string
+			if json.Unmarshal([]byte(argStr), &unwrapped) == nil {
+				argStr = unwrapped
+			}
+		}
+		tc.Function.Arguments = json.RawMessage(argStr)
 		result = append(result, tc)
 	}
 

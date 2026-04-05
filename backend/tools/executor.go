@@ -31,6 +31,15 @@ func NewExecutor(workspaceDir string, userID string) *Executor {
 }
 
 func (e *Executor) executeInternal(name string, argsJSON json.RawMessage) *ToolResult {
+	// Fix: 9Router sometimes double-encodes tool arguments as a JSON string.
+	// e.g. "\"{\\"content\\":\\"...\\"}\"" instead of {"content":"..."}
+	// If argsJSON is a JSON string, unwrap it to get the actual object.
+	if len(argsJSON) > 1 && argsJSON[0] == '"' {
+		var unwrapped string
+		if json.Unmarshal(argsJSON, &unwrapped) == nil && len(unwrapped) > 0 && unwrapped[0] == '{' {
+			argsJSON = json.RawMessage(unwrapped)
+		}
+	}
 	switch name {
 	case "file_read":
 		return e.fileRead(argsJSON)
