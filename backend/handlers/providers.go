@@ -87,7 +87,7 @@ func UpdateProvider(c *fiber.Ctx) error {
 	// Verify ownership
 	var ownerID uuid.UUID
 	err = db.Pool.QueryRow(context.Background(),
-		"SELECT user_id FROM model_providers WHERE id = $1", providerID).Scan(&ownerID)
+		"SELECT user_id FROM model_providers WHERE id = $1 AND user_id = $2", providerID, userID).Scan(&ownerID)
 	if err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "provider not found"})
 	}
@@ -135,8 +135,9 @@ func UpdateProvider(c *fiber.Ctx) error {
 
 	setClauses = append(setClauses, "updated_at = NOW()")
 	args = append(args, providerID)
-	query := fmt.Sprintf("UPDATE model_providers SET %s WHERE id = $%d",
-		strings.Join(setClauses, ", "), argIdx)
+	args = append(args, userID)
+	query := fmt.Sprintf("UPDATE model_providers SET %s WHERE id = $%d AND user_id = $%d",
+		strings.Join(setClauses, ", "), argIdx, argIdx+1)
 
 	_, err = db.Pool.Exec(context.Background(), query, args...)
 	if err != nil {

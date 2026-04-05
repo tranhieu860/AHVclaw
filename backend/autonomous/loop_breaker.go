@@ -10,31 +10,44 @@ import (
 
 const maxUnproductiveRuns = 5
 
-// IsGoalStuck checks if recent heartbeat runs for a goal show no progress.
-// It looks at the last N runs that mention the goal title and checks if summaries are repetitive.
+// IsGoalStuck checks if recent autonomous actions show no progress.
+// Uses outcome-based heuristics instead of text matching:
+// 1. Action signature repetition (same tools called in same order)
+// 2. No new artifacts produced (memories, files)
+// 3. Token budget burned with no state change
 func IsGoalStuck(ctx context.Context, userID uuid.UUID, goalTitle string) bool {
-	var recentRuns int
-	var uniqueSummaries int
+	var totalRuns int
+	var distinctToolSets int
+	var newMemories int
 
 	err := db.Pool.QueryRow(ctx, `
-		WITH recent AS (
-			SELECT summary FROM heartbeat_runs
-			WHERE user_id = $1
-			  AND summary ILIKE '%' || $2 || '%'
-			  AND created_at > now() - interval '24 hours'
-			ORDER BY created_at DESC
-			LIMIT $3
+		WITH recent_runs AS (
+			SELECT id, created_at FROM heartbeat_runs
+			WHERE user_id = $1 AND created_at > now() - interval '24 hours'
+			ORDER BY created_at DESC LIMIT $2
+		),
+		run_tools AS (
+			SELECT hr.id, string_agg(DISTINCT tl.tool_name, ',' ORDER BY tl.tool_name) as tool_set
+			FROM recent_runs hr
+			LEFT JOIN tool_logs tl ON tl.source = 'heartbeat' AND tl.user_id = $1
+				AND tl.created_at BETWEEN hr.created_at - interval '1 minute' AND hr.created_at + interval '10 minutes'
+			GROUP BY hr.id
 		)
-		SELECT COUNT(*), COUNT(DISTINCT LEFT(summary, 200)) FROM recent`,
-		userID, goalTitle, maxUnproductiveRuns).Scan(&recentRuns, &uniqueSummaries)
+		SELECT
+			(SELECT COUNT(*) FROM recent_runs),
+			(SELECT COUNT(DISTINCT tool_set) FROM run_tools),
+			(SELECT COUNT(*) FROM memories WHERE user_id = $1 AND created_at > now() - interval '24 hours')
+	`, userID, maxUnproductiveRuns).Scan(&totalRuns, &distinctToolSets, &newMemories)
 
 	if err != nil {
+		log.Printf("[loop_breaker] outcome query error for user %s: %v", userID, err)
 		return false
 	}
 
-	// If N+ runs but <=2 unique summaries, it's stuck in a loop
-	if recentRuns >= maxUnproductiveRuns && uniqueSummaries <= 2 {
-		log.Printf("[loop_breaker] goal '%s' is stuck: %d runs with only %d unique summaries", goalTitle, recentRuns, uniqueSummaries)
+	// Stuck = many runs + same tool pattern + no new memories
+	if totalRuns >= maxUnproductiveRuns && distinctToolSets <= 2 && newMemories <= 1 {
+		log.Printf("[loop_breaker] user %s is stuck: %d runs, %d distinct tool sets, %d new memories",
+			userID, totalRuns, distinctToolSets, newMemories)
 		return true
 	}
 	return false
@@ -49,6 +62,15 @@ func MarkGoalStuck(ctx context.Context, userID, goalID uuid.UUID) {
 		log.Printf("[loop_breaker] failed to mark goal %s as stuck: %v", goalID, err)
 	} else {
 		log.Printf("[loop_breaker] marked goal %s as stuck", goalID)
+	}
+
+	// Also cancel any active plans tied to this goal
+	_, err = db.Pool.Exec(ctx,
+		`UPDATE execution_plans SET status='failed', result='Tự động hủy - mục tiêu bị stuck', updated_at=now()
+		 WHERE user_id=$1 AND goal_id=$2 AND status IN ('pending','running','blocked')`,
+		userID, goalID)
+	if err != nil {
+		log.Printf("[loop_breaker] failed to cancel plans for stuck goal %s: %v", goalID, err)
 	}
 }
 

@@ -128,13 +128,6 @@ func UpdateBot(c *fiber.Ctx) error {
 
 	ctx := context.Background()
 
-	// Verify ownership
-	var ownerID uuid.UUID
-	err = db.Pool.QueryRow(ctx, "SELECT user_id FROM bots WHERE id = $1", botID).Scan(&ownerID)
-	if err != nil || ownerID != userID {
-		return c.Status(404).JSON(fiber.Map{"error": "bot not found"})
-	}
-
 	// Encrypt config if provided
 	var encConfig *json.RawMessage
 	if req.ChannelConfig != nil {
@@ -145,7 +138,7 @@ func UpdateBot(c *fiber.Ctx) error {
 		encConfig = enc
 	}
 
-	_, err = db.Pool.Exec(ctx,
+	result, err := db.Pool.Exec(ctx,
 		`UPDATE bots SET
 			name = COALESCE($2, name),
 			default_agent_id = COALESCE($3, default_agent_id),
@@ -157,10 +150,13 @@ func UpdateBot(c *fiber.Ctx) error {
 			notification_settings = COALESCE($9, notification_settings),
 			is_active = COALESCE($10, is_active),
 			updated_at = now()
-		 WHERE id = $1`,
+		 WHERE id = $1 AND user_id = $11`,
 		botID, req.Name, req.DefaultAgentID, req.Channel,
 		encConfig, req.AISettings, req.ResponseSettings,
-		req.AccessSettings, req.NotificationSettings, req.IsActive)
+		req.AccessSettings, req.NotificationSettings, req.IsActive, userID)
+	if result.RowsAffected() == 0 && err == nil {
+		return c.Status(404).JSON(fiber.Map{"error": "bot not found"})
+	}
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed to update bot: " + err.Error()})
 	}
@@ -178,19 +174,15 @@ func DeleteBot(c *fiber.Ctx) error {
 
 	ctx := context.Background()
 
-	// Verify ownership
-	var ownerID uuid.UUID
-	err = db.Pool.QueryRow(ctx, "SELECT user_id FROM bots WHERE id = $1", botID).Scan(&ownerID)
-	if err != nil || ownerID != userID {
-		return c.Status(404).JSON(fiber.Map{"error": "bot not found"})
-	}
-
 	// Stop bot if running
 	if ChannelManager != nil && ChannelManager.IsRunning(botID.String()) {
 		ChannelManager.StopBot(botID.String())
 	}
 
-	_, err = db.Pool.Exec(ctx, "DELETE FROM bots WHERE id = $1", botID)
+	result, err := db.Pool.Exec(ctx, "DELETE FROM bots WHERE id = $1 AND user_id = $2", botID, userID)
+	if err == nil && result.RowsAffected() == 0 {
+		return c.Status(404).JSON(fiber.Map{"error": "bot not found"})
+	}
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed to delete bot"})
 	}
@@ -217,7 +209,7 @@ func StartBot(c *fiber.Ctx) error {
 	var configEncrypted *json.RawMessage
 	var ownerID uuid.UUID
 	err = db.Pool.QueryRow(ctx,
-		"SELECT user_id, channel, channel_config FROM bots WHERE id = $1", botID,
+		"SELECT user_id, channel, channel_config FROM bots WHERE id = $1 AND user_id = $2", botID, userID,
 	).Scan(&ownerID, &channel, &configEncrypted)
 	if err != nil || ownerID != userID {
 		return c.Status(404).JSON(fiber.Map{"error": "bot not found"})
@@ -235,7 +227,7 @@ func StartBot(c *fiber.Ctx) error {
 	}
 
 	// Mark as active
-	db.Pool.Exec(ctx, "UPDATE bots SET is_active = true, updated_at = now() WHERE id = $1", botID)
+	db.Pool.Exec(ctx, "UPDATE bots SET is_active = true, updated_at = now() WHERE id = $1 AND user_id = $2", botID, userID)
 
 	return c.JSON(fiber.Map{"status": "started"})
 }
@@ -256,7 +248,7 @@ func StopBot(c *fiber.Ctx) error {
 
 	// Verify ownership
 	var ownerID uuid.UUID
-	err = db.Pool.QueryRow(ctx, "SELECT user_id FROM bots WHERE id = $1", botID).Scan(&ownerID)
+	err = db.Pool.QueryRow(ctx, "SELECT user_id FROM bots WHERE id = $1 AND user_id = $2", botID, userID).Scan(&ownerID)
 	if err != nil || ownerID != userID {
 		return c.Status(404).JSON(fiber.Map{"error": "bot not found"})
 	}
@@ -266,7 +258,7 @@ func StopBot(c *fiber.Ctx) error {
 	}
 
 	// Mark as inactive
-	db.Pool.Exec(ctx, "UPDATE bots SET is_active = false, updated_at = now() WHERE id = $1", botID)
+	db.Pool.Exec(ctx, "UPDATE bots SET is_active = false, updated_at = now() WHERE id = $1 AND user_id = $2", botID, userID)
 
 	return c.JSON(fiber.Map{"status": "stopped"})
 }
@@ -285,7 +277,7 @@ func BotStatus(c *fiber.Ctx) error {
 	var ownerID uuid.UUID
 	var isActive bool
 	err = db.Pool.QueryRow(ctx,
-		"SELECT user_id, is_active FROM bots WHERE id = $1", botID,
+		"SELECT user_id, is_active FROM bots WHERE id = $1 AND user_id = $2", botID, userID,
 	).Scan(&ownerID, &isActive)
 	if err != nil || ownerID != userID {
 		return c.Status(404).JSON(fiber.Map{"error": "bot not found"})

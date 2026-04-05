@@ -23,6 +23,7 @@ type Executor struct {
 	IsAutonomous   bool
 	TrustCheckFunc func(category, toolName string) (string, error)
 	DeliverFunc    func(text string)
+	AuditFunc      func(toolName, actionType, status string, trustScore, latencyMs, exitStatus int, result, errMsg string)
 }
 
 func NewExecutor(workspaceDir string, userID string) *Executor {
@@ -104,30 +105,28 @@ func (e *Executor) executeInternal(name string, argsJSON json.RawMessage) *ToolR
 
 
 func (e *Executor) checkTrust(toolName string) string {
-	if !e.IsAutonomous || e.TrustCheckFunc == nil {
+	capability := CapabilityFor(toolName)
+
+	// Read tools always allowed regardless of mode
+	if capability == "read" {
 		return "execute"
 	}
-	category := toolCategory(toolName)
-	decision, err := e.TrustCheckFunc(category, toolName)
-	if err != nil {
+
+	// In human-initiated mode, allow up to write_high
+	// (role-gated tools already filtered by ToolsForRole)
+	if !e.IsAutonomous {
 		return "execute"
+	}
+
+	// In autonomous mode, check trust for everything with side effects
+	if e.TrustCheckFunc == nil {
+		return "block" // fail-secure: no trust function = block
+	}
+	decision, err := e.TrustCheckFunc(capability, toolName)
+	if err != nil {
+		return "block" // fail-secure on error
 	}
 	return decision
-}
-
-func toolCategory(name string) string {
-	switch name {
-	case "memory_search", "memory_list", "knowledge_search", "file_read", "file_list", "file_search":
-		return "read"
-	case "memory_save", "file_write", "send_file", "scheduled_task_create":
-		return "write_low"
-	case "terminal_exec", "http_request":
-		return "write_high"
-	case "server_exec", "delegate":
-		return "critical"
-	default:
-		return "write_low"
-	}
 }
 
 func (e *Executor) Execute(name string, argsJSON json.RawMessage) *ToolResult {
@@ -153,17 +152,28 @@ func (e *Executor) Execute(name string, argsJSON json.RawMessage) *ToolResult {
 	decision := e.checkTrust(name)
 	switch decision {
 	case "block":
-		return &ToolResult{Name: name, Error: fmt.Sprintf("Action '%s' blocked by trust system.", name)}
+		if e.IsAutonomous && e.AuditFunc != nil {
+			capability := CapabilityFor(name)
+			e.AuditFunc(name, capability, "blocked", 0, 0, -1, "", fmt.Sprintf("Action %s blocked by trust system.", name))
+		}
+		return &ToolResult{Name: name, Error: fmt.Sprintf("Action %s blocked by trust system.", name)}
 	case "ask":
 		if e.DeliverFunc != nil {
 			e.DeliverFunc(fmt.Sprintf("AGI requests permission: %s - Use /approve %s to allow.", name, name))
 		}
-		return &ToolResult{Name: name, Error: fmt.Sprintf("Awaiting approval for '%s'.", name)}
+		if e.IsAutonomous && e.AuditFunc != nil {
+			capability := CapabilityFor(name)
+			e.AuditFunc(name, capability, "pending_approval", 0, 0, -1, "", "")
+		}
+		return &ToolResult{Name: name, Error: fmt.Sprintf("Awaiting approval for %s.", name)}
 	case "notify":
 		if e.DeliverFunc != nil {
 			e.DeliverFunc(fmt.Sprintf("AGI auto-executing: %s", name))
 		}
 	}
+
+	// Record start time for latency tracking
+	execStart := time.Now()
 
 	timeout := 30 * time.Second
 	switch name {
@@ -185,8 +195,28 @@ func (e *Executor) Execute(name string, argsJSON json.RawMessage) *ToolResult {
 		if len(result.Content) > 8000 {
 			result.Content = result.Content[:8000] + "\n...(truncated)"
 		}
+		// Audit log for autonomous actions
+		if e.IsAutonomous && e.AuditFunc != nil {
+			latency := int(time.Since(execStart).Milliseconds())
+			exitCode := 0
+			auditStatus := "executed"
+			errStr := ""
+			if result.Error != "" {
+				exitCode = 1
+				auditStatus = "error"
+				errStr = result.Error
+			}
+			capability := CapabilityFor(name)
+			e.AuditFunc(name, capability, auditStatus, 0, latency, exitCode, result.Content, errStr)
+		}
 		return result
 	case <-time.After(timeout):
+		// Audit log timeout
+		if e.IsAutonomous && e.AuditFunc != nil {
+			latency := int(time.Since(execStart).Milliseconds())
+			capability := CapabilityFor(name)
+			e.AuditFunc(name, capability, "timeout", 0, latency, -1, "", fmt.Sprintf("tool %s timed out after %v", name, timeout))
+		}
 		return &ToolResult{Name: name, Error: fmt.Sprintf("tool %s timed out after %v", name, timeout)}
 	}
 }

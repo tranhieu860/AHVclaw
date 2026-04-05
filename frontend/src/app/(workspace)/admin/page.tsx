@@ -10,7 +10,7 @@ import {
 import { api } from '@/lib/api';
 import { useStore } from '@/lib/store';
 
-type Tab = 'overview' | 'users' | 'system' | 'heartbeat' | 'activity' | 'database' | 'settings';
+type Tab = 'overview' | 'users' | 'system' | 'heartbeat' | 'activity' | 'database' | 'settings' | 'security';
 
 const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
   { key: 'overview', label: 'Tổng quan', icon: <Activity size={14} /> },
@@ -19,6 +19,7 @@ const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
   { key: 'heartbeat', label: 'AGI Engine', icon: <Zap size={14} /> },
   { key: 'activity', label: 'Hoạt động', icon: <Clock size={14} /> },
   { key: 'database', label: 'Database', icon: <Database size={14} /> },
+  { key: 'security', label: 'Bảo mật', icon: <Shield size={14} /> },
   { key: 'settings', label: 'Cài đặt', icon: <Settings size={14} /> },
 ];
 
@@ -68,6 +69,7 @@ export default function AdminPage() {
   const [activity, setActivity] = useState<any[]>([]);
   const [dbStats, setDbStats] = useState<any[]>([]);
   const [settings, setSettings] = useState<any[]>([]);
+  const [security, setSecurity] = useState<any>(null);
 
   // Modals
   const [showCreateUser, setShowCreateUser] = useState(false);
@@ -115,6 +117,11 @@ export default function AdminPage() {
         case 'database': {
           const d = await api.getAdminDBStats();
           setDbStats(Array.isArray(d) ? d : d.tables || []);
+          break;
+        }
+        case 'security': {
+          const sec = await api.getAdminSecurity();
+          setSecurity(sec);
           break;
         }
         case 'settings': {
@@ -258,6 +265,7 @@ export default function AdminPage() {
             {tab === 'heartbeat' && <HeartbeatTab heartbeat={heartbeat} />}
             {tab === 'activity' && <ActivityTab activity={activity} />}
             {tab === 'database' && <DatabaseTab dbStats={dbStats} />}
+            {tab === 'security' && <SecurityTab security={security} />}
             {tab === 'settings' && <SettingsTab settings={settings} onUpdate={handleUpdateSetting} />}
           </>
         )}
@@ -632,6 +640,76 @@ function DatabaseTab({ dbStats }: { dbStats: any[] }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+
+function SecurityTab({ security }: { security: any }) {
+  if (!security) return <div className="text-zinc-500">Đang tải dữ liệu bảo mật...</div>;
+
+  const cards = [
+    { label: 'Hành động bị chặn', value: security.denied_actions ?? 0, color: 'text-red-400', bg: 'bg-red-900/20' },
+    { label: 'Thực thi trust thấp', value: security.low_trust_executions ?? 0, color: 'text-orange-400', bg: 'bg-orange-900/20' },
+    { label: 'Kế hoạch bị dừng', value: security.stalled_plans ?? 0, color: 'text-yellow-400', bg: 'bg-yellow-900/20' },
+    { label: 'Kế hoạch đang chạy', value: security.active_plans ?? 0, color: 'text-blue-400', bg: 'bg-blue-900/20' },
+    { label: 'Embedding backlog', value: security.embedding_backlog ?? 0, color: 'text-purple-400', bg: 'bg-purple-900/20' },
+  ];
+
+  const trend = security.reflection_trend || [];
+
+  return (
+    <div className="space-y-6">
+      <h3 className="text-sm font-medium text-zinc-400">Bảo mật & Giám sát</h3>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        {cards.map((c, i) => (
+          <div key={i} className={c.bg + ' border border-zinc-800 rounded-lg p-4'}>
+            <div className={'text-2xl font-bold ' + c.color}>{c.value}</div>
+            <div className="text-xs text-zinc-500 mt-1">{c.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {trend.length > 0 && (
+        <div>
+          <h4 className="text-sm font-medium text-zinc-400 mb-3">Xu hướng phản ánh (7 ngày)</h4>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+            <div className="flex items-end gap-2 h-32">
+              {trend.map((t: { date: string; score: number }, i: number) => {
+                const height = Math.max(10, (t.score / 10) * 100);
+                return (
+                  <div key={i} className="flex flex-col items-center flex-1 gap-1">
+                    <div
+                      className="w-full bg-blue-500/30 rounded-t"
+                      style={{ height: height + '%' }}
+                      title={t.date + ': ' + t.score}
+                    />
+                    <span className="text-[10px] text-zinc-600 truncate w-full text-center">{t.date.slice(5)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+        <h4 className="text-sm font-medium text-zinc-400 mb-2">Trạng thái</h4>
+        <div className="space-y-2 text-sm">
+          <div className="flex justify-between">
+            <span className="text-zinc-500">Hành động bị chặn / tu choi</span>
+            <span className={security.denied_actions > 0 ? 'text-red-400 font-medium' : 'text-green-400'}>{security.denied_actions > 0 ? 'Cần xem xét' : 'Bình thường'}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-zinc-500">Trust thấp đã thực thi</span>
+            <span className={security.low_trust_executions > 0 ? 'text-orange-400 font-medium' : 'text-green-400'}>{security.low_trust_executions > 0 ? 'Cảnh báo' : 'An toàn'}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-zinc-500">Embedding backlog</span>
+            <span className={security.embedding_backlog > 10 ? 'text-yellow-400 font-medium' : 'text-green-400'}>{security.embedding_backlog > 10 ? 'Cần xử lý' : 'Tốt'}</span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

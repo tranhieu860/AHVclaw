@@ -160,7 +160,7 @@ func UpdateConnection(c *fiber.Ctx) error {
 	// Verify ownership
 	var ownerID uuid.UUID
 	err = db.Pool.QueryRow(context.Background(),
-		"SELECT user_id FROM provider_connections WHERE id = $1", connID).Scan(&ownerID)
+		"SELECT user_id FROM provider_connections WHERE id = $1 AND user_id = $2", connID, userID).Scan(&ownerID)
 	if err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "connection not found"})
 	}
@@ -375,7 +375,7 @@ func TestConnection(c *fiber.Ctx) error {
 		db.Pool.Exec(context.Background(),
 			`UPDATE provider_connections SET test_status='unavailable', last_error=$2,
 			 last_error_at=now(), error_code=0, backoff_level=LEAST(backoff_level+1,10), updated_at=now()
-			 WHERE id=$1`, connID, err.Error())
+			 WHERE id=$1 AND user_id=$3`, connID, err.Error(), userID)
 		return c.JSON(fiber.Map{"success": false, "error": "connection failed: " + err.Error()})
 	}
 	defer resp.Body.Close()
@@ -386,7 +386,7 @@ func TestConnection(c *fiber.Ctx) error {
 		// Clear error state on success
 		db.Pool.Exec(context.Background(),
 			`UPDATE provider_connections SET test_status='active', error_code=0,
-			 backoff_level=0, last_error='', updated_at=now() WHERE id=$1`, connID)
+			 backoff_level=0, last_error='', updated_at=now() WHERE id=$1 AND user_id=$2`, connID, userID)
 
 		var result interface{}
 		if json.Unmarshal(respBody, &result) == nil {
@@ -399,7 +399,7 @@ func TestConnection(c *fiber.Ctx) error {
 	db.Pool.Exec(context.Background(),
 		`UPDATE provider_connections SET test_status='error', error_code=$2, last_error=$3,
 		 last_error_at=now(), backoff_level=LEAST(backoff_level+1,10), updated_at=now()
-		 WHERE id=$1`, connID, resp.StatusCode, string(respBody))
+		 WHERE id=$1 AND user_id=$4`, connID, resp.StatusCode, string(respBody), userID)
 
 	return c.JSON(fiber.Map{"success": false, "status": resp.StatusCode, "error": string(respBody)})
 }
@@ -497,7 +497,7 @@ func UpdateCombo(c *fiber.Ctx) error {
 
 	var ownerID uuid.UUID
 	err = db.Pool.QueryRow(context.Background(),
-		"SELECT user_id FROM model_combos WHERE id = $1", comboID).Scan(&ownerID)
+		"SELECT user_id FROM model_combos WHERE id = $1 AND user_id = $2", comboID, userID).Scan(&ownerID)
 	if err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "combo not found"})
 	}
@@ -545,8 +545,9 @@ func UpdateCombo(c *fiber.Ctx) error {
 
 	setClauses = append(setClauses, "updated_at = NOW()")
 	args = append(args, comboID)
-	query := fmt.Sprintf("UPDATE model_combos SET %s WHERE id = $%d",
-		strings.Join(setClauses, ", "), argIdx)
+	args = append(args, userID)
+	query := fmt.Sprintf("UPDATE model_combos SET %s WHERE id = $%d AND user_id = $%d",
+		strings.Join(setClauses, ", "), argIdx, argIdx+1)
 	_, err = db.Pool.Exec(context.Background(), query, args...)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed to update combo"})

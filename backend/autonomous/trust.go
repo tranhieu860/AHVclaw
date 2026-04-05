@@ -136,20 +136,24 @@ func SeedDefaultTrust(ctx context.Context, userID uuid.UUID) error {
 		pattern    string
 		score      int
 	}{
+		// read = auto-execute (score 10)
 		{"read", "memory_search", 10},
 		{"read", "memory_list", 10},
 		{"read", "knowledge_search", 10},
 		{"read", "file_read", 10},
 		{"read", "file_list", 10},
 		{"read", "file_search", 10},
+		// write_low = notify (score 5-8)
 		{"write_low", "memory_save", 8},
-		{"write_low", "file_write", 5},
+		{"write_low", "file_write", 4},
 		{"write_low", "send_file", 5},
-		{"write_low", "scheduled_task_create", 4},
+		{"write_low", "manage_scheduled_task", 4},
+		// write_high = ask (score 1-3)
 		{"write_high", "terminal_exec", 1},
 		{"write_high", "http_request", 3},
-		{"critical", "server_exec", 0},
-		{"critical", "delegate", 0},
+		// critical = blocked (score 0)
+		{"critical", "server_ssh_exec", 0},
+		{"critical", "delegate_agent", 0},
 	}
 
 	for _, d := range defaults {

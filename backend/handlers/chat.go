@@ -61,6 +61,10 @@ func WSUpgrade() fiber.Handler {
 func WSChat() fiber.Handler {
 	return websocket.New(func(conn *websocket.Conn) {
 		userID, _ := conn.Locals("user_id").(uuid.UUID)
+		role, _ := conn.Locals("role").(string)
+		if role == "" {
+			role = "user"
+		}
 		defer conn.Close()
 
 		for {
@@ -77,7 +81,7 @@ func WSChat() fiber.Handler {
 
 			switch wsMsg.Type {
 			case "chat":
-				handleChat(conn, userID, wsMsg.Data)
+				handleChat(conn, userID, role, wsMsg.Data)
 			default:
 				sendWSError(conn, "unknown message type: "+wsMsg.Type)
 			}
@@ -85,7 +89,7 @@ func WSChat() fiber.Handler {
 	})
 }
 
-func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
+func handleChat(conn *websocket.Conn, userID uuid.UUID, role string, data json.RawMessage) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			log.Printf("[PANIC] web-chat handler: %v\nStack: %s", rec, debug.Stack())
@@ -224,7 +228,7 @@ func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
 	if agentID != nil {
 		var agentPrompt *string
 		db.Pool.QueryRow(ctx,
-			"SELECT system_prompt FROM agents WHERE id = $1", *agentID,
+			"SELECT system_prompt FROM agents WHERE id = $1 AND user_id = $2", *agentID, userID,
 		).Scan(&agentPrompt)
 		if agentPrompt != nil && *agentPrompt != "" {
 			systemPrompt = *agentPrompt
@@ -235,7 +239,7 @@ func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
 	if projectID != nil {
 		var projInstructions *string
 		db.Pool.QueryRow(ctx,
-			"SELECT instructions FROM projects WHERE id = $1", *projectID,
+			"SELECT instructions FROM projects WHERE id = $1 AND user_id = $2", *projectID, userID,
 		).Scan(&projInstructions)
 		if projInstructions != nil && *projInstructions != "" {
 			systemPrompt += "\n\n## Project Instructions:\n" + *projInstructions
@@ -243,8 +247,8 @@ func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
 
 		// Load project files as context
 		pfRows, pfErr := db.Pool.Query(ctx,
-			`SELECT filename, content FROM project_files WHERE project_id = $1 AND content IS NOT NULL AND content != '' LIMIT 5`,
-			*projectID)
+			`SELECT filename, content FROM project_files WHERE project_id = $1 AND project_id IN (SELECT id FROM projects WHERE user_id = $2) AND content IS NOT NULL AND content != '' LIMIT 5`,
+			*projectID, userID)
 		if pfErr == nil && pfRows != nil {
 			defer pfRows.Close()
 			var projFiles strings.Builder
@@ -269,8 +273,8 @@ func handleChat(conn *websocket.Conn, userID uuid.UUID, data json.RawMessage) {
 		var serverName, serverHost, serverEnv string
 		var serverPort int
 		err := db.Pool.QueryRow(ctx,
-			`SELECT name, host, port, environment FROM servers WHERE id = $1`,
-			*serverID,
+			`SELECT name, host, port, environment FROM servers WHERE id = $1 AND user_id = $2`,
+			*serverID, userID,
 		).Scan(&serverName, &serverHost, &serverPort, &serverEnv)
 		if err == nil {
 			// Sanitize server name to prevent prompt injection
@@ -376,7 +380,7 @@ always confirm with the user first.
 		Model:            req.Model,
 		FallbackModels:   fallbackStr,
 		Messages:         messages,
-		Tools:            allToolsAsAI(),
+		Tools:            toolsForRoleAsAI(role),
 		Executor:         executor,
 		MaxToolRounds:    10,
 		MaxContextTokens: 8000,
@@ -425,7 +429,7 @@ always confirm with the user first.
 			Model:            req.Model,
 			FallbackModels:   fallbackStr,
 			Messages:         retryMessages,
-			Tools:            allToolsAsAI(),
+			Tools:            toolsForRoleAsAI(role),
 			Executor:         executor,
 			MaxToolRounds:    5,
 			MaxContextTokens: 8000,
@@ -498,10 +502,10 @@ always confirm with the user first.
 	}
 }
 
-// allToolsAsAI converts tools.AllTools ([]tools.ToolDef) to []ai.Tool.
-func allToolsAsAI() []ai.Tool {
+// toolsForRoleAsAI returns AI tool definitions filtered by user role. ([]tools.ToolDef) to []ai.Tool.
+func toolsForRoleAsAI(role string) []ai.Tool {
 	var result []ai.Tool
-	for _, d := range tools.AllTools {
+	for _, d := range tools.ToolsForRole(role) {
 		result = append(result, ai.Tool{
 			Type: d.Type,
 			Function: ai.ToolFunction{

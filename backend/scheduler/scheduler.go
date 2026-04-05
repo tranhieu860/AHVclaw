@@ -157,6 +157,36 @@ func (s *Scheduler) executeTask(
 
 	log.Printf("[scheduler] executing task '%s' (id=%s)", name, taskID)
 
+	// Ownership verification: ensure task, agent, and bot still belong to the user
+	var ownerCheck uuid.UUID
+	ownerErr := db.Pool.QueryRow(ctx, "SELECT user_id FROM scheduled_tasks WHERE id = $1 AND user_id = $2", taskID, userID).Scan(&ownerCheck)
+	if ownerErr != nil {
+		log.Printf("[scheduler] WARN: task '%s' no longer belongs to user %s, skipping", name, userID)
+		_, _ = db.Pool.Exec(ctx, "UPDATE task_runs SET status='skipped', finished_at=now(), error=$1 WHERE id=$2",
+			"ownership verification failed: task", runID)
+		return
+	}
+	if agentID != nil {
+		var agentOwner uuid.UUID
+		agentErr := db.Pool.QueryRow(ctx, "SELECT user_id FROM agents WHERE id = $1 AND (user_id = $2 OR is_public = true)", *agentID, userID).Scan(&agentOwner)
+		if agentErr != nil {
+			log.Printf("[scheduler] WARN: agent %s in task '%s' no longer belongs to user %s, skipping", *agentID, name, userID)
+			_, _ = db.Pool.Exec(ctx, "UPDATE task_runs SET status='skipped', finished_at=now(), error=$1 WHERE id=$2",
+				"ownership verification failed: agent", runID)
+			return
+		}
+	}
+	if botID != nil {
+		var botOwner uuid.UUID
+		botErr := db.Pool.QueryRow(ctx, "SELECT user_id FROM bots WHERE id = $1 AND user_id = $2", *botID, userID).Scan(&botOwner)
+		if botErr != nil {
+			log.Printf("[scheduler] WARN: bot %s in task '%s' no longer belongs to user %s, skipping", *botID, name, userID)
+			_, _ = db.Pool.Exec(ctx, "UPDATE task_runs SET status='skipped', finished_at=now(), error=$1 WHERE id=$2",
+				"ownership verification failed: bot", runID)
+			return
+		}
+	}
+
 	// Execute with 5-minute timeout
 	execCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()

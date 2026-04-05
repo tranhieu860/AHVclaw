@@ -2,9 +2,13 @@ package ssh
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"log"
+	"net"
 	"time"
 
+	"github.com/ahvholding/ahvclaw/db"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -25,13 +29,44 @@ func NewClient(host string, port int, username, password string) *SSHClient {
 }
 
 func (c *SSHClient) Execute(command string) (string, int, error) {
+	port := c.Port
+
 	config := &ssh.ClientConfig{
 		User: c.Username,
 		Auth: []ssh.AuthMethod{
 			ssh.Password(c.Password),
 		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         10 * time.Second,
+		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			fingerprint := ssh.FingerprintSHA256(key)
+			keyType := key.Type()
+
+			// Check if we have a stored key for this host
+			var storedFingerprint string
+			err := db.Pool.QueryRow(context.Background(),
+				"SELECT fingerprint FROM ssh_host_keys WHERE host=$1 AND port=$2 AND key_type=$3",
+				hostname, port, keyType).Scan(&storedFingerprint)
+
+			if err != nil {
+				// First connection - store the key (trust on first use / TOFU)
+				log.Printf("[ssh] TOFU: storing host key for %s:%d (%s): %s", hostname, port, keyType, fingerprint)
+				_, insertErr := db.Pool.Exec(context.Background(),
+					`INSERT INTO ssh_host_keys (host, port, key_type, fingerprint, raw_key, first_seen_at)
+					 VALUES ($1, $2, $3, $4, $5, now()) ON CONFLICT DO NOTHING`,
+					hostname, port, keyType, fingerprint, key.Marshal())
+				if insertErr != nil {
+					log.Printf("[ssh] failed to store host key: %v", insertErr)
+				}
+				return nil
+			}
+
+			// Verify against stored key
+			if storedFingerprint != fingerprint {
+				return fmt.Errorf("SSH host key mismatch for %s:%d (%s): expected %s, got %s",
+					hostname, port, keyType, storedFingerprint, fingerprint)
+			}
+			return nil
+		},
+		Timeout: 10 * time.Second,
 	}
 
 	addr := fmt.Sprintf("%s:%d", c.Host, c.Port)

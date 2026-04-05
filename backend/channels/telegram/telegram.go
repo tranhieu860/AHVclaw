@@ -828,7 +828,8 @@ func (a *Adapter) handleCallbackQuery(cq *tgbotapi.CallbackQuery) {
 		}
 		tag, err := db.Pool.Exec(ctx,
 			`UPDATE conversations SET current_agent_id=$1
-			 WHERE bot_id=$2 AND channel_chat_id=$3 AND status='active'`,
+			 WHERE bot_id=$2 AND channel_chat_id=$3 AND status='active'
+			 AND $1 IN (SELECT id FROM agents WHERE user_id = (SELECT user_id FROM bots WHERE id = $2))`,
 			agentUUID, botUUID, chatIDStr,
 		)
 		if err != nil || tag.RowsAffected() == 0 {

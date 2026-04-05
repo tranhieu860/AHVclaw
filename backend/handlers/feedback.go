@@ -10,6 +10,7 @@ import (
 )
 
 func HandleMessageFeedback(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(uuid.UUID)
 	messageID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid message ID"})
@@ -27,8 +28,9 @@ func HandleMessageFeedback(c *fiber.Ctx) error {
 
 	ctx := context.Background()
 	tag, err := db.Pool.Exec(ctx,
-		`UPDATE messages SET feedback_rating = $1, feedback_at = $2 WHERE id = $3`,
-		body.Rating, time.Now(), messageID)
+		`UPDATE messages SET feedback_rating = $1, feedback_at = $2
+		 WHERE id = $3 AND conversation_id IN (SELECT id FROM conversations WHERE user_id = $4)`,
+		body.Rating, time.Now(), messageID, userID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed to save feedback"})
 	}

@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
-	"time"
 
 	"github.com/ahvholding/ahvclaw/sandbox"
 )
@@ -54,54 +52,21 @@ func (e *Executor) terminalExec(argsJSON json.RawMessage) *ToolResult {
 		}
 	}
 
-	// If autonomous mode, use sandboxed execution
-	if e.IsAutonomous && e.WorkspaceDir != "" {
-		output, err := sandbox.SandboxedExec(context.Background(), e.WorkspaceDir, args.Command, args.Timeout)
-		if err != nil {
-			if output != "" {
-				return &ToolResult{Name: "terminal_exec", Content: output + "\nError: " + err.Error()}
-			}
-			return &ToolResult{Name: "terminal_exec", Error: err.Error()}
-		}
-		if len(output) > 100*1024 {
-			output = output[:100*1024] + "\n... (truncated)"
-		}
-		return &ToolResult{Name: "terminal_exec", Content: output}
+	// ALL execution goes through bubblewrap sandbox
+	wsDir := e.WorkspaceDir
+	if wsDir == "" {
+		wsDir = "/tmp"
 	}
 
-	timeout := args.Timeout
-	if timeout <= 0 {
-		timeout = 30
-	}
-	if timeout > 120 {
-		timeout = 120
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "bash", "-c", args.Command)
-	cmd.Dir = e.WorkspaceDir
-	// Restrict environment
-	cmd.Env = []string{
-		"PATH=/usr/local/bin:/usr/bin:/bin",
-		"HOME=" + e.WorkspaceDir,
-		"TERM=xterm",
-		"LANG=en_US.UTF-8",
-	}
-
-	output, err := cmd.CombinedOutput()
-	result := string(output)
-	if len(result) > 100000 {
-		result = result[:100000] + "\n...(truncated)"
-	}
-
+	output, err := sandbox.SandboxedExec(context.Background(), wsDir, args.Command, args.Timeout)
 	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return &ToolResult{Name: "terminal_exec", Content: result + "\n(command timed out)"}
+		if output != "" {
+			return &ToolResult{Name: "terminal_exec", Content: output + "\nError: " + err.Error()}
 		}
-		return &ToolResult{Name: "terminal_exec", Content: result + "\nExit error: " + err.Error()}
+		return &ToolResult{Name: "terminal_exec", Error: err.Error()}
 	}
-
-	return &ToolResult{Name: "terminal_exec", Content: result}
+	if len(output) > 100*1024 {
+		output = output[:100*1024] + "\n... (truncated)"
+	}
+	return &ToolResult{Name: "terminal_exec", Content: output}
 }

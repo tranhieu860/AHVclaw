@@ -234,9 +234,6 @@ func (d *Daemon) runForUser(cfg HeartbeatConfig) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	// Seed default trust entries if none exist
-	SeedDefaultTrust(ctx, cfg.UserID)
-
 	runID := uuid.New()
 	startedAt := time.Now()
 
@@ -269,6 +266,24 @@ func (d *Daemon) runForUser(cfg HeartbeatConfig) {
 		executor.DeliverFunc = func(text string) {
 			d.deliverFunc(cfg.UserID, cfg.DeliveryChannel, cfg.DeliveryChatID, text)
 		}
+	}
+
+	// Wire up comprehensive audit logging for autonomous actions
+	executor.AuditFunc = func(toolName, actionType, status string, trustScore, latencyMs, exitStatus int, result, errMsg string) {
+		LogAutonomousAction(context.Background(), AuditEntry{
+			UserID:         userID,
+			HeartbeatRunID: &runID,
+			ActionType:     actionType,
+			ActionPattern:  toolName,
+			ToolID:         toolName,
+			Description:    fmt.Sprintf("Autonomous exec: %s", toolName),
+			TrustScore:     trustScore,
+			Status:         status,
+			LatencyMs:      latencyMs,
+			ExitStatus:     exitStatus,
+			Result:         result,
+			Error:          errMsg,
+		})
 	}
 
 	// Look up user's preferred model
@@ -358,6 +373,20 @@ func (d *Daemon) runForUser(cfg HeartbeatConfig) {
 
 	outputBuf = result.Content
 	_ = tokensIn
+
+	// Advance active plan if one was being executed
+	if planErr == nil && plan != nil && plan.Status == "running" && plan.CurrentStep < len(plan.Steps) {
+		if actionCount > 0 {
+			// At least one tool was called - consider step done
+			AdvancePlan(ctx, plan, summarize(outputBuf, 500), nil)
+			log.Printf("[heartbeat] advanced plan %s to step %d/%d (status=%s)",
+				plan.Title, plan.CurrentStep+1, len(plan.Steps), plan.Status)
+		} else if err != nil {
+			// ProcessChat returned error - mark step failed (with retry)
+			AdvancePlan(ctx, plan, "", err)
+			log.Printf("[heartbeat] plan step failed for %s: %v", plan.Title, err)
+		}
+	}
 
 	// Deliver output if non-empty and delivery configured
 	if outputBuf != "" && cfg.DeliveryChannel != "" {
@@ -483,7 +512,7 @@ func buildHeartbeatTask(cfg HeartbeatConfig) string {
 		var gb []string
 		for _, g := range goals {
 			if g.Status == "active" || g.Status == "in_progress" {
-				gb = append(gb, fmt.Sprintf("- [%s] %s (%d%%) — %s", g.Priority, g.Title, g.Progress, g.Description))
+				gb = append(gb, fmt.Sprintf("- [%s] %s (%d%%) — %s", g.Priority, g.Title, g.Progress, derefStr(g.Description)))
 			}
 		}
 		if len(gb) > 0 {
@@ -556,3 +585,9 @@ func truncateStr(s string, max int) string {
 
 // ptr returns a pointer to the given string.
 func ptr(s string) *string { return &s }
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}

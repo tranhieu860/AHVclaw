@@ -54,3 +54,88 @@ func AutonomousToolsOnly() []ToolDef {
 	}
 	return result
 }
+
+// ToolTier classifies tools by privilege level.
+type ToolTier int
+
+const (
+	TierSafe       ToolTier = iota // read-only, no side effects
+	TierStandard                   // normal user tools with write capability
+	TierPrivileged                 // admin/dev only (shell, SSH, delegation)
+)
+
+// toolTierMap classifies every tool. Unlisted tools default to TierPrivileged
+// so new tools are restricted until explicitly classified.
+var toolTierMap = map[string]ToolTier{
+	// Safe: read-only / no side effects
+	"file_read":           TierSafe,
+	"file_list":           TierSafe,
+	"file_search":         TierSafe,
+	"memory_search":       TierSafe,
+	"knowledge_search":    TierSafe,
+	"server_list":         TierSafe,
+	"server_status":       TierSafe,
+	"browser_screenshot":  TierSafe,
+	"browser_extract":     TierSafe,
+	"browser_tab_list":    TierSafe,
+	"cu_screenshot":       TierSafe,
+	"cu_read_page":        TierSafe,
+	"cu_tab_list":         TierSafe,
+
+	// Standard: write/mutate but normal user operations
+	"file_write":             TierStandard,
+	"file_delete":            TierStandard,
+	"memory_save":            TierStandard,
+	"http_request":           TierStandard,
+	"browser_navigate":       TierStandard,
+	"browser_click":          TierStandard,
+	"browser_type":           TierStandard,
+	"browser_scroll":         TierStandard,
+	"browser_tab_switch":     TierStandard,
+	"cu_click":               TierStandard,
+	"cu_type":                TierStandard,
+	"cu_scroll":              TierStandard,
+	"cu_navigate":            TierStandard,
+	"cu_tab_switch":          TierStandard,
+	"manage_scheduled_task":  TierStandard,
+	"skill_install":          TierStandard,
+
+	// Privileged: shell access, SSH, agent delegation
+	"terminal_exec":    TierPrivileged,
+	"server_ssh_exec":  TierPrivileged,
+	"delegate_agent":   TierPrivileged,
+}
+
+// ToolTierFor returns the tier for a tool name. Unknown tools are TierPrivileged.
+func ToolTierFor(name string) ToolTier {
+	if tier, ok := toolTierMap[name]; ok {
+		return tier
+	}
+	return TierPrivileged
+}
+
+// ToolsForRole returns only the tools accessible to the given role.
+//   - "user"  → safe + standard
+//   - "dev"   → safe + standard + terminal_exec
+//   - "admin" → all tools
+func ToolsForRole(role string) []ToolDef {
+	var result []ToolDef
+	for _, t := range AllTools {
+		tier := ToolTierFor(t.Function.Name)
+		switch role {
+		case "admin":
+			result = append(result, t)
+		case "dev":
+			if tier <= TierStandard {
+				result = append(result, t)
+			} else if t.Function.Name == "terminal_exec" {
+				result = append(result, t)
+			}
+		default: // "user" and anything else
+			if tier <= TierStandard {
+				result = append(result, t)
+			}
+		}
+	}
+	return result
+}

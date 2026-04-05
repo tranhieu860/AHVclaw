@@ -2,10 +2,12 @@ package handlers
 
 import (
 	"context"
+	"log"
 	"strings"
 	"time"
 
 	"github.com/ahvholding/ahvclaw/auth"
+	"github.com/ahvholding/ahvclaw/autonomous"
 	"github.com/ahvholding/ahvclaw/db"
 	"github.com/ahvholding/ahvclaw/models"
 	"github.com/gofiber/fiber/v2"
@@ -68,6 +70,11 @@ func Register(c *fiber.Ctx) error {
 
 	if err := tx.Commit(context.Background()); err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "internal error"})
+	}
+
+	// Seed default trust entries for the new user
+	if err := autonomous.SeedDefaultTrust(context.Background(), user.ID); err != nil {
+		log.Printf("[auth] warning: failed to seed trust for user %s: %v", user.ID, err)
 	}
 
 	return respondWithTokens(c, user)

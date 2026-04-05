@@ -240,6 +240,45 @@ func applyLessons(ctx context.Context, userID uuid.UUID, res ReflectionResult, d
 	}
 }
 
+// applyReflectionToPlans modifies active plans and goals based on reflection results.
+// If performance is poor, it cancels stalled plans and defers old stuck goals.
+func applyReflectionToPlans(ctx context.Context, userID uuid.UUID, res ReflectionResult) {
+	if res.PerformanceScore < 3.0 {
+		// Cancel active plans that are pending/running/blocked
+		result, err := db.Pool.Exec(ctx, `
+			UPDATE execution_plans SET status='failed',
+			result='Tự động hủy do performance thấp', updated_at=now()
+			WHERE user_id=$1 AND status IN ('pending','running','blocked')`, userID)
+		if err != nil {
+			log.Printf("[reflection] failed to cancel stalled plans for user %s: %v", userID, err)
+		} else {
+			rows := result.RowsAffected()
+			if rows > 0 {
+				log.Printf("[reflection] cancelled %d stalled plans for user %s (performance=%.1f)",
+					rows, userID, res.PerformanceScore)
+			}
+		}
+
+		// Defer goals that have been in_progress for more than 3 days
+		result, err = db.Pool.Exec(ctx, `
+			UPDATE goals SET status='deferred', updated_at=now()
+			WHERE user_id=$1 AND status='in_progress'
+			AND updated_at < now() - interval '3 days'`, userID)
+		if err != nil {
+			log.Printf("[reflection] failed to defer old goals for user %s: %v", userID, err)
+		} else {
+			rows := result.RowsAffected()
+			if rows > 0 {
+				log.Printf("[reflection] deferred %d stale goals for user %s (performance=%.1f)",
+					rows, userID, res.PerformanceScore)
+			}
+		}
+
+		log.Printf("[reflection] low performance (%.1f) for user %s - cleaned up stalled plans and deferred old goals",
+			res.PerformanceScore, userID)
+	}
+}
+
 // getUserModel fetches the user's preferred AI model from settings
 func getUserModel(ctx context.Context, userID uuid.UUID) string {
 	var model string
@@ -351,6 +390,9 @@ Be concise. Return only valid JSON.`
 
 	// 7. Auto-apply lessons and patterns
 	applyLessons(ctx, userID, reflection, today)
+
+	// 8. Apply reflection results to active plans and goals
+	applyReflectionToPlans(ctx, userID, reflection)
 
 	// Extract/update goals from reflection
 	ExtractGoalsFromReflection(ctx, userID, reflection, router)

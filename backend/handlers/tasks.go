@@ -126,6 +126,23 @@ func CreateTask(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "cannot calculate next run: " + err.Error()})
 	}
 
+	// Verify ownership of referenced agent
+	if body.AgentID != nil {
+		var cnt int
+		err := db.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM agents WHERE id = $1 AND user_id = $2", *body.AgentID, userID).Scan(&cnt)
+		if err != nil || cnt == 0 {
+			return c.Status(403).JSON(fiber.Map{"error": "agent not found or not owned by you"})
+		}
+	}
+	// Verify ownership of referenced bot
+	if body.BotID != nil {
+		var cnt int
+		err := db.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM bots WHERE id = $1 AND user_id = $2", *body.BotID, userID).Scan(&cnt)
+		if err != nil || cnt == 0 {
+			return c.Status(403).JSON(fiber.Map{"error": "bot not found or not owned by you"})
+		}
+	}
+
 	scheduleHuman := scheduler.HumanReadableSchedule(body.Schedule)
 
 	var task taskResponse
@@ -275,8 +292,8 @@ func UpdateTask(c *fiber.Ctx) error {
 	_, err := db.Pool.Exec(ctx,
 		`UPDATE scheduled_tasks SET name=$1, description=$2, prompt=$3, schedule=$4, schedule_human=$5,
 		 timezone=$6, delivery_channel=$7, delivery_chat_id=$8, bot_id=$9, agent_id=$10, next_run_at=$11, updated_at=now()
-		 WHERE id=$12`,
-		name, desc, prompt, sched, schedHuman, tz, dc, dcid, botID, agentID, nextRun, t.ID)
+		 WHERE id=$12 AND user_id=$13`,
+		name, desc, prompt, sched, schedHuman, tz, dc, dcid, botID, agentID, nextRun, t.ID, c.Locals("user_id").(uuid.UUID))
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed to update task"})
 	}
@@ -289,7 +306,7 @@ func DeleteTask(c *fiber.Ctx) error {
 	if fErr != nil {
 		return fErr
 	}
-	_, err := db.Pool.Exec(ctx, "DELETE FROM scheduled_tasks WHERE id = $1", t.ID)
+	_, err := db.Pool.Exec(ctx, "DELETE FROM scheduled_tasks WHERE id = $1 AND user_id = $2", t.ID, c.Locals("user_id").(uuid.UUID))
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed to delete task"})
 	}
@@ -302,7 +319,7 @@ func PauseTask(c *fiber.Ctx) error {
 	if fErr != nil {
 		return fErr
 	}
-	_, err := db.Pool.Exec(ctx, "UPDATE scheduled_tasks SET is_active = false, updated_at = now() WHERE id = $1", t.ID)
+	_, err := db.Pool.Exec(ctx, "UPDATE scheduled_tasks SET is_active = false, updated_at = now() WHERE id = $1 AND user_id = $2", t.ID, c.Locals("user_id").(uuid.UUID))
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed to pause task"})
 	}
@@ -320,8 +337,8 @@ func ResumeTask(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "cannot calculate next run"})
 	}
 	_, err = db.Pool.Exec(ctx,
-		"UPDATE scheduled_tasks SET is_active = true, next_run_at = $1, error_count = 0, updated_at = now() WHERE id = $2",
-		nextRun, t.ID)
+		"UPDATE scheduled_tasks SET is_active = true, next_run_at = $1, error_count = 0, updated_at = now() WHERE id = $2 AND user_id = $3",
+		nextRun, t.ID, c.Locals("user_id").(uuid.UUID))
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed to resume task"})
 	}
@@ -336,8 +353,8 @@ func RunTaskNow(c *fiber.Ctx) error {
 	}
 	now := time.Now()
 	_, err := db.Pool.Exec(ctx,
-		"UPDATE scheduled_tasks SET next_run_at = $1, is_active = true, updated_at = now() WHERE id = $2",
-		now, t.ID)
+		"UPDATE scheduled_tasks SET next_run_at = $1, is_active = true, updated_at = now() WHERE id = $2 AND user_id = $3",
+		now, t.ID, c.Locals("user_id").(uuid.UUID))
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "failed to trigger task"})
 	}

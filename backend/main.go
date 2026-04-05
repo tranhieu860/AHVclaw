@@ -596,6 +596,7 @@ func main() {
 	adminRoutes.Get("/admin/heartbeat", handlers.AdminHeartbeatStatus)
 	adminRoutes.Get("/admin/db-stats", handlers.AdminDBStats)
 	adminRoutes.Get("/admin/stats", handlers.AdminSystemStats)
+	adminRoutes.Get("/admin/security", handlers.AdminSecurityDashboard)
 
 	// WebSocket chat
 	app.Use("/ws", handlers.WSUpgrade())

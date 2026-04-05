@@ -292,6 +292,7 @@ class ApiClient {
   async updateAdminSetting(key: string, value: string) {
     return this.fetchJSON("/api/admin/settings", { method: "PUT", body: JSON.stringify({ key, value }) });
   }
+  async getAdminSecurity() { return this.fetchJSON("/api/admin/security"); }
 
 }
 

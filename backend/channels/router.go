@@ -205,7 +205,7 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 	if agentID != nil {
 		var agentFallback *string
 		err = db.Pool.QueryRow(ctx,
-			`SELECT system_prompt, model, COALESCE(fallback_models, ''), COALESCE(skills, '{}') FROM agents WHERE id = $1`, *agentID,
+			`SELECT system_prompt, model, COALESCE(fallback_models, ''), COALESCE(skills, '{}') FROM agents WHERE id = $1 AND (user_id = $2 OR is_public = true)`, *agentID, botUserID,
 		).Scan(&systemPrompt, &model, &agentFallback, &agentSkillIDs)
 		if agentFallback != nil && *agentFallback != "" && fallbackModels == "" {
 			fallbackModels = *agentFallback
@@ -224,7 +224,7 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 	// 6a. Load and inject agent skills into system prompt
 	if len(agentSkillIDs) > 0 {
 		skillRows, skillErr := db.Pool.Query(ctx,
-			`SELECT s.name, s.config FROM skills s WHERE s.id = ANY($1)`, agentSkillIDs)
+			`SELECT s.name, s.config FROM skills s WHERE s.id = ANY($1) AND (s.author_id = $2 OR s.is_public = true)`, agentSkillIDs, botUserID)
 		if skillErr == nil && skillRows != nil {
 			defer skillRows.Close()
 			var skillPrompts []string
@@ -252,7 +252,7 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 	if conv.ProjectID != nil {
 		var projInstructions *string
 		db.Pool.QueryRow(ctx,
-			"SELECT instructions FROM projects WHERE id = $1", *conv.ProjectID,
+			"SELECT instructions FROM projects WHERE id = $1 AND (user_id = $2 OR is_public = true)", *conv.ProjectID, botUserID,
 		).Scan(&projInstructions)
 		if projInstructions != nil && *projInstructions != "" {
 			systemPrompt += "\n\n## Project Instructions:\n" + *projInstructions

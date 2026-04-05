@@ -752,6 +752,21 @@ ON CONFLICT (id) DO NOTHING`,
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_execution_plans_user_status ON execution_plans(user_id, status)`,
 
+	// =============================================
+	// Phase 10.1 Migrations - Audit Trail for Autonomous Actions
+	// =============================================
+
+	// 065: Expand autonomous_actions for full audit trail
+	`ALTER TABLE autonomous_actions ADD COLUMN IF NOT EXISTS agent_id UUID`,
+	`ALTER TABLE autonomous_actions ADD COLUMN IF NOT EXISTS goal_id UUID`,
+	`ALTER TABLE autonomous_actions ADD COLUMN IF NOT EXISTS plan_step_id UUID`,
+	`ALTER TABLE autonomous_actions ADD COLUMN IF NOT EXISTS tool_id VARCHAR(100)`,
+	`ALTER TABLE autonomous_actions ADD COLUMN IF NOT EXISTS sandbox_id VARCHAR(100)`,
+	`ALTER TABLE autonomous_actions ADD COLUMN IF NOT EXISTS approval_source VARCHAR(50)`,
+	`ALTER TABLE autonomous_actions ADD COLUMN IF NOT EXISTS latency_ms INT`,
+	`ALTER TABLE autonomous_actions ADD COLUMN IF NOT EXISTS exit_status INT`,
+	`ALTER TABLE autonomous_actions ADD COLUMN IF NOT EXISTS artifacts JSONB DEFAULT '[]'`,
+
 }
 
 func RunMigrations() error {

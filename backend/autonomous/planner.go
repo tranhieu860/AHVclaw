@@ -17,8 +17,11 @@ type PlanStep struct {
 	Description string `json:"description"`
 	ToolName    string `json:"tool_name"`
 	ToolArgs    string `json:"tool_args"`
-	Status      string `json:"status"` // pending, running, done, failed, skipped
+	Status      string `json:"status"` // pending, running, done, failed, skipped, blocked
 	Output      string `json:"output"`
+	RetryCount  int    `json:"retry_count"`
+	MaxRetries  int    `json:"max_retries"`
+	Blocker     string `json:"blocker,omitempty"`
 }
 
 // ExecutionPlan represents a multi-step autonomous action plan.
@@ -29,7 +32,7 @@ type ExecutionPlan struct {
 	Title       string     `json:"title"`
 	Steps       []PlanStep `json:"steps"`
 	CurrentStep int        `json:"current_step"`
-	Status      string     `json:"status"` // pending, running, completed, failed
+	Status      string     `json:"status"` // pending, running, completed, failed, blocked
 	Result      string     `json:"result"`
 }
 
@@ -78,6 +81,7 @@ Mỗi bước là một tool call duy nhất. Viết cụ thể các tham số.`
 
 	for i := range steps {
 		steps[i].Status = "pending"
+		steps[i].MaxRetries = 2
 	}
 
 	plan := &ExecutionPlan{
@@ -112,7 +116,7 @@ func GetActivePlan(ctx context.Context, userID uuid.UUID) (*ExecutionPlan, error
 	err := db.Pool.QueryRow(ctx, `
 		SELECT id, user_id, goal_id, title, steps, current_step, status, result
 		FROM execution_plans
-		WHERE user_id=$1 AND status IN (pending,running)
+		WHERE user_id=$1 AND status IN ('pending','running','blocked')
 		ORDER BY created_at DESC LIMIT 1`,
 		userID).Scan(&plan.ID, &plan.UserID, &goalID, &plan.Title,
 		&stepsJSON, &plan.CurrentStep, &plan.Status, &result)
@@ -138,8 +142,11 @@ func AdvancePlan(ctx context.Context, plan *ExecutionPlan, stepOutput string, st
 	if stepErr != nil {
 		step.Status = "failed"
 		step.Output = stepErr.Error()
-		plan.Status = "failed"
-		plan.Result = fmt.Sprintf("Failed at step %d: %s", plan.CurrentStep+1, stepErr.Error())
+		// Try retry before marking plan as failed
+		if !RetryStep(plan) {
+			plan.Status = "failed"
+			plan.Result = fmt.Sprintf("Thất bại ở bước %d: %s", plan.CurrentStep+1, stepErr.Error())
+		}
 	} else {
 		step.Status = "done"
 		if len(stepOutput) > 2000 {
@@ -156,6 +163,52 @@ func AdvancePlan(ctx context.Context, plan *ExecutionPlan, stepOutput string, st
 	}
 
 	savePlanState(ctx, plan)
+}
+
+// RetryStep resets a failed step for retry if under max_retries.
+func RetryStep(plan *ExecutionPlan) bool {
+	if plan.CurrentStep >= len(plan.Steps) {
+		return false
+	}
+	step := &plan.Steps[plan.CurrentStep]
+	if step.Status != "failed" {
+		return false
+	}
+	if step.RetryCount >= step.MaxRetries {
+		return false
+	}
+	step.RetryCount++
+	step.Status = "pending"
+	step.Blocker = ""
+	plan.Status = "running"
+	return true
+}
+
+// SkipStep marks current step as skipped and moves to next.
+func SkipStep(plan *ExecutionPlan, reason string) {
+	if plan.CurrentStep >= len(plan.Steps) {
+		return
+	}
+	step := &plan.Steps[plan.CurrentStep]
+	step.Status = "skipped"
+	step.Blocker = reason
+	plan.CurrentStep++
+	if plan.CurrentStep >= len(plan.Steps) {
+		plan.Status = "completed"
+		plan.Result = "Hoàn thành (một số bước đã bỏ qua)"
+	}
+}
+
+// BlockStep marks current step as blocked.
+func BlockStep(plan *ExecutionPlan, reason string) {
+	if plan.CurrentStep >= len(plan.Steps) {
+		return
+	}
+	step := &plan.Steps[plan.CurrentStep]
+	step.Status = "blocked"
+	step.Blocker = reason
+	plan.Status = "blocked"
+	plan.Result = fmt.Sprintf("Bị chặn ở bước %d: %s", plan.CurrentStep+1, reason)
 }
 
 func savePlanState(ctx context.Context, plan *ExecutionPlan) {

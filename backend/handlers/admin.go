@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"runtime"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ahvholding/ahvclaw/autonomous"
 	"github.com/ahvholding/ahvclaw/db"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -352,6 +354,11 @@ func AdminCreateUser(c *fiber.Ctx) error {
 		VALUES ($1, false, 5)
 		ON CONFLICT (user_id) DO NOTHING`, userID)
 
+	// Seed default trust entries for the new user
+	if err := autonomous.SeedDefaultTrust(context.Background(), userID); err != nil {
+		log.Printf("[admin] warning: failed to seed trust for user %s: %v", userID, err)
+	}
+
 	return c.Status(201).JSON(fiber.Map{
 		"id":      userID,
 		"email":   body.Email,
@@ -616,4 +623,53 @@ func AdminDBStats(c *fiber.Ctx) error {
 		"total_bytes":   totalBytes,
 		"database_size": dbSize,
 	})
+}
+
+// AdminSecurityDashboard returns security invariants for the admin panel.
+func AdminSecurityDashboard(c *fiber.Ctx) error {
+	ctx := context.Background()
+	var stats fiber.Map = fiber.Map{}
+
+	// Denied autonomous actions
+	var deniedActions int
+	db.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM autonomous_actions WHERE status IN ('block','ask','denied')").Scan(&deniedActions)
+	stats["denied_actions"] = deniedActions
+
+	// Trust escalations - low trust executions
+	var escalations int
+	db.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM autonomous_actions WHERE status='executed' AND trust_score_at_time < 4").Scan(&escalations)
+	stats["low_trust_executions"] = escalations
+
+	// Stalled plans
+	var stalledPlans int
+	db.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM execution_plans WHERE status IN ('blocked','failed')").Scan(&stalledPlans)
+	stats["stalled_plans"] = stalledPlans
+
+	// Active plans
+	var activePlans int
+	db.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM execution_plans WHERE status IN ('pending','running')").Scan(&activePlans)
+	stats["active_plans"] = activePlans
+
+	// Embedding backlog (memories without embeddings)
+	var backlog int
+	db.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM memories m LEFT JOIN memory_embeddings me ON me.memory_id=m.id WHERE me.id IS NULL").Scan(&backlog)
+	stats["embedding_backlog"] = backlog
+
+	// Reflection trend (last 7 days)
+	rows, _ := db.Pool.Query(ctx,
+		"SELECT date, performance_score FROM reflections WHERE created_at > now() - interval '7 days' ORDER BY date ASC")
+	if rows != nil {
+		defer rows.Close()
+		var trend []fiber.Map
+		for rows.Next() {
+			var date string
+			var score float64
+			if rows.Scan(&date, &score) == nil {
+				trend = append(trend, fiber.Map{"date": date, "score": score})
+			}
+		}
+		stats["reflection_trend"] = trend
+	}
+
+	return c.JSON(stats)
 }

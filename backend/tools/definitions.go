@@ -9,6 +9,7 @@ type ToolDef struct {
 		Description string          `json:"description"`
 		Parameters  json.RawMessage `json:"parameters"`
 	} `json:"function"`
+	Capability string `json:"capability"` // "read", "write_low", "write_high", "critical"
 }
 
 var AllTools = []ToolDef{
@@ -109,11 +110,16 @@ func memorySearchDef() ToolDef {
 }
 
 func makeTool(name, desc, params string) ToolDef {
+	return makeToolCap(name, desc, params, "")
+}
+
+func makeToolCap(name, desc, params, capability string) ToolDef {
 	var t ToolDef
 	t.Type = "function"
 	t.Function.Name = name
 	t.Function.Description = desc
 	t.Function.Parameters = json.RawMessage(params)
+	t.Capability = capability
 	return t
 }
 
@@ -267,4 +273,61 @@ func cuTabListDef() ToolDef {
 }
 func cuTabSwitchDef() ToolDef {
 	return makeTool("cu_tab_switch", "Switch to a specific tab in the user's browser", `{"type":"object","properties":{"tab_id":{"type":"integer","description":"Tab ID to switch to (from cu_tab_list)"}},"required":["tab_id"]}`)
+}
+
+// toolCapabilities maps tool names to their capability level.
+var toolCapabilities = map[string]string{
+	// read
+	"memory_search":    "read",
+	"memory_list":      "read",
+	"knowledge_search": "read",
+	"file_read":        "read",
+	"file_list":        "read",
+	"file_search":      "read",
+	"server_list":      "read",
+	"server_status":    "read",
+	"browser_screenshot": "read",
+	"browser_extract":  "read",
+	"browser_tab_list": "read",
+	"cu_screenshot":    "read",
+	"cu_read_page":     "read",
+	"cu_tab_list":      "read",
+	// write_low
+	"memory_save":           "write_low",
+	"file_write":            "write_low",
+	"file_delete":           "write_low",
+	"send_file":             "write_low",
+	"manage_scheduled_task": "write_low",
+	"skill_install":         "write_low",
+	"browser_navigate":      "write_low",
+	"browser_click":         "write_low",
+	"browser_type":          "write_low",
+	"browser_scroll":        "write_low",
+	"browser_tab_switch":    "write_low",
+	"cu_click":              "write_low",
+	"cu_type":               "write_low",
+	"cu_scroll":             "write_low",
+	"cu_navigate":           "write_low",
+	"cu_tab_switch":         "write_low",
+	// write_high
+	"terminal_exec": "write_high",
+	"http_request":  "write_high",
+	// critical
+	"server_ssh_exec":  "critical",
+	"delegate_agent":   "critical",
+}
+
+// CapabilityFor returns the capability level for a tool name. Unknown tools default to "critical".
+func CapabilityFor(name string) string {
+	if cap, ok := toolCapabilities[name]; ok {
+		return cap
+	}
+	return "critical"
+}
+
+func init() {
+	// Set Capability on all tools from the map
+	for i := range AllTools {
+		AllTools[i].Capability = CapabilityFor(AllTools[i].Function.Name)
+	}
 }
