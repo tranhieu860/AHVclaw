@@ -321,8 +321,23 @@ always confirm with the user first.
 		systemPrompt += serversMd
 	}
 
-	// Load memories via semantic search with fallback to recent
+	// Always load personal/identity memories first (these define who the user is)
 	var memoryContext strings.Builder
+	personalRows, personalErr := db.Pool.Query(ctx,
+		`SELECT type, key, content FROM memories
+		 WHERE user_id = $1 AND type IN ('user','profile','preference','feedback','correction')
+		 ORDER BY updated_at DESC LIMIT 15`, userID)
+	if personalErr == nil && personalRows != nil {
+		defer personalRows.Close()
+		for personalRows.Next() {
+			var mType, mKey, mContent string
+			if personalRows.Scan(&mType, &mKey, &mContent) == nil {
+				memoryContext.WriteString(fmt.Sprintf("- [%s] %s: %s\n", mType, mKey, mContent))
+			}
+		}
+	}
+
+	// Then add contextual memories via semantic search
 	semanticResults, semErr := embeddings.SearchByEmbedding(userID.String(), req.Content, 10)
 	if semErr == nil && len(semanticResults) > 0 {
 		for _, r := range semanticResults {
