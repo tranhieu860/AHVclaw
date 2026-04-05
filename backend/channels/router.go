@@ -574,10 +574,9 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 
 	// 8b. Parse thinking and run verification
 	thinking, cleanResponse := engine.ParseThinking(result.Content)
-
-	// Send thinking summary for Telegram (non-simple only)
-	if thinkingSummary := engine.FormatThinkingForTelegram(thinking); thinkingSummary != "" {
-		adapter.SendMessage(msg.ChatID, thinkingSummary)
+	// Safety: if ParseThinking stripped everything but original had content, keep original
+	if cleanResponse == "" && result.Content != "" {
+		cleanResponse = result.Content
 	}
 
 	// Run verification on medium/complex responses

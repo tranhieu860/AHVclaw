@@ -139,9 +139,14 @@ func ProcessChat(ctx context.Context, cfg ChatConfig) (*ChatResult, error) {
 		if finishReason != "tool_calls" || len(accumulatedToolCalls) == 0 {
 			content := SanitizeUTF8(fullContent.String())
 
-			// Guard: empty response with stop reason likely means model returned
-			// only thinking tags or had a streaming issue. Retry once.
-			if content == "" && round < cfg.MaxToolRounds-1 {
+			// Strip <thinking> tags before checking if response is truly empty
+			_, strippedContent := ParseThinking(content)
+			if strippedContent != "" {
+				content = strippedContent
+			}
+
+			// Guard: truly empty response (even after stripping thinking). Retry max once.
+			if content == "" && round == 0 {
 				log.Printf("[engine] WARNING: empty response on round %d, retrying once", round+1)
 				messages = append(messages, ai.ChatMessage{
 					Role:    "assistant",
@@ -149,7 +154,7 @@ func ProcessChat(ctx context.Context, cfg ChatConfig) (*ChatResult, error) {
 				})
 				messages = append(messages, ai.ChatMessage{
 					Role:    "user",
-					Content: "Your previous response was empty. Please provide your answer.",
+					Content: "Your previous response was empty. Please provide your answer directly without using <thinking> tags.",
 				})
 				continue
 			}
