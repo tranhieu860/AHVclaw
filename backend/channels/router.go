@@ -310,8 +310,23 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 		cogContext := cognitive.BuildContextString(cogResults)
 		systemPrompt += cogContext
 	} else {
-		// Fallback to legacy embedding search
+		// Always load personal/identity memories first
 		var memoryContext strings.Builder
+		personalRows, personalErr := db.Pool.Query(ctx,
+			`SELECT type, key, content FROM memories
+			 WHERE user_id = $1 AND type IN ('user','profile','preference','feedback','correction')
+			 ORDER BY updated_at DESC LIMIT 15`, botUserID)
+		if personalErr == nil && personalRows != nil {
+			defer personalRows.Close()
+			for personalRows.Next() {
+				var mType, mKey, mContent string
+				if personalRows.Scan(&mType, &mKey, &mContent) == nil {
+					memoryContext.WriteString(fmt.Sprintf("- [%s] %s: %s\n", mType, mKey, mContent))
+				}
+			}
+		}
+
+		// Then add contextual memories via semantic search
 		semanticResults, semErr := embeddings.SearchByEmbedding(botUserID.String(), msgText, 10)
 		if semErr == nil && len(semanticResults) > 0 {
 			for _, r := range semanticResults {
@@ -335,6 +350,13 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 		if memoryContext.Len() > 0 {
 			systemPrompt += "\n\n## Your memories about this user:\n" + memoryContext.String()
 		}
+	}
+
+	// Inject user identity
+	var userName string
+	db.Pool.QueryRow(ctx, "SELECT name FROM users WHERE id = $1", botUserID).Scan(&userName)
+	if userName != "" {
+		systemPrompt += fmt.Sprintf("\n\n## User Identity\nYou are talking to: %s\nUser ID: %s\nAlways address them by name when appropriate.", userName, botUserID.String())
 	}
 
 	systemPrompt += prompts.ThinkingInstructions
