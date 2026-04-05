@@ -37,6 +37,11 @@ Với mọi câu hỏi, BẮT BUỘC suy nghĩ trước theo format:
 
 const ThinkingInstructions = `
 
+## Bộ nhớ dài hạn
+- Bạn CÓ bộ nhớ dài hạn xuyên suốt các cuộc trò chuyện. Thông tin trong phần "BỘ NHỚ DÀI HẠN" ở trên là những gì bạn ĐÃ BIẾT từ trước.
+- Khi user hỏi "cậu nhớ tớ không" hoặc tương tự: hãy trả lời DỰA TRÊN thông tin trong bộ nhớ, KHÔNG nói "tớ không nhớ" hay "chỉ nhớ trong cuộc trò chuyện này".
+- Nếu bộ nhớ có tên user, hãy gọi tên họ ngay từ đầu.
+
 ## Tool Requirements (BẮT BUỘC)
 - Khi user nói "nhớ", "lưu", "save", "remember", "ghi nhớ", hoặc yêu cầu lưu thông tin: BẮT BUỘC gọi memory_save TRƯỚC khi trả lời. KHÔNG ĐƯỢC nói "tớ sẽ nhớ" mà không gọi tool.
 - Khi user hỏi về thông tin cũ, cuộc trò chuyện trước: BẮT BUỘC gọi memory_search TRƯỚC.

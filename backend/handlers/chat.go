@@ -359,7 +359,7 @@ always confirm with the user first.
 		}
 	}
 	if memoryContext.Len() > 0 {
-		systemPrompt += "\n\n## Your memories about this user:\n" + memoryContext.String()
+		systemPrompt += "\n\n## BỘ NHỚ DÀI HẠN CỦA BẠN (lưu từ các cuộc trò chuyện TRƯỚC ĐÂY):\nBạn CÓ bộ nhớ dài hạn. Những thông tin dưới đây bạn ĐÃ BIẾT từ trước, KHÔNG cần hỏi lại. Hãy trả lời như đã biết.\n" + memoryContext.String()
 	}
 
 	systemPrompt += prompts.ThinkingInstructions

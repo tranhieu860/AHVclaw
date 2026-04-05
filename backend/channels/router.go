@@ -298,12 +298,16 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 		log.Printf("[router] using conversation model override: %s", model)
 	}
 
+	log.Printf("[router] LOADING personal memories for botUserID=%s", botUserID)
 	// ALWAYS load personal/identity memories first (regardless of cognitive search)
 	var personalMemContext strings.Builder
 	personalRows, personalErr := db.Pool.Query(ctx,
 		`SELECT type, key, content FROM memories
 		 WHERE user_id = $1 AND type IN ('user','profile','preference','feedback','correction')
 		 ORDER BY updated_at DESC LIMIT 15`, botUserID)
+	if personalErr != nil {
+		log.Printf("[router] ERROR loading personal memories: %v", personalErr)
+	}
 	if personalErr == nil && personalRows != nil {
 		defer personalRows.Close()
 		for personalRows.Next() {
@@ -314,7 +318,10 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 		}
 	}
 	if personalMemContext.Len() > 0 {
-		systemPrompt += "\n\n## User identity & preferences (ALWAYS follow these):\n" + personalMemContext.String()
+		systemPrompt += "\n\n## BỘ NHỚ DÀI HẠN CỦA BẠN (lưu từ các cuộc trò chuyện TRƯỚC ĐÂY):\nBạn CÓ bộ nhớ dài hạn. Những thông tin dưới đây bạn ĐÃ BIẾT từ trước, KHÔNG cần hỏi lại. Hãy trả lời như đã biết.\n" + personalMemContext.String()
+		log.Printf("[router] injected %d bytes of personal memories for user %s", personalMemContext.Len(), botUserID)
+	} else {
+		log.Printf("[router] WARNING: no personal memories found for user %s", botUserID)
 	}
 
 	// Cognitive memory retrieval for contextual knowledge
