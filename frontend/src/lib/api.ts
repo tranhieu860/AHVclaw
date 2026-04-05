@@ -198,12 +198,12 @@ class ApiClient {
   async rejectPattern(id: string) { return this.fetchJSON(`/api/patterns/${id}/reject`, { method: "POST" }); }
 
   // Knowledge Base
-  async getKnowledgeBases() { return this.fetchJSON("/api/knowledge"); }
-  async createKnowledgeBase(data: Record<string, unknown>) { return this.fetchJSON("/api/knowledge", { method: "POST", body: JSON.stringify(data) }); }
-  async deleteKnowledgeBase(id: string) { return this.fetchJSON(`/api/knowledge/${id}`, { method: "DELETE" }); }
-  async getDocuments(kbId: string) { return this.fetchJSON(`/api/knowledge/${kbId}/documents`); }
-  async createDocument(kbId: string, data: Record<string, unknown>) { return this.fetchJSON(`/api/knowledge/${kbId}/documents`, { method: "POST", body: JSON.stringify(data) }); }
-  async searchKnowledgeBase(kbId: string, query: string) { return this.fetchJSON(`/api/knowledge/${kbId}/search?q=${encodeURIComponent(query)}`); }
+  async getKnowledgeBases() { return this.fetchJSON("/api/knowledge-bases"); }
+  async createKnowledgeBase(data: Record<string, unknown>) { return this.fetchJSON("/api/knowledge-bases", { method: "POST", body: JSON.stringify(data) }); }
+  async deleteKnowledgeBase(id: string) { return this.fetchJSON(`/api/knowledge-bases/${id}`, { method: "DELETE" }); }
+  async getDocuments(kbId: string) { return this.fetchJSON(`/api/knowledge-bases/${kbId}/documents`); }
+  async createDocument(kbId: string, data: Record<string, unknown>) { return this.fetchJSON(`/api/knowledge-bases/${kbId}/documents`, { method: "POST", body: JSON.stringify(data) }); }
+  async searchKnowledgeBase(kbId: string, query: string) { return this.fetchJSON(`/api/knowledge-bases/${kbId}/search?q=${encodeURIComponent(query)}`); }
 
   // Cognitive Memory
   async cognitiveSearch(query: string, sourceType?: string, after?: string, before?: string) {

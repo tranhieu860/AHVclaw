@@ -403,6 +403,8 @@ always confirm with the user first.
 
 	if err != nil {
 		log.Printf("[web-chat] ProcessChat error: %v", err)
+		// Send done signal so the client stops waiting
+		sendWSJSON(conn, "delta", models.StreamDelta{Done: true})
 		return
 	}
 

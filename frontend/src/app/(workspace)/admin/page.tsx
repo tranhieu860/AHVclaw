@@ -351,8 +351,8 @@ function OverviewTab({ dashboard, system }: { dashboard: any; system: any }) {
   ];
 
   const sysItems = system ? [
-    { label: 'Disk', value: system.disk_usage || '—' },
-    { label: 'RAM', value: system.memory_usage || '—' },
+    { label: 'Disk', value: system.disk?.use_pct || '—' },
+    { label: 'RAM', value: system.memory?.used || '—' },
     { label: 'DB Size', value: system.db_size || '—' },
     { label: 'Goroutines', value: system.goroutines ?? '—' },
     { label: 'Go Version', value: system.go_version || '—' },
@@ -458,9 +458,9 @@ function UsersTab({
                 <td className="py-2 pr-4 text-zinc-400">{u.message_count ?? 0}</td>
                 <td className="py-2 pr-4 text-zinc-400">{u.memory_count ?? 0}</td>
                 <td className="py-2 pr-4 text-zinc-400">{u.goal_count ?? 0}</td>
-                <td className="py-2 pr-4 text-zinc-400 font-mono text-xs">{formatBytes(u.storage_bytes ?? 0)}</td>
+                <td className="py-2 pr-4 text-zinc-400 font-mono text-xs">{formatBytes(u.storage_used ?? 0)}</td>
                 <td className="py-2 pr-4">
-                  {u.agi_enabled ? (
+                  {u.heartbeat_enabled ? (
                     <span className="px-2 py-0.5 rounded text-xs bg-green-900/30 text-green-400">Bật</span>
                   ) : (
                     <span className="px-2 py-0.5 rounded text-xs bg-zinc-800 text-zinc-500">Tắt</span>
@@ -550,15 +550,15 @@ function HeartbeatTab({ heartbeat }: { heartbeat: any[] }) {
           <div className="grid grid-cols-2 gap-2 text-sm">
             <div>
               <span className="text-zinc-500">Interval: </span>
-              <span className="text-zinc-300 font-mono">{h.interval || '—'}</span>
+              <span className="text-zinc-300 font-mono">{h.interval_minutes || '—'}</span>
             </div>
             <div>
               <span className="text-zinc-500">Tổng chạy: </span>
-              <span className="text-zinc-300">{h.total_runs ?? 0}</span>
+              <span className="text-zinc-300">{h.run_count ?? 0}</span>
             </div>
             <div>
               <span className="text-zinc-500">Actions: </span>
-              <span className="text-zinc-300">{h.total_actions ?? 0}</span>
+              <span className="text-zinc-300">{h.actions_executed ?? 0}</span>
             </div>
             <div>
               <span className="text-zinc-500">Goals: </span>
@@ -597,7 +597,7 @@ function ActivityTab({ activity }: { activity: any[] }) {
             <tr key={i} className="border-b border-zinc-800/50 hover:bg-zinc-900/50">
               <td className="py-2 pr-4 text-zinc-400 text-xs font-mono whitespace-nowrap">{formatTime(a.created_at || a.timestamp)}</td>
               <td className="py-2 pr-4 text-zinc-300">{a.user_name || a.user_email || '—'}</td>
-              <td className="py-2 pr-4 text-zinc-200 font-mono text-xs">{a.tool || a.action || '—'}</td>
+              <td className="py-2 pr-4 text-zinc-200 font-mono text-xs">{a.tool_name || a.action || '—'}</td>
               <td className="py-2 pr-4">
                 {a.status === 'success' || a.success ? (
                   <span className="px-2 py-0.5 rounded text-xs bg-green-900/30 text-green-400">OK</span>

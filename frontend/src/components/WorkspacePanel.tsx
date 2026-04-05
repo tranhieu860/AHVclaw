@@ -6,10 +6,12 @@ import { ChatPanel } from './ChatPanel';
 import { CodeEditor, EditorTab, getLanguage } from './CodeEditor';
 import { TerminalPanel } from './Terminal';
 import { BrowserPanel } from './BrowserPanel';
+import { useStore } from '@/lib/store';
 
 type TabType = 'chat' | 'editor' | 'terminal' | 'browser';
 
 export function WorkspacePanel() {
+  const toggleRightPanel = useStore((s) => s.toggleRightPanel);
   const [activeTab, setActiveTab] = useState<TabType>('chat');
   const [editorTabs, setEditorTabs] = useState<EditorTab[]>([]);
   const [activeEditorTab, setActiveEditorTab] = useState(0);
@@ -63,7 +65,7 @@ export function WorkspacePanel() {
         {tabs.map(({ type, label, icon: Icon }) => (
           <button
             key={type}
-            onClick={() => setActiveTab(type)}
+            onClick={() => { if (type === 'browser') { toggleRightPanel(); return; } setActiveTab(type); }}
             className={`flex items-center gap-1.5 px-4 py-2 text-sm border-b-2 ${
               activeTab === type
                 ? 'border-blue-500 text-white'
@@ -90,7 +92,7 @@ export function WorkspacePanel() {
           />
         )}
         {activeTab === 'terminal' && <TerminalPanel />}
-        {activeTab === 'browser' && <BrowserPanel onClose={() => setActiveTab('chat')} />}
+        
       </div>
     </div>
   );

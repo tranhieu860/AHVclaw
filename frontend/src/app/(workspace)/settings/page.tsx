@@ -15,8 +15,8 @@ interface Provider {
 }
 
 interface StorageInfo {
-  used: number;
-  quota: number;
+  storage_used: number;
+  storage_quota: number;
 }
 
 interface AdminUser {
@@ -328,14 +328,14 @@ export default function SettingsPage() {
               <>
                 <div>
                   <div className="flex justify-between text-sm mb-2">
-                    <span className="text-zinc-400">Used: {formatBytes(storage.used)}</span>
-                    <span className="text-zinc-400">Quota: {formatBytes(storage.quota)}</span>
+                    <span className="text-zinc-400">Used: {formatBytes(storage.storage_used)}</span>
+                    <span className="text-zinc-400">Quota: {formatBytes(storage.storage_quota)}</span>
                   </div>
                   <div className="w-full bg-zinc-800 rounded-full h-3">
-                    <div className="bg-blue-600 h-3 rounded-full transition-all" style={{ width: `${Math.min((storage.used / storage.quota) * 100, 100)}%` }} />
+                    <div className="bg-blue-600 h-3 rounded-full transition-all" style={{ width: `${Math.min((storage.storage_used / storage.storage_quota) * 100, 100)}%` }} />
                   </div>
                   <p className="text-xs text-zinc-500 mt-2">
-                    {storage.quota > 0 ? `${((storage.used / storage.quota) * 100).toFixed(1)}% used` : 'Chưa đặt hạn mức'}
+                    {storage.storage_quota > 0 ? `${((storage.storage_used / storage.storage_quota) * 100).toFixed(1)}% used` : 'Chưa đặt hạn mức'}
                   </p>
                 </div>
               </>
@@ -533,8 +533,8 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <span className="text-zinc-400">Token</span>
                   <div className="flex items-center gap-2">
-                    <code className="text-zinc-300 bg-zinc-800 px-2 py-0.5 rounded max-w-[200px] truncate">{typeof window !== 'undefined' ? localStorage.getItem('access_token')?.slice(0, 20) + '...' : '...'}</code>
-                    <button onClick={() => { const t = localStorage.getItem('access_token'); if (t) { navigator.clipboard.writeText(t); setCopied(true); setTimeout(() => setCopied(false), 2000); } }} className="p-1 text-zinc-500 hover:text-white transition-colors" title="Sao chép token">{copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}</button>
+                    <code className="text-zinc-300 bg-zinc-800 px-2 py-0.5 rounded">{'••••••••••••••••••••'}</code>
+                    <span className="text-xs text-zinc-500">Xem trong Settings &gt; Hồ sơ &gt; API Key</span>
                   </div>
                 </div>
                 <p className="text-zinc-500 text-xs mt-2">Mở extension popup, dán Server URL và Token, rồi bật ON.</p>

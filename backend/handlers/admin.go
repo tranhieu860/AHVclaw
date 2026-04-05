@@ -148,16 +148,16 @@ func AdminDashboard(c *fiber.Ctx) error {
 		Key   string
 		Query string
 	}{
-		{"users", "SELECT COUNT(*) FROM users"},
-		{"conversations", "SELECT COUNT(*) FROM conversations"},
-		{"messages", "SELECT COUNT(*) FROM messages"},
-		{"memories", "SELECT COUNT(*) FROM memories"},
-		{"goals", "SELECT COUNT(*) FROM goals"},
-		{"heartbeat_runs", "SELECT COUNT(*) FROM heartbeat_runs"},
-		{"tool_logs", "SELECT COUNT(*) FROM tool_logs"},
-		{"bots", "SELECT COUNT(*) FROM bots"},
-		{"tasks", "SELECT COUNT(*) FROM tasks"},
-		{"connections", "SELECT COUNT(*) FROM connections"},
+		{"total_users", "SELECT COUNT(*) FROM users"},
+		{"total_conversations", "SELECT COUNT(*) FROM conversations"},
+		{"total_messages", "SELECT COUNT(*) FROM messages"},
+		{"total_memory", "SELECT COUNT(*) FROM memories"},
+		{"total_goals", "SELECT COUNT(*) FROM goals"},
+		{"total_heartbeat_runs", "SELECT COUNT(*) FROM heartbeat_runs"},
+		{"total_tool_calls", "SELECT COUNT(*) FROM tool_logs"},
+		{"total_bots", "SELECT COUNT(*) FROM bots"},
+		{"total_tasks", "SELECT COUNT(*) FROM scheduled_tasks"},
+		{"total_connections", "SELECT COUNT(*) FROM provider_connections"},
 	}
 
 	for _, t := range tables {
