@@ -492,13 +492,13 @@ always confirm with the user first.
 			title = string(runes[:60]) + "..."
 		}
 		db.Pool.Exec(ctx,
-			"UPDATE conversations SET title = $1, updated_at = now() WHERE id = $2",
-			title, *convID)
+			"UPDATE conversations SET title = $1, updated_at = now() WHERE id = $2 AND user_id = $3",
+			title, *convID, userID)
 		// Notify client of auto-generated title
 		sendWSJSON(conn, "title_update", map[string]string{"conversation_id": (*convID).String(), "title": title})
 	} else {
 		db.Pool.Exec(ctx,
-			"UPDATE conversations SET updated_at = now() WHERE id = $1", *convID)
+			"UPDATE conversations SET updated_at = now() WHERE id = $1 AND user_id = $2", *convID, userID)
 	}
 }
 

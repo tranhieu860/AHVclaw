@@ -31,21 +31,24 @@ type AuditEntry struct {
 	Artifacts      []byte     `json:"artifacts,omitempty"`
 }
 
-// LogAutonomousAction records a comprehensive audit entry for an autonomous action.
-func LogAutonomousAction(ctx context.Context, params AuditEntry) {
+// AuditLog is the global audit logging function that can be called from any package.
+// It inserts a comprehensive audit entry into autonomous_actions with all 18 fields.
+func AuditLog(ctx context.Context, entry AuditEntry) error {
 	// Default artifacts to empty JSON array if nil
-	artifacts := params.Artifacts
+	artifacts := entry.Artifacts
 	if artifacts == nil {
 		artifacts, _ = json.Marshal([]interface{}{})
 	}
 
 	// Convert empty strings to nil for nullable fields
 	var result, errMsg *string
-	if params.Result != "" {
-		result = &params.Result
+	if entry.Result != "" {
+		r := entry.Result
+		result = &r
 	}
-	if params.Error != "" {
-		errMsg = &params.Error
+	if entry.Error != "" {
+		e := entry.Error
+		errMsg = &e
 	}
 
 	_, err := db.Pool.Exec(ctx,
@@ -54,14 +57,70 @@ func LogAutonomousAction(ctx context.Context, params AuditEntry) {
 		  action_type, action_pattern, tool_id, description,
 		  trust_score_at_time, status, sandbox_id, approval_source,
 		  latency_ms, exit_status, result, error, artifacts, created_at)
-		 VALUES (gen_random_uuid(), , , , , , , , , ,
-		         0, 1, 2, 3, 4, 5, 6, 7, 8, now())`,
-		params.UserID, params.HeartbeatRunID, params.AgentID, params.GoalID,
-		params.PlanStepID, params.ActionType, params.ActionPattern, params.ToolID,
-		params.Description, params.TrustScore, params.Status, params.SandboxID,
-		params.ApprovalSource, params.LatencyMs, params.ExitStatus, result,
+		 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9,
+		         $10, $11, $12, $13, $14, $15, $16, $17, $18, now())`,
+		entry.UserID, entry.HeartbeatRunID, entry.AgentID, entry.GoalID,
+		entry.PlanStepID, entry.ActionType, entry.ActionPattern, entry.ToolID,
+		entry.Description, entry.TrustScore, entry.Status, entry.SandboxID,
+		entry.ApprovalSource, entry.LatencyMs, entry.ExitStatus, result,
 		errMsg, artifacts)
 	if err != nil {
-		log.Printf("[audit] failed to log autonomous action: %v", err)
+		log.Printf("[audit] failed to log action: %v", err)
+		return err
 	}
+	return nil
+}
+
+// LogAutonomousAction records a comprehensive audit entry for an autonomous action.
+// Kept for backward compatibility; delegates to AuditLog.
+func LogAutonomousAction(ctx context.Context, params AuditEntry) {
+	AuditLog(ctx, params)
+}
+
+// LogTrustDecision logs a trust system decision with score.
+func LogTrustDecision(ctx context.Context, userID uuid.UUID, toolName, actionType, decision string, score int) {
+	AuditLog(ctx, AuditEntry{
+		UserID:      userID,
+		ActionType:  "trust_decision",
+		ActionPattern: actionType,
+		ToolID:      toolName,
+		Description: decision + " (score=" + intToStr(score) + ")",
+		TrustScore:  score,
+		Status:      decision,
+	})
+}
+
+// LogPlanEvent logs planner lifecycle events (created, advanced, completed, failed).
+func LogPlanEvent(ctx context.Context, userID uuid.UUID, goalID *uuid.UUID, planID uuid.UUID, event, description string) {
+	pid := planID
+	AuditLog(ctx, AuditEntry{
+		UserID:      userID,
+		GoalID:      goalID,
+		PlanStepID:  &pid,
+		ActionType:  event,
+		ActionPattern: "planner",
+		ToolID:      "planner",
+		Description: description,
+		Status:      "logged",
+	})
+}
+
+func intToStr(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	s := ""
+	neg := false
+	if n < 0 {
+		neg = true
+		n = -n
+	}
+	for n > 0 {
+		s = string(rune('0'+n%10)) + s
+		n /= 10
+	}
+	if neg {
+		s = "-" + s
+	}
+	return s
 }

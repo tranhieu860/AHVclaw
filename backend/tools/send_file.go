@@ -32,8 +32,17 @@ func (e *Executor) sendFile(argsJSON json.RawMessage) *ToolResult {
 		return &ToolResult{Name: "send_file", Error: "access denied: file must be in workspace or /tmp"}
 	}
 
+	// Symlink check: resolve and re-verify the path stays within allowed boundaries
+	realPath, err := filepath.EvalSymlinks(resolvedPath)
+	if err != nil {
+		return &ToolResult{Name: "send_file", Error: "cannot resolve file path: " + err.Error()}
+	}
+	if !strings.HasPrefix(realPath, e.WorkspaceDir) && !strings.HasPrefix(realPath, "/tmp/") {
+		return &ToolResult{Name: "send_file", Error: "access denied: resolved path escapes workspace"}
+	}
+
 	// Check file exists
-	info, err := os.Stat(resolvedPath)
+	info, err := os.Stat(realPath)
 	if err != nil {
 		return &ToolResult{Name: "send_file", Error: "file not found: " + err.Error()}
 	}
@@ -51,7 +60,7 @@ func (e *Executor) sendFile(argsJSON json.RawMessage) *ToolResult {
 		return &ToolResult{Name: "send_file", Error: "file sending not available in this context"}
 	}
 
-	if err := e.SendFileFn(resolvedPath, args.Caption); err != nil {
+	if err := e.SendFileFn(realPath, args.Caption); err != nil {
 		return &ToolResult{Name: "send_file", Error: fmt.Sprintf("failed to send file: %v", err)}
 	}
 

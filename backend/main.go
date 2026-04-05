@@ -168,7 +168,7 @@ func main() {
 			if agentID != nil {
 				var agentPrompt *string
 				var agentModel *string
-				db.Pool.QueryRow(ctx, "SELECT system_prompt, model FROM agents WHERE id = $1", *agentID).Scan(&agentPrompt, &agentModel)
+				db.Pool.QueryRow(ctx, "SELECT system_prompt, model FROM agents WHERE id = $1 AND (user_id = $2 OR is_public = true)", *agentID, userID).Scan(&agentPrompt, &agentModel)
 				if agentPrompt != nil {
 					systemPrompt = *agentPrompt
 				}
@@ -184,11 +184,24 @@ func main() {
 			executor.BroadcastFn = func(uid string, eventType string, data interface{}) {
 				handlers.Hub.BroadcastToUser(uid, handlers.Event{Type: eventType, Data: data})
 			}
+				executor.IsAutonomous = true
+				executor.TrustCheckFunc = func(category, toolName string) (string, error) {
+					decision, _, err := autonomous.CheckTrust(ctx, userID, category, toolName)
+					return decision, err
+				}
+				executor.AuditFunc = func(toolName, actionType, status string, trustScore, latencyMs, exitStatus int, result, errMsg string) {
+					autonomous.LogAutonomousAction(ctx, autonomous.AuditEntry{
+						UserID: userID, ToolID: toolName, ActionType: actionType,
+						Status: status, TrustScore: trustScore, LatencyMs: latencyMs,
+						ExitStatus: exitStatus, Result: result, Error: errMsg,
+						ApprovalSource: "scheduler",
+					})
+				}
 			result, err := engine.ProcessChat(ctx, engine.ChatConfig{
 				AIRouter:         handlers.Router,
 				Model:            model,
 				Messages:         messages,
-				Tools:            allToolsForScheduler(),
+				Tools:            autonomousToolsAsAI(),
 				Executor:         executor,
 				MaxToolRounds:    5,
 				MaxContextTokens: 4000,
@@ -621,10 +634,10 @@ func main() {
 }
 
 
-// allToolsForScheduler converts tools for scheduler use.
-func allToolsForScheduler() []ai.Tool {
+// autonomousToolsAsAI converts autonomous-only tools to ai.Tool format for scheduler use.
+func autonomousToolsAsAI() []ai.Tool {
 	var result []ai.Tool
-	for _, d := range tools.AllTools {
+	for _, d := range tools.AutonomousToolsOnly() {
 		result = append(result, ai.Tool{
 			Type: d.Type,
 			Function: ai.ToolFunction{

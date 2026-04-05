@@ -103,6 +103,11 @@ Mỗi bước là một tool call duy nhất. Viết cụ thể các tham số.`
 	}
 
 	log.Printf("[planner] created plan %s with %d steps for user %s", goalTitle, len(steps), userID)
+
+	// Audit: plan_created
+	LogPlanEvent(ctx, userID, &goalID, plan.ID, "plan_created",
+		fmt.Sprintf("Plan '%s' created with %d steps", goalTitle, len(steps)))
+
 	return plan, nil
 }
 
@@ -139,13 +144,24 @@ func AdvancePlan(ctx context.Context, plan *ExecutionPlan, stepOutput string, st
 	}
 
 	step := &plan.Steps[plan.CurrentStep]
+	stepNum := plan.CurrentStep + 1
+
 	if stepErr != nil {
 		step.Status = "failed"
 		step.Output = stepErr.Error()
+
+		// Audit: step_failed
+		LogPlanEvent(ctx, plan.UserID, plan.GoalID, plan.ID, "step_failed",
+			fmt.Sprintf("Step %d/%d '%s' failed: %s", stepNum, len(plan.Steps), step.Description, stepErr.Error()))
+
 		// Try retry before marking plan as failed
 		if !RetryStep(plan) {
 			plan.Status = "failed"
-			plan.Result = fmt.Sprintf("Thất bại ở bước %d: %s", plan.CurrentStep+1, stepErr.Error())
+			plan.Result = fmt.Sprintf("Thất bại ở bước %d: %s", stepNum, stepErr.Error())
+
+			// Audit: plan_failed
+			LogPlanEvent(ctx, plan.UserID, plan.GoalID, plan.ID, "plan_failed",
+				fmt.Sprintf("Plan '%s' failed at step %d: %s", plan.Title, stepNum, stepErr.Error()))
 		}
 	} else {
 		step.Status = "done"
@@ -153,10 +169,19 @@ func AdvancePlan(ctx context.Context, plan *ExecutionPlan, stepOutput string, st
 			stepOutput = stepOutput[:2000] + "...(truncated)"
 		}
 		step.Output = stepOutput
+
+		// Audit: step_advanced
+		LogPlanEvent(ctx, plan.UserID, plan.GoalID, plan.ID, "step_advanced",
+			fmt.Sprintf("Step %d/%d '%s' completed", stepNum, len(plan.Steps), step.Description))
+
 		plan.CurrentStep++
 		if plan.CurrentStep >= len(plan.Steps) {
 			plan.Status = "completed"
 			plan.Result = "Tất cả các bước đã hoàn thành."
+
+			// Audit: plan_completed
+			LogPlanEvent(ctx, plan.UserID, plan.GoalID, plan.ID, "plan_completed",
+				fmt.Sprintf("Plan '%s' completed successfully (%d steps)", plan.Title, len(plan.Steps)))
 		} else {
 			plan.Status = "running"
 		}

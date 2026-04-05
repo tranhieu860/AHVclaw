@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/ahvholding/ahvclaw/sandbox"
@@ -56,6 +57,18 @@ func (e *Executor) terminalExec(argsJSON json.RawMessage) *ToolResult {
 	wsDir := e.WorkspaceDir
 	if wsDir == "" {
 		wsDir = "/tmp"
+	}
+
+	// Validate workspace path for directory traversal and symlink attacks
+	if wsDir != "/tmp" {
+		absPath, err := filepath.Abs(wsDir)
+		if err != nil || !strings.HasPrefix(absPath, "/data/ahvclaw/workspaces/") {
+			return &ToolResult{Name: "terminal_exec", Error: fmt.Sprintf("invalid workspace path: %s", wsDir)}
+		}
+		resolved, err := filepath.EvalSymlinks(absPath)
+		if err == nil && resolved != absPath {
+			return &ToolResult{Name: "terminal_exec", Error: fmt.Sprintf("workspace path contains symlinks: %s -> %s", absPath, resolved)}
+		}
 	}
 
 	output, err := sandbox.SandboxedExec(context.Background(), wsDir, args.Command, args.Timeout)

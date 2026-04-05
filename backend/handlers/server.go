@@ -136,7 +136,7 @@ func ServerExec(c *fiber.Ctx) error {
 	}
 
 	_, _ = db.Pool.Exec(context.Background(),
-		"UPDATE servers SET last_connected_at = now() WHERE id = $1", serverID)
+		"UPDATE servers SET last_connected_at = now() WHERE id = $1 AND user_id = $2", serverID, userID)
 
 	_, _ = db.Pool.Exec(context.Background(),
 		"INSERT INTO audit_logs (user_id, server_id, command, output, exit_code) VALUES ($1, $2, $3, $4, $5)",
@@ -174,7 +174,7 @@ func ServerStatus(c *fiber.Ctx) error {
 	}
 
 	_, _ = db.Pool.Exec(context.Background(),
-		"UPDATE servers SET last_connected_at = now() WHERE id = $1", serverID)
+		"UPDATE servers SET last_connected_at = now() WHERE id = $1 AND user_id = $2", serverID, userID)
 
 	return c.JSON(fiber.Map{"status": status})
 }

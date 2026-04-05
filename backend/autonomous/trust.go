@@ -144,8 +144,8 @@ func SeedDefaultTrust(ctx context.Context, userID uuid.UUID) error {
 		{"read", "file_list", 10},
 		{"read", "file_search", 10},
 		// write_low = notify (score 5-8)
-		{"write_low", "memory_save", 8},
-		{"write_low", "file_write", 4},
+		{"write_low", "memory_save", 5},
+		{"write_high", "file_write", 3},
 		{"write_low", "send_file", 5},
 		{"write_low", "manage_scheduled_task", 4},
 		// write_high = ask (score 1-3)

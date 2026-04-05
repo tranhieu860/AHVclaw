@@ -486,6 +486,19 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 	if BroadcastFunc != nil {
 		executor.BroadcastFn = BroadcastFunc
 	}
+	executor.IsAutonomous = true
+	executor.TrustCheckFunc = func(category, toolName string) (string, error) {
+		decision, _, err := autonomous.CheckTrust(ctx, botUserID, category, toolName)
+		return decision, err
+	}
+	executor.AuditFunc = func(toolName, actionType, status string, trustScore, latencyMs, exitStatus int, result, errMsg string) {
+		autonomous.LogAutonomousAction(ctx, autonomous.AuditEntry{
+			UserID: botUserID, ToolID: toolName, ActionType: actionType,
+			Status: status, TrustScore: trustScore, LatencyMs: latencyMs,
+			ExitStatus: exitStatus, Result: result, Error: errMsg,
+			ApprovalSource: "bot_channel",
+		})
+	}
 
 
 	// Remember original message count to identify new messages later

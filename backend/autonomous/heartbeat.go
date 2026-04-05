@@ -313,6 +313,29 @@ func (d *Daemon) runForUser(cfg HeartbeatConfig) {
 
 	// Check for active execution plan and inject context
 	plan, planErr := GetActivePlan(ctx, cfg.UserID)
+
+	// If no active plan, check if we should create one for a complex goal
+	if planErr != nil || plan == nil {
+		topGoal := pickTopGoalForPlanning(ctx, cfg.UserID)
+		if topGoal != nil {
+			log.Printf("[heartbeat] no active plan for user %s, creating plan for goal: %s", cfg.UserID, topGoal.Title)
+			desc := ""
+			if topGoal.Description != nil {
+				desc = *topGoal.Description
+			}
+			newPlan, createErr := CreatePlan(ctx, cfg.UserID, topGoal.ID, topGoal.Title, desc, d.router)
+			if createErr != nil {
+				log.Printf("[heartbeat] failed to create plan for goal %s: %v", topGoal.Title, createErr)
+			} else {
+				plan = newPlan
+				planErr = nil
+				log.Printf("[heartbeat] created plan %s with %d steps for goal %s", newPlan.ID, len(newPlan.Steps), topGoal.Title)
+				// Mark goal as in_progress
+				db.Pool.Exec(ctx, `UPDATE goals SET status='in_progress', updated_at=now() WHERE id=$1`, topGoal.ID)
+			}
+		}
+	}
+
 	if planErr == nil && plan != nil && plan.CurrentStep < len(plan.Steps) {
 		step := plan.Steps[plan.CurrentStep]
 		log.Printf("[heartbeat] active plan for user %s: step %d/%d - %s (tool: %s)",
@@ -365,6 +388,11 @@ func (d *Daemon) runForUser(cfg HeartbeatConfig) {
 
 	if err != nil {
 		log.Printf("[heartbeat] run %s ProcessChat error: %v", runID, err)
+		// Advance plan on error (mark step failed, allow retry)
+		if planErr == nil && plan != nil && plan.Status == "running" && plan.CurrentStep < len(plan.Steps) {
+			AdvancePlan(ctx, plan, "", err)
+			log.Printf("[heartbeat] plan step failed for %s: %v (retry=%v)", plan.Title, err, plan.Steps[plan.CurrentStep].Status == "pending")
+		}
 		db.Pool.Exec(context.Background(),
 			`UPDATE heartbeat_runs SET finished_at=NOW(), summary=$1, tokens_used=$2 WHERE id=$3`,
 			"error: "+err.Error(), 0, runID)
@@ -430,6 +458,50 @@ func (d *Daemon) runForUser(cfg HeartbeatConfig) {
 
 	log.Printf("[heartbeat] run %s complete for user %s (%d tokens)", runID, cfg.UserID, tokensOut)
 }
+
+// pickTopGoalForPlanning finds the best active goal that needs an execution plan.
+// It selects goals that: have no existing plan, are active/in_progress, and appear complex.
+func pickTopGoalForPlanning(ctx context.Context, userID uuid.UUID) *Goal {
+	goals, err := ListGoals(ctx, userID)
+	if err != nil || len(goals) == 0 {
+		return nil
+	}
+
+	for _, g := range goals {
+		if g.Status != "active" && g.Status != "in_progress" {
+			continue
+		}
+
+		// Check if this goal already has a plan (any status)
+		var planCount int
+		db.Pool.QueryRow(ctx,
+			`SELECT COUNT(*) FROM execution_plans WHERE goal_id=$1`, g.ID).Scan(&planCount)
+		if planCount > 0 {
+			continue
+		}
+
+		// Check if goal is complex enough to warrant a plan:
+		// - has a description with multiple parts (contains "and", commas, numbered steps)
+		// - or has been attempted before (heartbeat ran but progress is still 0)
+		desc := ""
+		if g.Description != nil {
+			desc = *g.Description
+		}
+
+		isComplex := len(desc) > 50 ||
+			strings.Contains(desc, " and ") ||
+			strings.Contains(desc, ", ") ||
+			strings.Contains(g.Title, " and ") ||
+			g.Progress == 0
+
+		if isComplex {
+			goal := g // copy
+			return &goal
+		}
+	}
+	return nil
+}
+
 
 // toAITools converts []tools.ToolDef to []ai.Tool
 func toAITools(defs []tools.ToolDef) []ai.Tool {
