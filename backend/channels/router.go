@@ -627,7 +627,12 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 	result.Content = cleanResponse
 
 	// Save ALL new messages from result.Messages to DB
-	newMessages := result.Messages[originalMsgCount:]
+	// Guard against TrimHistory reducing message count below originalMsgCount
+	newMsgStart := originalMsgCount
+	if newMsgStart > len(result.Messages) {
+		newMsgStart = len(result.Messages)
+	}
+	newMessages := result.Messages[newMsgStart:]
 	for _, m := range newMessages {
 		switch m.Role {
 		case "assistant":
