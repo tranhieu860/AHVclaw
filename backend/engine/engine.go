@@ -89,7 +89,7 @@ func ProcessChat(ctx context.Context, cfg ChatConfig) (*ChatResult, error) {
 
 		var fullContent strings.Builder
 		var accumulatedToolCalls []json.RawMessage
-		var finishReason string
+		var finishReason string // kept for logging
 		var usageIn, usageOut int
 
 		aiReq := ai.ChatCompletionRequest{
@@ -135,8 +135,11 @@ func ProcessChat(ctx context.Context, cfg ChatConfig) (*ChatResult, error) {
 		totalIn += usageIn
 		totalOut += usageOut
 
-		// No tool calls — final response.
-		if finishReason != "tool_calls" || len(accumulatedToolCalls) == 0 {
+		// Check if we have tool calls — process them regardless of finish_reason.
+		// Some providers (9Router) don't set finish_reason to "tool_calls".
+		hasToolCalls := len(accumulatedToolCalls) > 0
+		_ = finishReason // used by logging below
+		if !hasToolCalls {
 			content := SanitizeUTF8(fullContent.String())
 
 			// Strip <thinking> tags before checking if response is truly empty
