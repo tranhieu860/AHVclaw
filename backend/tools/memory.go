@@ -30,6 +30,14 @@ func (e *Executor) memorySave(argsJSON json.RawMessage) *ToolResult {
 		return &ToolResult{Name: "memory_save", Error: "type must be one of: profile, preference, knowledge, correction"}
 	}
 
+	// If this is a correction, clean up old contradictory facts with the same key
+	if args.Type == "correction" {
+		_, _ = db.Pool.Exec(context.Background(),
+			`DELETE FROM memories WHERE user_id = $1 AND key = $2 AND type != 'correction'`,
+			e.UserID, args.Key)
+		log.Printf("[memory_save] correction: cleaned up old facts for key=%s", args.Key)
+	}
+
 	var memoryID string
 	err := db.Pool.QueryRow(context.Background(),
 		`INSERT INTO memories (user_id, type, key, content, updated_at)

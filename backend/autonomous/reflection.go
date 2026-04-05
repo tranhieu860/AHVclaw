@@ -147,6 +147,31 @@ func gatherDayContext(ctx context.Context, userID uuid.UUID, loc *time.Location)
 		sb.WriteString("\n")
 	}
 
+	// Load lessons from previous reflections so they inform future behavior
+	lessonRows, lessonErr := db.Pool.Query(ctx,
+		`SELECT lessons FROM reflections WHERE user_id=$1 AND date < $2::date ORDER BY date DESC LIMIT 3`,
+		userID, today)
+	if lessonErr == nil && lessonRows != nil {
+		defer lessonRows.Close()
+		var allLessons []string
+		for lessonRows.Next() {
+			var lessonsJSON []byte
+			if lessonRows.Scan(&lessonsJSON) == nil && len(lessonsJSON) > 0 {
+				var lessons []string
+				if json.Unmarshal(lessonsJSON, &lessons) == nil {
+					allLessons = append(allLessons, lessons...)
+				}
+			}
+		}
+		if len(allLessons) > 0 {
+			sb.WriteString("## Lessons from Previous Reflections\n")
+			for _, l := range allLessons {
+				sb.WriteString(fmt.Sprintf("  • %s\n", l))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
 	return sb.String()
 }
 

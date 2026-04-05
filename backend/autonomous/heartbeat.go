@@ -360,6 +360,7 @@ func (d *Daemon) runForUser(cfg HeartbeatConfig) {
 	var outputBuf string
 	tokensIn, tokensOut := 0, 0
 	var actionCount int
+	var toolErrorCount int
 
 	result, err := engine.ProcessChat(ctx, engine.ChatConfig{
 		AIRouter:       hbRouter,
@@ -373,10 +374,12 @@ func (d *Daemon) runForUser(cfg HeartbeatConfig) {
 			log.Printf("[heartbeat] tool call: %s", name)
 		},
 		OnToolResult: func(name, content, errStr string) {
-			actionCount++
 			status := "success"
 			if errStr != "" {
 				status = "error"
+				toolErrorCount++
+			} else {
+				actionCount++
 			}
 			db.Pool.Exec(context.Background(),
 				`INSERT INTO tool_logs (user_id, tool_name, input, output, status, duration_ms, source)
@@ -409,10 +412,15 @@ func (d *Daemon) runForUser(cfg HeartbeatConfig) {
 	// Advance active plan if one was being executed
 	if planErr == nil && plan != nil && plan.Status == "running" && plan.CurrentStep < len(plan.Steps) {
 		if actionCount > 0 {
-			// At least one tool was called - consider step done
+			// At least one tool succeeded - consider step done
 			AdvancePlan(ctx, plan, summarize(outputBuf, 500), nil)
 			log.Printf("[heartbeat] advanced plan %s to step %d/%d (status=%s)",
 				plan.Title, plan.CurrentStep+1, len(plan.Steps), plan.Status)
+		} else if toolErrorCount > 0 && actionCount == 0 {
+			// All tool calls failed — do NOT advance, mark step as blocked
+			BlockStep(plan, fmt.Sprintf("all %d tool calls returned errors", toolErrorCount))
+			savePlanState(ctx, plan)
+			log.Printf("[heartbeat] plan step blocked for %s: %d tool errors, 0 successes", plan.Title, toolErrorCount)
 		} else if err != nil {
 			// ProcessChat returned error - mark step failed (with retry)
 			AdvancePlan(ctx, plan, "", err)

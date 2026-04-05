@@ -370,14 +370,47 @@ always confirm with the user first.
 		memoryBlock = "\n\n## BỘ NHỚ DÀI HẠN CỦA BẠN (lưu từ các cuộc trò chuyện TRƯỚC ĐÂY):\nBạn CÓ bộ nhớ dài hạn. Những thông tin dưới đây bạn ĐÃ BIẾT từ trước, KHÔNG cần hỏi lại. Hãy trả lời như đã biết.\n" + memoryContext.String()
 	}
 
+
+	// Inject accepted patterns as behavioral guidelines (parity with router.go)
+	patternRows, patErr := db.Pool.Query(ctx,
+		`SELECT description FROM detected_patterns WHERE user_id=$1 AND status='accepted' LIMIT 10`,
+		userID)
+	if patErr == nil && patternRows != nil {
+		defer patternRows.Close()
+		var patternHints []string
+		for patternRows.Next() {
+			var desc string
+			if patternRows.Scan(&desc) == nil {
+				patternHints = append(patternHints, desc)
+			}
+		}
+		if len(patternHints) > 0 {
+			systemPrompt += "\n\n## Learned behavioral patterns (from self-reflection):\n"
+			for _, h := range patternHints {
+				systemPrompt += "- " + h + "\n"
+			}
+		}
+	}
+
+	// Inject prompt suggestions from reflections (parity with router.go)
+	var suggestionsJSON string
+	db.Pool.QueryRow(ctx,
+		`SELECT value FROM user_settings WHERE user_id=$1 AND key='active_prompt_suggestions'`,
+		userID).Scan(&suggestionsJSON)
+	if suggestionsJSON != "" {
+		var suggestions []string
+		if json.Unmarshal([]byte(suggestionsJSON), &suggestions) == nil && len(suggestions) > 0 {
+			systemPrompt += "\n## Self-improvement notes:\n"
+			for _, s := range suggestions {
+				systemPrompt += "- " + s + "\n"
+			}
+		}
+	}
+
 	systemPrompt += prompts.ThinkingInstructions
 
 	// Prepend system message and conversation summary
 	var fullMessages []ai.ChatMessage
-	log.Printf("[web-chat] SYSTEM PROMPT length=%d", len(systemPrompt))
-	if err := os.WriteFile("/tmp/last_system_prompt.txt", []byte(systemPrompt), 0666); err != nil {
-		log.Printf("[web-chat] ERROR writing prompt file: %v", err)
-	}
 	// Put memories at the TOP of system prompt so AI sees them first
 	if memoryBlock != "" {
 		systemPrompt = memoryBlock + "\n\n---\n" + systemPrompt

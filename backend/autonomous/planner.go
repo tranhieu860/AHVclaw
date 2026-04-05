@@ -154,14 +154,14 @@ func AdvancePlan(ctx context.Context, plan *ExecutionPlan, stepOutput string, st
 		LogPlanEvent(ctx, plan.UserID, plan.GoalID, plan.ID, "step_failed",
 			fmt.Sprintf("Step %d/%d '%s' failed: %s", stepNum, len(plan.Steps), step.Description, stepErr.Error()))
 
-		// Try retry before marking plan as failed
+		// Try retry before marking plan as blocked
 		if !RetryStep(plan) {
-			plan.Status = "failed"
-			plan.Result = fmt.Sprintf("Thất bại ở bước %d: %s", stepNum, stepErr.Error())
+			// Max retries exceeded — mark as blocked (not failed) so it can be reviewed
+			BlockStep(plan, fmt.Sprintf("max retries exceeded: %s", stepErr.Error()))
 
-			// Audit: plan_failed
-			LogPlanEvent(ctx, plan.UserID, plan.GoalID, plan.ID, "plan_failed",
-				fmt.Sprintf("Plan '%s' failed at step %d: %s", plan.Title, stepNum, stepErr.Error()))
+			// Audit: plan_blocked
+			LogPlanEvent(ctx, plan.UserID, plan.GoalID, plan.ID, "plan_blocked",
+				fmt.Sprintf("Plan '%s' blocked at step %d (max retries): %s", plan.Title, stepNum, stepErr.Error()))
 		}
 	} else {
 		step.Status = "done"
@@ -178,6 +178,14 @@ func AdvancePlan(ctx context.Context, plan *ExecutionPlan, stepOutput string, st
 		if plan.CurrentStep >= len(plan.Steps) {
 			plan.Status = "completed"
 			plan.Result = "Tất cả các bước đã hoàn thành."
+
+			// Sync goal status: mark goal as completed when plan completes
+			if plan.GoalID != nil {
+				db.Pool.Exec(ctx,
+					`UPDATE goals SET status='completed', progress=100, updated_at=now() WHERE id=$1 AND status IN ('active','in_progress')`,
+					*plan.GoalID)
+				log.Printf("[planner] goal %s marked completed (plan finished)", *plan.GoalID)
+			}
 
 			// Audit: plan_completed
 			LogPlanEvent(ctx, plan.UserID, plan.GoalID, plan.ID, "plan_completed",
@@ -234,6 +242,13 @@ func BlockStep(plan *ExecutionPlan, reason string) {
 	step.Blocker = reason
 	plan.Status = "blocked"
 	plan.Result = fmt.Sprintf("Bị chặn ở bước %d: %s", plan.CurrentStep+1, reason)
+
+	// Sync goal status: mark goal as blocked when plan is blocked
+	if plan.GoalID != nil {
+		db.Pool.Exec(context.Background(),
+			`UPDATE goals SET status='blocked', updated_at=now() WHERE id=$1 AND status IN ('active','in_progress')`,
+			*plan.GoalID)
+	}
 }
 
 func savePlanState(ctx context.Context, plan *ExecutionPlan) {
