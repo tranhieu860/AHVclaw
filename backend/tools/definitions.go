@@ -81,7 +81,7 @@ func terminalExecDef() ToolDef {
 }
 
 func httpRequestDef() ToolDef {
-	return makeTool("http_request", "Make an HTTP request", `{
+	return makeTool("http_request", "Make an HTTP API request (JSON endpoints only). DO NOT use for browsing websites - use browser_navigate + browser_extract instead which can render JavaScript", `{
 		"type":"object","properties":{
 			"method":{"type":"string","enum":["GET","POST","PUT","DELETE","PATCH"],"default":"GET"},
 			"url":{"type":"string","description":"Request URL"},
@@ -147,7 +147,7 @@ func serverStatusDef() ToolDef {
 }
 
 func browserNavigateDef() ToolDef {
-	return makeTool("browser_navigate", "Navigate the browser to a URL", `{
+	return makeTool("browser_navigate", "Open a website URL in browser (PREFERRED for all web pages). Use this instead of http_request for websites. After navigating, use browser_extract to read page content", `{
 		"type":"object","properties":{
 			"url":{"type":"string","description":"URL to navigate to"}
 		},"required":["url"]
@@ -179,7 +179,7 @@ func browserTypeDef() ToolDef {
 }
 
 func browserExtractDef() ToolDef {
-	return makeTool("browser_extract", "Extract text content from the current browser page", `{
+	return makeTool("browser_extract", "Read/extract all text content from current browser page (after browser_navigate). Gets full rendered content including JavaScript-generated data like prices, tables, etc.", `{
 		"type":"object","properties":{}
 	}`)
 }

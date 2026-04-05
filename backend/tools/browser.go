@@ -44,22 +44,8 @@ func (e *Executor) browserNavigate(argsJSON json.RawMessage) *ToolResult {
 		return &ToolResult{Name: "browser_navigate", Error: "url is required"}
 	}
 
-	// Try extension first
-	if computeruse.Hub.IsOnline(e.UserID) {
-		paramsJSON, _ := json.Marshal(args)
-		cmd := computeruse.CUCommand{ID: uuid.New().String(), Action: "navigate", Params: paramsJSON}
-		result, err := computeruse.Hub.SendCommand(e.UserID, cmd)
-		if err == nil {
-			var data struct {
-				URL   string `json:"url"`
-				Title string `json:"title"`
-			}
-			json.Unmarshal(result.Data, &data)
-			e.broadcastBrowserUpdate("extension", "", data.URL, data.Title, fmt.Sprintf("Navigated to: %s", data.URL))
-			return &ToolResult{Name: "browser_navigate", Content: fmt.Sprintf("Navigated to: %s\nTitle: %s", data.URL, data.Title)}
-		}
-		// Extension failed, fall through to Playwright
-	}
+	// Always use Playwright for navigate+extract workflows (more reliable for scraping)
+	// Extension navigate opens in user's real browser which disrupts their session
 
 	// Playwright fallback
 	result, err := browser.Execute(browser.BrowserRequest{
@@ -233,11 +219,15 @@ func (e *Executor) browserExtract(argsJSON json.RawMessage) *ToolResult {
 			}
 			json.Unmarshal(result.Data, &data)
 			content := data.Content
-			if len(content) > 10000 {
-				content = content[:10000] + "\n...(truncated)"
+			// If extension returned meaningful content (>200 chars), use it
+			if len(content) > 200 {
+				if len(content) > 10000 {
+					content = content[:10000] + "\n...(truncated)"
+				}
+				e.broadcastBrowserUpdate("extension", "", data.URL, data.Title, "Page content extracted")
+				return &ToolResult{Name: "browser_extract", Content: fmt.Sprintf("Page: %s (%s)\n\n%s", data.URL, data.Title, content)}
 			}
-			e.broadcastBrowserUpdate("extension", "", data.URL, data.Title, "Page content extracted")
-			return &ToolResult{Name: "browser_extract", Content: fmt.Sprintf("Page: %s (%s)\n\n%s", data.URL, data.Title, content)}
+			// Extension returned too little content, fall through to Playwright
 		}
 	}
 
