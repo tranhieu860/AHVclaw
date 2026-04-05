@@ -56,8 +56,8 @@ interface Reflection {
 
 interface CognitiveStats {
   total_embeddings: number;
-  by_type: Record<string, number>;
-  total_cross_references: number;
+  embeddings_by_type: Record<string, number>;
+  total_cross_refs: number;
   last_consolidation: string | null;
 }
 
@@ -450,14 +450,14 @@ export default function DashboardPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-zinc-800/50 rounded-lg p-3">
                   <p className="text-xs text-zinc-500 mb-1">Embedding</p>
-                  <p className="text-2xl font-semibold text-cyan-400">{cogStats.total_embeddings.toLocaleString()}</p>
+                  <p className="text-2xl font-semibold text-cyan-400">{(cogStats.total_embeddings ?? 0).toLocaleString()}</p>
                 </div>
                 <div className="bg-zinc-800/50 rounded-lg p-3">
                   <p className="text-xs text-zinc-500 mb-1">Tham chiếu chéo</p>
-                  <p className="text-2xl font-semibold text-purple-400">{cogStats.total_cross_references.toLocaleString()}</p>
+                  <p className="text-2xl font-semibold text-purple-400">{(cogStats.total_cross_refs ?? 0).toLocaleString()}</p>
                 </div>
               </div>
-              {cogStats.by_type && Object.keys(cogStats.by_type).length > 0 && (
+              {cogStats.embeddings_by_type && Object.keys(cogStats.embeddings_by_type).length > 0 && (
                 <div className="space-y-1.5">
                   <p className="text-xs text-zinc-500">Phân loại</p>
                   <div className="flex flex-wrap gap-2">
@@ -468,10 +468,10 @@ export default function DashboardPage() {
                       { key: "pattern", color: "bg-orange-900/40 text-orange-400" },
                       { key: "goal", color: "bg-cyan-900/40 text-cyan-400" },
                     ].map(({ key, color }) =>
-                      cogStats.by_type[key] !== undefined ? (
+                      cogStats.embeddings_by_type[key] !== undefined ? (
                         <span key={key} className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full ${color}`}>
                           <span className="capitalize">{key}</span>
-                          <span className="font-medium">{cogStats.by_type[key]}</span>
+                          <span className="font-medium">{cogStats.embeddings_by_type[key]}</span>
                         </span>
                       ) : null
                     )}

@@ -80,10 +80,13 @@ export function ChatPanel() {
       };
 
       ws.onmessage = (event) => {
-        const msg = JSON.parse(event.data);
+        let msg;
+        try { msg = JSON.parse(event.data); } catch { console.warn('WS parse error:', event.data); return; }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const safeParse = (d: any): any => { if (typeof d === 'string') { try { return JSON.parse(d); } catch { return d; } } return d; };
         switch (msg.type) {
           case 'delta': {
-            const delta = typeof msg.data === 'string' ? JSON.parse(msg.data) : msg.data;
+            const delta = safeParse(msg.data);
             if (delta.done) {
               if (thinkingRef.current) {
                 const currentMsgs = [...useStore.getState().messages];
@@ -105,16 +108,16 @@ export function ChatPanel() {
             break;
           }
           case 'conversation_id': {
-            const id = typeof msg.data === 'string' ? JSON.parse(msg.data) : msg.data;
+            const id = safeParse(msg.data);
             setActiveConversationId(typeof id === 'object' ? id.id : id);
             break;
           }
           case 'tool_call':
-            setToolActivity(`Running: ${(typeof msg.data === 'string' ? JSON.parse(msg.data) : msg.data).name}...`);
+            setToolActivity(`Running: ${(safeParse(msg.data)).name}...`);
             break;
           case 'tool_result': {
             setToolActivity(null);
-            const result = typeof msg.data === 'string' ? JSON.parse(msg.data) : msg.data;
+            const result = safeParse(msg.data);
             const resultText = result.error
               ? `\n\n**Tool Error (${result.name}):** ${result.error}`
               : `\n\n**Tool (${result.name}):** ${(result.content || 'Done').substring(0, 500)}`;
@@ -122,14 +125,14 @@ export function ChatPanel() {
             break;
           }
           case "thinking": {
-            const thinkData = typeof msg.data === "string" ? JSON.parse(msg.data) : msg.data;
+            const thinkData = safeParse(msg.data);
             thinkingRef.current += (thinkingRef.current ? "\n" : "") + (thinkData.content || "");
             break;
           }
           case 'error': {
             setIsStreaming(false);
             setToolActivity(null);
-            const errData = typeof msg.data === 'string' ? JSON.parse(msg.data) : msg.data;
+            const errData = safeParse(msg.data);
             updateLastAssistantContent('\n\n**Error:** ' + errData.message);
             ws.close();
             break;

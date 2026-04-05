@@ -357,7 +357,7 @@ function OverviewTab({ dashboard, system }: { dashboard: any; system: any }) {
     { label: 'Goroutines', value: system.goroutines ?? '—' },
     { label: 'Go Version', value: system.go_version || '—' },
     { label: 'Uptime', value: system.uptime || '—' },
-    { label: 'DB Pool', value: system.db_pool || '—' },
+    { label: 'DB Pool', value: system.db_pool ? (system.db_pool.idle_conns ?? 0) + '/' + (system.db_pool.max_conns ?? 0) + ' idle/max' : '—' },
   ] : [];
 
   return (
