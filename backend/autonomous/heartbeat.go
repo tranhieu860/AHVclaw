@@ -571,6 +571,32 @@ Delivery channel: %s
 		}
 	}
 
+	// Always inject personal memories so the bot knows user identity & preferences
+	var personalMems strings.Builder
+	pRows, pErr := db.Pool.Query(context.Background(),
+		`SELECT type, key, content FROM memories
+		 WHERE user_id = $1 AND type IN ('user','profile','preference','feedback','correction')
+		 ORDER BY updated_at DESC LIMIT 15`, cfg.UserID)
+	if pErr == nil && pRows != nil {
+		defer pRows.Close()
+		for pRows.Next() {
+			var mType, mKey, mContent string
+			if pRows.Scan(&mType, &mKey, &mContent) == nil {
+				personalMems.WriteString(fmt.Sprintf("- [%s] %s: %s\n", mType, mKey, mContent))
+			}
+		}
+	}
+	if personalMems.Len() > 0 {
+		prompt += "\n## User identity & preferences (ALWAYS follow these):\n" + personalMems.String()
+	}
+
+	// Inject user name for personalization
+	var userName string
+	db.Pool.QueryRow(context.Background(), "SELECT name FROM users WHERE id = $1", cfg.UserID).Scan(&userName)
+	if userName != "" {
+		prompt += fmt.Sprintf("\nYou are talking to: %s\n", userName)
+	}
+
 	return prompt
 }
 
