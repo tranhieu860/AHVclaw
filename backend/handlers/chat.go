@@ -219,6 +219,13 @@ func handleChat(conn *websocket.Conn, userID uuid.UUID, role string, data json.R
 	// Build system prompt from centralized default
 	systemPrompt := prompts.DefaultSystemPrompt
 
+	// Inject user identity so the AI knows who it is talking to
+	var userName, userEmail string
+	db.Pool.QueryRow(ctx, "SELECT name, email FROM users WHERE id = $1", userID).Scan(&userName, &userEmail)
+	if userName != "" {
+		systemPrompt += fmt.Sprintf("\n\n## User Identity\nYou are talking to: %s (email: %s)\nUser ID: %s\nAlways address them by name when appropriate.", userName, userEmail, userID.String())
+	}
+
 	// Load agent config if conversation has an agent
 	var agentID *uuid.UUID
 	var projectID *uuid.UUID
