@@ -65,7 +65,8 @@ const cardCls = 'bg-zinc-900 border border-zinc-800 rounded-xl p-4';
 
 function timeAgo(iso: string | null): string {
   if (!iso) return 'Never';
-  const diff = Date.now() - new Date(iso).getTime();
+  const d = new Date(iso); if (isNaN(d.getTime())) return iso.length > 30 ? iso.slice(0, 30) + "..." : iso;
+  const diff = Date.now() - d.getTime();
   const m = Math.floor(diff / 60000);
   if (m < 1) return 'Just now';
   if (m < 60) return `${m}m ago`;

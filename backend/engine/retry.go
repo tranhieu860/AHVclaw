@@ -89,6 +89,12 @@ func RetryableStreamChatWithContext(
 			}
 		}
 
+		// On 429 rate limit, skip remaining retries and go straight to fallbacks
+		if errors.As(lastErr, &aiErr) && aiErr.StatusCode == 429 && len(cfg.FallbackModels) > 0 {
+			log.Printf("[retry] 429 rate limit on %q, skipping to fallback models", primaryModel)
+			break
+		}
+
 		log.Printf("[retry] retryable error from model %q (attempt %d/%d): %v", primaryModel, i+1, attempts, lastErr)
 	}
 
