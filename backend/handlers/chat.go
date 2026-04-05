@@ -322,19 +322,26 @@ always confirm with the user first.
 	}
 
 	// Always load personal/identity memories first (these define who the user is)
+	log.Printf("[web-chat] LOADING personal memories for userID=%s", userID)
 	var memoryContext strings.Builder
 	personalRows, personalErr := db.Pool.Query(ctx,
 		`SELECT type, key, content FROM memories
 		 WHERE user_id = $1 AND type IN ('user','profile','preference','feedback','correction')
 		 ORDER BY updated_at DESC LIMIT 15`, userID)
+	if personalErr != nil {
+		log.Printf("[web-chat] ERROR loading personal memories: %v", personalErr)
+	}
 	if personalErr == nil && personalRows != nil {
 		defer personalRows.Close()
+		count := 0
 		for personalRows.Next() {
 			var mType, mKey, mContent string
 			if personalRows.Scan(&mType, &mKey, &mContent) == nil {
 				memoryContext.WriteString(fmt.Sprintf("- [%s] %s: %s\n", mType, mKey, mContent))
+				count++
 			}
 		}
+		log.Printf("[web-chat] loaded %d personal memories (%d bytes)", count, memoryContext.Len())
 	}
 
 	// Then add contextual memories via semantic search
@@ -358,14 +365,23 @@ always confirm with the user first.
 			}
 		}
 	}
+	memoryBlock := ""
 	if memoryContext.Len() > 0 {
-		systemPrompt += "\n\n## BỘ NHỚ DÀI HẠN CỦA BẠN (lưu từ các cuộc trò chuyện TRƯỚC ĐÂY):\nBạn CÓ bộ nhớ dài hạn. Những thông tin dưới đây bạn ĐÃ BIẾT từ trước, KHÔNG cần hỏi lại. Hãy trả lời như đã biết.\n" + memoryContext.String()
+		memoryBlock = "\n\n## BỘ NHỚ DÀI HẠN CỦA BẠN (lưu từ các cuộc trò chuyện TRƯỚC ĐÂY):\nBạn CÓ bộ nhớ dài hạn. Những thông tin dưới đây bạn ĐÃ BIẾT từ trước, KHÔNG cần hỏi lại. Hãy trả lời như đã biết.\n" + memoryContext.String()
 	}
 
 	systemPrompt += prompts.ThinkingInstructions
 
 	// Prepend system message and conversation summary
 	var fullMessages []ai.ChatMessage
+	log.Printf("[web-chat] SYSTEM PROMPT length=%d", len(systemPrompt))
+	if err := os.WriteFile("/tmp/last_system_prompt.txt", []byte(systemPrompt), 0666); err != nil {
+		log.Printf("[web-chat] ERROR writing prompt file: %v", err)
+	}
+	// Put memories at the TOP of system prompt so AI sees them first
+	if memoryBlock != "" {
+		systemPrompt = memoryBlock + "\n\n---\n" + systemPrompt
+	}
 	fullMessages = append(fullMessages, ai.ChatMessage{Role: "system", Content: systemPrompt})
 
 	var summary *string

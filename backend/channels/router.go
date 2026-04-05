@@ -317,8 +317,9 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 			}
 		}
 	}
+	personalMemBlock := ""
 	if personalMemContext.Len() > 0 {
-		systemPrompt += "\n\n## BỘ NHỚ DÀI HẠN CỦA BẠN (lưu từ các cuộc trò chuyện TRƯỚC ĐÂY):\nBạn CÓ bộ nhớ dài hạn. Những thông tin dưới đây bạn ĐÃ BIẾT từ trước, KHÔNG cần hỏi lại. Hãy trả lời như đã biết.\n" + personalMemContext.String()
+		personalMemBlock = "\n\n## BỘ NHỚ DÀI HẠN CỦA BẠN (lưu từ các cuộc trò chuyện TRƯỚC ĐÂY):\nBạn CÓ bộ nhớ dài hạn. Những thông tin dưới đây bạn ĐÃ BIẾT từ trước, KHÔNG cần hỏi lại. Hãy trả lời như đã biết.\n" + personalMemContext.String()
 		log.Printf("[router] injected %d bytes of personal memories for user %s", personalMemContext.Len(), botUserID)
 	} else {
 		log.Printf("[router] WARNING: no personal memories found for user %s", botUserID)
@@ -432,6 +433,10 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 	}
 
 	// 7. Build message history
+	// Put memories at the TOP of system prompt so AI sees them first
+	if personalMemBlock != "" {
+		systemPrompt = personalMemBlock + "\n\n---\n" + systemPrompt
+	}
 	messages := r.buildMessageHistory(ctx, conv.ID, systemPrompt)
 
 	// 7b. If there are image files, make the last user message multimodal
