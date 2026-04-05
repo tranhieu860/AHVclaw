@@ -298,7 +298,26 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 		log.Printf("[router] using conversation model override: %s", model)
 	}
 
-	// Cognitive memory retrieval (replaces simple memory search)
+	// ALWAYS load personal/identity memories first (regardless of cognitive search)
+	var personalMemContext strings.Builder
+	personalRows, personalErr := db.Pool.Query(ctx,
+		`SELECT type, key, content FROM memories
+		 WHERE user_id = $1 AND type IN ('user','profile','preference','feedback','correction')
+		 ORDER BY updated_at DESC LIMIT 15`, botUserID)
+	if personalErr == nil && personalRows != nil {
+		defer personalRows.Close()
+		for personalRows.Next() {
+			var mType, mKey, mContent string
+			if personalRows.Scan(&mType, &mKey, &mContent) == nil {
+				personalMemContext.WriteString(fmt.Sprintf("- [%s] %s: %s\n", mType, mKey, mContent))
+			}
+		}
+	}
+	if personalMemContext.Len() > 0 {
+		systemPrompt += "\n\n## User identity & preferences (ALWAYS follow these):\n" + personalMemContext.String()
+	}
+
+	// Cognitive memory retrieval for contextual knowledge
 	cogResults, cogErr := cognitive.Search(ctx, cognitive.SearchOptions{
 		UserID:         botUserID,
 		Query:          msgText,
@@ -310,23 +329,8 @@ func (r *Router) HandleInbound(msg InboundMessage, adapter ChannelAdapter) {
 		cogContext := cognitive.BuildContextString(cogResults)
 		systemPrompt += cogContext
 	} else {
-		// Always load personal/identity memories first
+		// Fallback to legacy embedding search
 		var memoryContext strings.Builder
-		personalRows, personalErr := db.Pool.Query(ctx,
-			`SELECT type, key, content FROM memories
-			 WHERE user_id = $1 AND type IN ('user','profile','preference','feedback','correction')
-			 ORDER BY updated_at DESC LIMIT 15`, botUserID)
-		if personalErr == nil && personalRows != nil {
-			defer personalRows.Close()
-			for personalRows.Next() {
-				var mType, mKey, mContent string
-				if personalRows.Scan(&mType, &mKey, &mContent) == nil {
-					memoryContext.WriteString(fmt.Sprintf("- [%s] %s: %s\n", mType, mKey, mContent))
-				}
-			}
-		}
-
-		// Then add contextual memories via semantic search
 		semanticResults, semErr := embeddings.SearchByEmbedding(botUserID.String(), msgText, 10)
 		if semErr == nil && len(semanticResults) > 0 {
 			for _, r := range semanticResults {
