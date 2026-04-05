@@ -82,6 +82,7 @@ func ProcessChat(ctx context.Context, cfg ChatConfig) (*ChatResult, error) {
 	messages := cfg.Messages
 	model := cfg.Model
 	var totalIn, totalOut int
+	toolCallHistory := make(map[string]int) // track repeated tool calls
 
 	for round := 0; round < cfg.MaxToolRounds; round++ {
 		// Trim history before each AI call.
@@ -229,11 +230,41 @@ func ProcessChat(ctx context.Context, cfg ChatConfig) (*ChatResult, error) {
 				Content:    toolContent,
 				ToolCallID: tc.ID,
 			})
+
+			// Track repeated tool calls for loop detection
+			callKey := tc.Function.Name + ":" + string(tc.Function.Arguments)
+			toolCallHistory[callKey]++
+		}
+
+		// Loop detection: if same tool+args called 3+ times, force AI to stop and respond
+		for key, count := range toolCallHistory {
+			if count >= 3 {
+				log.Printf("[engine] loop detected: %s called %d times, forcing text response", key, count)
+				messages = append(messages, ai.ChatMessage{
+					Role:    "user",
+					Content: "SYSTEM: You have called the same tool multiple times with identical arguments. The data you need is not available through this tool. Stop calling tools and give the user a helpful text response based on what you already know. Do NOT call any more tools.",
+				})
+				// Set MaxToolRounds to current round+1 to allow one final response
+				cfg.MaxToolRounds = round + 2
+				break
+			}
 		}
 	}
 
 	// Exhausted all tool rounds without a final response.
-	return nil, fmt.Errorf("exceeded maximum tool rounds (%d)", cfg.MaxToolRounds)
+	// Instead of hard error, return a graceful fallback so user gets a reply
+	log.Printf("[engine] WARNING: exceeded max tool rounds (%d), returning graceful fallback", cfg.MaxToolRounds)
+	fallbackContent := "Xin lỗi, tớ đã thử nhiều cách nhưng không lấy được dữ liệu từ nguồn này. Trang web có thể render nội dung bằng JavaScript nên không đọc được qua HTTP request thông thường. Bạn có thể gửi ảnh chụp màn hình hoặc copy nội dung bảng giá để tớ đọc giúp nhé."
+	if cfg.OnDone != nil {
+		cfg.OnDone(totalIn, totalOut)
+	}
+	return &ChatResult{
+		Content:   fallbackContent,
+		TokensIn:  totalIn,
+		TokensOut: totalOut,
+		Model:     model,
+		Messages:  messages,
+	}, nil
 }
 
 // SanitizeUTF8 removes Unicode replacement characters from a string.
