@@ -142,6 +142,7 @@ func main() {
 
 	auth.Init(cfg.JWTSecret)
 	handlers.Router = ai.NewRouterClient(cfg.RouterURL, cfg.RouterAPIKey)
+	handlers.ConnPool = ai.NewConnectionPool(handlers.Router)
 
 	// Init channel manager
 	// Wire broadcast function for channels package (avoids import cycle)
@@ -197,9 +198,11 @@ func main() {
 						ApprovalSource: "scheduler",
 					})
 				}
+			schResolved := handlers.ConnPool.Resolve(ctx, userID, model)
+			schRouter := schResolved.CreateClient()
 			result, err := engine.ProcessChat(ctx, engine.ChatConfig{
-				AIRouter:         handlers.Router,
-				Model:            model,
+				AIRouter:         schRouter,
+				Model:            schResolved.Model,
 				Messages:         messages,
 				Tools:            autonomousToolsAsAI(),
 				Executor:         executor,
@@ -231,7 +234,7 @@ func main() {
 	// Start heartbeat daemon
 	hbCtx, hbCancel := context.WithCancel(context.Background())
 	defer hbCancel()
-	hbDaemon := autonomous.NewDaemon(handlers.Router, func(userID uuid.UUID, channel, chatID, text string) {
+	hbDaemon := autonomous.NewDaemon(handlers.Router, handlers.ConnPool, func(userID uuid.UUID, channel, chatID, text string) {
 		// Deliver via channel adapter if available
 		if channelManager != nil && chatID != "" {
 			if adapter, ok := channelManager.GetAdapter(chatID); ok {

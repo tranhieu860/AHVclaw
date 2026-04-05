@@ -31,13 +31,14 @@ type DeliverFunc func(userID uuid.UUID, channel, chatID, text string)
 
 // Daemon holds state for the heartbeat daemon.
 type Daemon struct {
+	connPool    *ai.ConnectionPool
 	router      *ai.RouterClient
 	deliverFunc DeliverFunc
 }
 
 // NewDaemon creates a new heartbeat Daemon.
-func NewDaemon(router *ai.RouterClient, deliver DeliverFunc) *Daemon {
-	return &Daemon{router: router, deliverFunc: deliver}
+func NewDaemon(router *ai.RouterClient, connPool *ai.ConnectionPool, deliver DeliverFunc) *Daemon {
+	return &Daemon{router: router, connPool: connPool, deliverFunc: deliver}
 }
 
 // Start launches the heartbeat ticker. It blocks; call in a goroutine.
@@ -105,7 +106,7 @@ func (d *Daemon) tick(ctx context.Context) {
 						defer reflectionRunning.Delete(uid)
 						refCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 						defer cancel()
-						if err := RunReflection(refCtx, uid, tz, d.router); err != nil {
+						if err := RunReflection(refCtx, uid, tz, d.connPool.Resolve(refCtx, uid, "AHV-Holding").CreateClient()); err != nil {
 							log.Printf("[heartbeat] reflection error for %s: %v", uid, err)
 						} else {
 							log.Printf("[heartbeat] reflection complete for %s", uid)
@@ -127,7 +128,7 @@ func (d *Daemon) tick(ctx context.Context) {
 						// Uses context.Background() intentionally: consolidation should finish even on daemon shutdown
 						cogCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 						defer cancel()
-						if run, err := cognitive.RunConsolidation(cogCtx, d.router, uid); err != nil {
+						if run, err := cognitive.RunConsolidation(cogCtx, d.connPool.Resolve(cogCtx, uid, "AHV-Holding").CreateClient(), uid); err != nil {
 						log.Printf("[heartbeat] consolidation error for %s: %v", uid, err)
 					} else if run != nil {
 							log.Printf("[heartbeat] consolidation complete for %s: scanned=%d merged=%d pruned=%d crossrefs=%d",
@@ -155,7 +156,7 @@ func (d *Daemon) tick(ctx context.Context) {
 							defer reflectionRunning.Delete(uid)
 							refCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 							defer cancel()
-							if err := RunReflection(refCtx, uid, tz, d.router); err != nil {
+							if err := RunReflection(refCtx, uid, tz, d.connPool.Resolve(refCtx, uid, "AHV-Holding").CreateClient()); err != nil {
 								log.Printf("[heartbeat] catch-up reflection error for %s: %v", uid, err)
 							} else {
 								log.Printf("[heartbeat] catch-up reflection complete for %s", uid)
@@ -181,7 +182,7 @@ func (d *Daemon) tick(ctx context.Context) {
 							defer consolidationRunning.Delete(uid)
 							cogCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 							defer cancel()
-							if run, err := cognitive.RunConsolidation(cogCtx, d.router, uid); err != nil {
+							if run, err := cognitive.RunConsolidation(cogCtx, d.connPool.Resolve(cogCtx, uid, "AHV-Holding").CreateClient(), uid); err != nil {
 								log.Printf("[heartbeat] catch-up consolidation error for %s: %v", uid, err)
 							} else if run != nil {
 								log.Printf("[heartbeat] catch-up consolidation for %s: scanned=%d merged=%d",
@@ -303,6 +304,9 @@ func (d *Daemon) runForUser(cfg HeartbeatConfig) {
 		cfg.UserID).Scan(&fallbackModels)
 
 	// Check for stuck goals before building prompt (loop breaker)
+	hbResolved := d.connPool.Resolve(ctx, userID, model)
+	hbRouter := hbResolved.CreateClient()
+
 	stuckCount := CheckAndSkipStuckGoals(ctx, cfg.UserID)
 	if stuckCount > 0 {
 		log.Printf("[heartbeat] loop_breaker marked %d stuck goals for user %s", stuckCount, cfg.UserID)
@@ -323,7 +327,7 @@ func (d *Daemon) runForUser(cfg HeartbeatConfig) {
 			if topGoal.Description != nil {
 				desc = *topGoal.Description
 			}
-			newPlan, createErr := CreatePlan(ctx, cfg.UserID, topGoal.ID, topGoal.Title, desc, d.router)
+			newPlan, createErr := CreatePlan(ctx, cfg.UserID, topGoal.ID, topGoal.Title, desc, hbRouter)
 			if createErr != nil {
 				log.Printf("[heartbeat] failed to create plan for goal %s: %v", topGoal.Title, createErr)
 			} else {
@@ -358,8 +362,8 @@ func (d *Daemon) runForUser(cfg HeartbeatConfig) {
 	var actionCount int
 
 	result, err := engine.ProcessChat(ctx, engine.ChatConfig{
-		AIRouter:       d.router,
-		Model:          model,
+		AIRouter:       hbRouter,
+		Model:          hbResolved.Model,
 		FallbackModels: fallbackModels,
 		Messages:       messages,
 		Tools:          safeAITools,

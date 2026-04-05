@@ -24,6 +24,7 @@ import (
 )
 
 var Router *ai.RouterClient
+var ConnPool *ai.ConnectionPool
 
 func WSUpgrade() fiber.Handler {
 	return func(c *fiber.Ctx) error {
@@ -374,10 +375,16 @@ always confirm with the user first.
 		fallbackStr = *userFallback
 	}
 
-	// Use shared engine for AI loop
+	// Resolve per-user AI connection (falls back to default Router if none found)
+	resolved := ConnPool.Resolve(ctx, userID, req.Model)
+	activeRouter := resolved.CreateClient()
+
+	// Use per-user connection for AI loop
 	result, err := engine.ProcessChat(ctx, engine.ChatConfig{
-		AIRouter:         Router,
-		Model:            req.Model,
+		AIRouter:         activeRouter,
+		APIFormat:        resolved.APIFormat,
+		ConnectionID:     resolved.ConnectionID,
+		Model:            resolved.Model,
 		FallbackModels:   fallbackStr,
 		Messages:         messages,
 		Tools:            toolsForRoleAsAI(role),
