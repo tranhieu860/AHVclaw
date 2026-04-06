@@ -13,7 +13,6 @@ let authToken = "";
 let refreshToken = "";
 
 // Track handed-over tabs: chrome tabId -> { url, title }
-// Needed so tab_revoke can send URL even when tab object is unavailable (onRemoved).
 const handedOverTabs = new Map();
 
 // Pending handover confirmations: chrome tabId -> { resolve }
@@ -102,18 +101,23 @@ function connectHelper() {
                 chrome.storage.local.set({ helperStatus });
                 break;
             case "public_key":
-                // Helper generated keypair — register with server
                 registerGrant(msg.public_key, msg.device_id);
                 break;
             case "handover_accepted":
-                console.log("[bg] tab handover accepted:", msg.targetId, "chromeTab:", msg.chromeTabId);
+                // Helper resolved the mapping — track it
+                if (msg.chromeTabId != null) {
+                    console.log("[bg] handover accepted: chrome:" + msg.chromeTabId + " -> cdp:" + msg.targetId);
+                }
                 break;
             case "handover_rejected":
-                console.log("[bg] tab handover rejected:", msg.error);
-                // Remove from group if handover failed
+                console.log("[bg] handover rejected:", msg.error);
                 if (msg.chromeTabId) {
                     try { chrome.tabs.ungroup(parseInt(msg.chromeTabId, 10)); } catch {}
                 }
+                break;
+            case "tab_created":
+                // Helper created a tab via CDP — find it and group it
+                groupHelperCreatedTab(msg.targetId, msg.url);
                 break;
             case "retry_cdp_result":
                 console.log("[bg] CDP retry:", msg.success ? "OK" : msg.error);
@@ -133,7 +137,6 @@ function connectHelper() {
         chrome.storage.local.set({ helperStatus });
     });
 
-    // Request initial status
     requestHelperStatus();
 }
 
@@ -155,6 +158,77 @@ function sendToHelper(msg) {
 
 function requestHelperStatus() {
     sendToHelper({ type: "get_status" });
+}
+
+// ─── Helper-Created Tab Grouping ────────────────────────────────────────
+
+// When helper creates a tab via CDP, the tab exists in Chrome but is NOT
+// in the AHVclaw group. Find it by URL and move it into the group.
+// Then send tab_grouped back so helper has the chromeTabId <-> targetId mapping.
+async function groupHelperCreatedTab(targetId, url) {
+    try {
+        // Ensure AHVclaw group exists
+        await ensureAHVclawGroup();
+
+        // Find Chrome tab by URL (just created, should be unique or most recent)
+        const tabs = await chrome.tabs.query({ url: url });
+        if (tabs.length === 0) {
+            // about:blank or restricted URL — try broader query
+            const allTabs = await chrome.tabs.query({});
+            const match = allTabs.find(t => t.url === url || (url === "about:blank" && t.url === "chrome://newtab/"));
+            if (!match) {
+                console.warn("[bg] tab_created: cannot find Chrome tab for", url);
+                return;
+            }
+            tabs.push(match);
+        }
+
+        // Pick the most recently created tab (last in array, highest id)
+        const tab = tabs.reduce((a, b) => a.id > b.id ? a : b);
+
+        // Move tab into AHVclaw group
+        await chrome.tabs.group({ tabIds: [tab.id], groupId: ahvclawGroupId });
+
+        // Track it locally
+        handedOverTabs.set(tab.id, { url: url, title: tab.title });
+
+        // Tell helper the chromeTabId <-> targetId mapping
+        sendToHelper({
+            type: "tab_grouped",
+            targetId: targetId,
+            chromeTabId: tab.id,
+        });
+
+        console.log("[bg] grouped helper-created tab: chrome:" + tab.id + " -> cdp:" + targetId);
+    } catch (err) {
+        console.error("[bg] groupHelperCreatedTab error:", err);
+    }
+}
+
+async function ensureAHVclawGroup() {
+    if (ahvclawGroupId != null) {
+        // Verify group still exists
+        try {
+            await chrome.tabGroups.get(ahvclawGroupId);
+            return;
+        } catch {
+            ahvclawGroupId = null;
+        }
+    }
+
+    // Try to find existing group
+    const groups = await chrome.tabGroups.query({ title: GROUP_TITLE });
+    if (groups.length > 0) {
+        ahvclawGroupId = groups[0].id;
+        return;
+    }
+
+    // Create new group with a placeholder tab, then set title
+    const placeholderTab = await chrome.tabs.create({ url: "about:blank", active: false });
+    ahvclawGroupId = await chrome.tabs.group({ tabIds: [placeholderTab.id] });
+    await chrome.tabGroups.update(ahvclawGroupId, { title: GROUP_TITLE, color: "cyan" });
+    // Remove placeholder — the actual tab will be grouped right after
+    await chrome.tabs.remove(placeholderTab.id);
 }
 
 // ─── Grant Registration ─────────────────────────────────────────────────
@@ -201,10 +275,12 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     if (changeInfo.groupId === undefined) return;
 
     if (changeInfo.groupId === ahvclawGroupId && ahvclawGroupId !== null) {
+        // Skip if this tab was just grouped by us (helper-created)
+        if (handedOverTabs.has(tabId)) return;
+
         // Tab moved INTO group — prompt handover consent
         const confirmed = await showHandoverConfirm(tab);
         if (confirmed) {
-            // Track this tab for future revoke (URL needed by helper)
             handedOverTabs.set(tabId, { url: tab.url, title: tab.title });
             sendToHelper({
                 type: "tab_handover",
@@ -213,29 +289,26 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
                 title: tab.title,
             });
         } else {
-            // User declined — remove from group
             try { chrome.tabs.ungroup(tabId); } catch {}
         }
     } else if (ahvclawGroupId !== null && changeInfo.groupId !== ahvclawGroupId) {
-        // Tab moved OUT of group — notify helper to revoke with URL
-        const tracked = handedOverTabs.get(tabId);
-        sendToHelper({
-            type: "tab_revoke",
-            tabId: tabId,
-            url: tracked ? tracked.url : tab.url,
-        });
-        handedOverTabs.delete(tabId);
+        // Tab moved OUT of group — revoke by stable chromeTabId
+        if (handedOverTabs.has(tabId)) {
+            sendToHelper({
+                type: "tab_revoke",
+                tabId: tabId,
+            });
+            handedOverTabs.delete(tabId);
+        }
     }
 });
 
-// Detect tab closed — revoke with tracked URL
+// Detect tab closed — revoke by stable chromeTabId
 chrome.tabs.onRemoved.addListener((tabId) => {
-    const tracked = handedOverTabs.get(tabId);
-    if (tracked) {
+    if (handedOverTabs.has(tabId)) {
         sendToHelper({
             type: "tab_revoke",
             tabId: tabId,
-            url: tracked.url,
         });
         handedOverTabs.delete(tabId);
     }
@@ -261,7 +334,6 @@ function showHandoverConfirm(tab) {
         });
         const confirmUrl = chrome.runtime.getURL(`confirm.html?${params.toString()}`);
 
-        // Store pending resolve
         pendingConfirms.set(tab.id, { resolve });
 
         chrome.windows.create({
@@ -272,7 +344,6 @@ function showHandoverConfirm(tab) {
             focused: true,
         }, (win) => {
             if (!win) {
-                // Failed to create window — deny by default (fail-closed)
                 pendingConfirms.delete(tab.id);
                 resolve(false);
             }
@@ -288,7 +359,7 @@ function showHandoverConfirm(tab) {
     });
 }
 
-// ─── Kill Switch (from popup) ───────────────────────────────────────────
+// ─── Internal Messages ──────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === "handover_confirm_result") {
@@ -321,7 +392,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         serverRevoke();
         sendResponse({ ok: true });
     }
-    return true; // async response
+    return true;
 });
 
 async function serverKill() {

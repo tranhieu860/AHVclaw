@@ -1,11 +1,33 @@
 // /opt/ahvclaw/helper/src/tab-manager.js
 // Tab group "AHVclaw" manager with ownership tracking.
+// Maintains bidirectional chromeTabId <-> CDP targetId mapping for stable identity.
 const CDP = require("chrome-remote-interface");
 
 class TabManager {
     constructor(cdpManager) {
         this.cdp = cdpManager;
-        this.ownedTabs = new Map(); // targetId -> { type, url_at_transfer, created_at, frozen? }
+        this.ownedTabs = new Map(); // targetId -> { type, url_at_transfer, created_at, frozen?, chromeTabId? }
+        // Bidirectional map: chromeTabId <-> CDP targetId
+        this.chromeToTarget = new Map(); // chromeTabId (number) -> targetId (string)
+        this.targetToChrome = new Map(); // targetId (string) -> chromeTabId (number)
+    }
+
+    // Store bidirectional mapping
+    linkIds(chromeTabId, targetId) {
+        this.chromeToTarget.set(chromeTabId, targetId);
+        this.targetToChrome.set(targetId, chromeTabId);
+        const info = this.ownedTabs.get(targetId);
+        if (info) info.chromeTabId = chromeTabId;
+    }
+
+    // Lookup targetId from chromeTabId
+    getTargetId(chromeTabId) {
+        return this.chromeToTarget.get(chromeTabId) || null;
+    }
+
+    // Lookup chromeTabId from targetId
+    getChromeTabId(targetId) {
+        return this.targetToChrome.get(targetId) || null;
     }
 
     async createTab(url) {
@@ -13,7 +35,6 @@ class TabManager {
             throw new Error("Max 5 tabs in AHVclaw group");
         }
 
-        const targets = await this.cdp.getTargets();
         const browser = await CDP({ port: this.cdp.port });
         const { targetId } = await browser.Target.createTarget({
             url: url || "about:blank",
@@ -31,13 +52,17 @@ class TabManager {
         return targetId;
     }
 
-    addTransferredTab(targetId, url) {
+    addTransferredTab(targetId, url, chromeTabId) {
         this.ownedTabs.set(targetId, {
             type: "user-transferred",
             url_at_transfer: url,
             created_at: new Date(),
+            chromeTabId: chromeTabId,
         });
-        console.log(`[tab] user transferred tab ${targetId} (${url})`);
+        if (chromeTabId != null) {
+            this.linkIds(chromeTabId, targetId);
+        }
+        console.log(`[tab] user transferred tab ${targetId} (chrome:${chromeTabId}, ${url})`);
     }
 
     isOwned(targetId) {
@@ -56,9 +81,24 @@ class TabManager {
         if (info) {
             this.ownedTabs.delete(targetId);
             this.cdp.detachTarget(targetId);
+            // Clean up bidirectional map
+            const chromeId = this.targetToChrome.get(targetId);
+            if (chromeId != null) {
+                this.chromeToTarget.delete(chromeId);
+                this.targetToChrome.delete(targetId);
+            }
             console.log(`[tab] revoked tab ${targetId}`);
         }
         return info;
+    }
+
+    // Revoke by chromeTabId — stable identity, no URL ambiguity
+    revokeByChomeTabId(chromeTabId) {
+        const targetId = this.chromeToTarget.get(chromeTabId);
+        if (targetId) {
+            return this.revokeTab(targetId);
+        }
+        return null;
     }
 
     freezeTab(targetId) {
@@ -75,6 +115,8 @@ class TabManager {
             this.cdp.detachTarget(id);
         }
         this.ownedTabs.clear();
+        this.chromeToTarget.clear();
+        this.targetToChrome.clear();
         console.log("[tab] revoked all tabs");
     }
 
@@ -91,6 +133,12 @@ class TabManager {
                 await browser.Target.closeTarget({ targetId: id });
                 await browser.close();
             } catch {}
+            // Clean up maps
+            const chromeId = this.targetToChrome.get(id);
+            if (chromeId != null) {
+                this.chromeToTarget.delete(chromeId);
+                this.targetToChrome.delete(id);
+            }
             this.ownedTabs.delete(id);
         }
     }
@@ -105,6 +153,7 @@ class TabManager {
                 title: t.title,
                 owned: this.ownedTabs.has(t.id),
                 type: this.ownedTabs.get(t.id)?.type || null,
+                chromeTabId: this.targetToChrome.get(t.id) || null,
             }));
     }
 }

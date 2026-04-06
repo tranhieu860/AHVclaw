@@ -129,50 +129,80 @@ async function main() {
         });
     });
 
+    // Tab handover: extension sends chromeTabId + URL + title.
+    // Helper resolves to CDP target. If multiple targets share the same URL,
+    // disambiguate by title. If still ambiguous, reject (fail-closed).
     nativeMsg.onMessage("tab_handover", async (msg) => {
         if (!msg.url) {
             nativeMsg.send({ type: "handover_rejected", error: "url required" });
             return;
         }
-        // Resolve Chrome tab -> CDP target by URL matching
         try {
             const targets = await cdp.getTargets();
-            const match = targets.find(t => t.type === "page" && t.url === msg.url);
-            if (!match) {
+            let matches = targets.filter(t => t.type === "page" && t.url === msg.url);
+
+            // Disambiguate by title if multiple matches
+            if (matches.length > 1 && msg.title) {
+                const titleMatches = matches.filter(t => t.title === msg.title);
+                if (titleMatches.length > 0) {
+                    matches = titleMatches;
+                }
+            }
+
+            if (matches.length === 0) {
                 nativeMsg.send({ type: "handover_rejected", error: "no CDP target for URL: " + msg.url });
                 return;
             }
-            tabManager.addTransferredTab(match.id, msg.url);
-            await cdp.attachToTarget(match.id);
-            nativeMsg.send({ type: "handover_accepted", targetId: match.id, chromeTabId: msg.tabId });
-            console.log();
+            if (matches.length > 1) {
+                nativeMsg.send({ type: "handover_rejected", error: "ambiguous: " + matches.length + " tabs with same URL+title, cannot resolve safely" });
+                return;
+            }
+
+            const target = matches[0];
+            const chromeTabId = msg.tabId != null ? Number(msg.tabId) : null;
+
+            tabManager.addTransferredTab(target.id, msg.url, chromeTabId);
+            await cdp.attachToTarget(target.id);
+
+            nativeMsg.send({
+                type: "handover_accepted",
+                targetId: target.id,
+                chromeTabId: chromeTabId,
+            });
+            console.log(`[native-messaging] handover: chrome:${chromeTabId} -> cdp:${target.id} (${msg.url})`);
         } catch (err) {
             console.error("[native-messaging] handover error:", err.message);
             nativeMsg.send({ type: "handover_rejected", error: err.message });
         }
     });
 
-    nativeMsg.onMessage("tab_revoke", async (msg) => {
-        // Extension says tab left AHVclaw group — find and revoke by chrome tabId or URL
-        // Try to find owned tab matching this chrome tab
-        if (msg.url) {
-            for (const [targetId, info] of tabManager.ownedTabs) {
-                if (info.url_at_transfer === msg.url) {
-                    tabManager.revokeTab(targetId);
-                    console.log();
-                    break;
-                }
+    // Tab revoke: use stable chromeTabId -> targetId mapping (not URL).
+    nativeMsg.onMessage("tab_revoke", (msg) => {
+        const chromeTabId = msg.tabId != null ? Number(msg.tabId) : null;
+        if (chromeTabId != null) {
+            const info = tabManager.revokeByChomeTabId(chromeTabId);
+            if (info) {
+                console.log(`[native-messaging] tab_revoke: chrome:${chromeTabId} revoked`);
+                return;
             }
         }
-        // Also try by targetId if extension somehow knows it
-        if (msg.targetId && tabManager.ownedTabs.has(msg.targetId)) {
-            tabManager.revokeTab(msg.targetId);
-        }
+        // Fallback: if somehow no mapping, log warning
+        console.warn(`[native-messaging] tab_revoke: no mapping for chrome:${chromeTabId}`);
     });
 
     nativeMsg.onMessage("revoke_all", () => {
         tabManager.revokeAll();
         console.log("[native-messaging] revoke_all: AHVclaw group deleted");
+    });
+
+    // Extension confirms a helper-created tab was grouped.
+    // Now we have the chromeTabId <-> targetId mapping.
+    nativeMsg.onMessage("tab_grouped", (msg) => {
+        const { targetId, chromeTabId } = msg;
+        if (targetId && chromeTabId != null) {
+            tabManager.linkIds(Number(chromeTabId), targetId);
+            console.log(`[native-messaging] tab_grouped: chrome:${chromeTabId} <-> cdp:${targetId}`);
+        }
     });
 
     nativeMsg.onMessage("kill", () => {
@@ -206,6 +236,19 @@ async function main() {
             nativeMsg.send({ type: "retry_cdp_result", success: false, error: err.message });
         }
     });
+
+    // Hook: after helper creates a tab via command, tell extension to group it
+    const origCreateTab = tabManager.createTab.bind(tabManager);
+    tabManager.createTab = async function (url) {
+        const targetId = await origCreateTab(url);
+        // Ask extension to find this tab and move it into AHVclaw group
+        nativeMsg.send({
+            type: "tab_created",
+            targetId: targetId,
+            url: url || "about:blank",
+        });
+        return targetId;
+    };
 
     // FAIL-CLOSED: connect to Chrome FIRST. Only go online if CDP succeeds.
     try {
