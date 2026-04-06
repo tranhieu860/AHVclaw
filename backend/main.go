@@ -542,6 +542,12 @@ func main() {
 	// Computer Use
 	protected.Get("/computer-use/status", handlers.ComputerUseStatus)
 
+	// Browser Companion
+	protected.Post("/companion/grant", handlers.CompanionGrant())
+	protected.Post("/companion/revoke", handlers.CompanionRevoke())
+	protected.Post("/companion/kill", handlers.CompanionKill())
+	protected.Post("/companion/audit", handlers.CompanionAuditLog())
+
 	// Goals
 	protected.Get("/goals", handlers.ListGoals)
 	protected.Post("/goals", handlers.CreateGoal)
