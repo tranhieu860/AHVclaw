@@ -1,5 +1,6 @@
 // /opt/ahvclaw/helper/src/index.js
 // AHVclaw Browser Companion Native Helper — entry point with lifecycle.
+// FAIL-CLOSED: helper does NOT go online (no WS hello) unless CDP is connected.
 const WSClient = require("./ws-client");
 const CDPManager = require("./cdp-manager");
 const TabManager = require("./tab-manager");
@@ -48,6 +49,7 @@ async function main() {
     });
 
     let killing = false;
+    let cdpReady = false;
 
     async function killSwitch() {
         if (killing) return;
@@ -65,7 +67,7 @@ async function main() {
         await tabManager.closeHelperTabs();
 
         console.log("[kill] step 5: exit");
-        ws.close();
+        if (ws) ws.close();
         process.exit(0);
     }
 
@@ -77,36 +79,40 @@ async function main() {
         }, 5000);
     }
 
-    const ws = new WSClient(SERVER_URL, {
-        token: TOKEN,
-        onCommand: (cmd) => executor.execute(cmd, ws),
-        onKill: killWithTimeout,
-        onConnected: () => {
-            // Send signed hello with real user_id
-            const nonce = crypto.randomBytes(16).toString("hex");
-            const payloadObj = {
-                user_id: USER_ID,
-                device_id: keypair.deviceId,
-                helper_version: "1.0.0",
-                timestamp: new Date().toISOString(),
-                nonce: nonce,
-            };
-            const payloadStr = JSON.stringify(payloadObj);
-            const signature = keypair.sign(payloadStr);
+    let ws = null;
 
-            ws.sendHello({
-                type: "helper_hello",
-                user_id: USER_ID,
-                device_id: keypair.deviceId,
-                helper_version: "1.0.0",
-                signature: signature,
-                signed_payload: Buffer.from(payloadStr).toString("base64"),
-            });
-        },
-        onSessionEstablished: (sessionId) => {
-            executor.auth.sessionId = sessionId;
-        },
-    });
+    function createWSClient() {
+        return new WSClient(SERVER_URL, {
+            token: TOKEN,
+            onCommand: (cmd) => executor.execute(cmd, ws),
+            onKill: killWithTimeout,
+            onConnected: () => {
+                // Send signed hello with real user_id
+                const nonce = crypto.randomBytes(16).toString("hex");
+                const payloadObj = {
+                    user_id: USER_ID,
+                    device_id: keypair.deviceId,
+                    helper_version: "1.0.0",
+                    timestamp: new Date().toISOString(),
+                    nonce: nonce,
+                };
+                const payloadStr = JSON.stringify(payloadObj);
+                const signature = keypair.sign(payloadStr);
+
+                ws.sendHello({
+                    type: "helper_hello",
+                    user_id: USER_ID,
+                    device_id: keypair.deviceId,
+                    helper_version: "1.0.0",
+                    signature: signature,
+                    signed_payload: Buffer.from(payloadStr).toString("base64"),
+                });
+            },
+            onSessionEstablished: (sessionId) => {
+                executor.auth.sessionId = sessionId;
+            },
+        });
+    }
 
     // Native Messaging handlers (extension communication)
     const nativeMsg = new NativeMessaging();
@@ -114,9 +120,9 @@ async function main() {
     nativeMsg.onMessage("get_status", () => {
         nativeMsg.send({
             type: "status",
-            connected: ws.ws && ws.ws.readyState === 1,
-            sessionId: ws.sessionId,
-            cdpConnected: cdp.port !== null,
+            connected: ws && ws.ws && ws.ws.readyState === 1,
+            sessionId: ws ? ws.sessionId : null,
+            cdpConnected: cdpReady,
             ownedTabs: tabManager.ownedTabs.size,
         });
     });
@@ -143,17 +149,44 @@ async function main() {
         });
     });
 
-    // Connect to Chrome
+    // Extension can trigger a CDP retry (e.g. after user restarts Chrome)
+    nativeMsg.onMessage("retry_cdp", async () => {
+        if (cdpReady) {
+            nativeMsg.send({ type: "retry_cdp_result", success: true, reason: "already_connected" });
+            return;
+        }
+        try {
+            await cdp.connect();
+            cdpReady = true;
+            console.log("[cdp] retry succeeded, connecting to server");
+            nativeMsg.send({ type: "retry_cdp_result", success: true });
+            // NOW go online
+            ws = createWSClient();
+            ws.connect();
+        } catch (err) {
+            console.error("[cdp] retry failed:", err.message);
+            nativeMsg.send({ type: "retry_cdp_result", success: false, error: err.message });
+        }
+    });
+
+    // FAIL-CLOSED: connect to Chrome FIRST. Only go online if CDP succeeds.
     try {
         await cdp.connect();
+        cdpReady = true;
+        console.log("[cdp] browser connected, going online");
     } catch (err) {
         console.error("[cdp] failed to connect:", err.message);
+        console.log("[helper] OFFLINE — waiting for extension retry_cdp or Chrome restart");
+        // Do NOT call ws.connect(). Helper stays offline.
+        // Extension can send "retry_cdp" via Native Messaging after user restarts Chrome.
     }
 
-    // Connect to server
-    ws.connect();
+    if (cdpReady) {
+        ws = createWSClient();
+        ws.connect();
+    }
 
-    // Start native messaging listener (for extension communication)
+    // Start native messaging listener (always, even without CDP — extension needs status)
     if (process.stdin.isTTY === undefined) {
         nativeMsg.start();
     }
@@ -162,7 +195,7 @@ async function main() {
     process.on("SIGTERM", killWithTimeout);
     process.on("SIGINT", killWithTimeout);
 
-    console.log(`[helper] AHVclaw Browser Companion started for user ${USER_ID}`);
+    console.log(`[helper] AHVclaw Browser Companion started for user ${USER_ID} (CDP: ${cdpReady ? "ONLINE" : "OFFLINE"})`);
 }
 
 main().catch(err => {
