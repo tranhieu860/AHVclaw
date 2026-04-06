@@ -12,6 +12,13 @@ let helperStatus = { connected: false, cdpConnected: false, sessionId: null, own
 let authToken = "";
 let refreshToken = "";
 
+// Track handed-over tabs: chrome tabId -> { url, title }
+// Needed so tab_revoke can send URL even when tab object is unavailable (onRemoved).
+const handedOverTabs = new Map();
+
+// Pending handover confirmations: chrome tabId -> { resolve }
+const pendingConfirms = new Map();
+
 // ─── Initialization ─────────────────────────────────────────────────────
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -49,6 +56,26 @@ chrome.storage.onChanged.addListener((changes, area) => {
     }
 });
 
+// ─── Authenticated Fetch (with 401 auto-refresh) ────────────────────────
+
+async function authFetch(url, options = {}) {
+    if (!authToken) throw new Error("no auth token");
+    options.headers = { ...options.headers, "Authorization": `Bearer ${authToken}` };
+
+    let res = await fetch(url, options);
+
+    if (res.status === 401) {
+        const refreshed = await tryRefreshToken();
+        if (refreshed) {
+            // Retry with new token
+            options.headers["Authorization"] = `Bearer ${authToken}`;
+            res = await fetch(url, options);
+        }
+    }
+
+    return res;
+}
+
 // ─── Native Messaging ───────────────────────────────────────────────────
 
 function connectHelper() {
@@ -79,7 +106,14 @@ function connectHelper() {
                 registerGrant(msg.public_key, msg.device_id);
                 break;
             case "handover_accepted":
-                console.log("[bg] tab handover accepted:", msg.targetId);
+                console.log("[bg] tab handover accepted:", msg.targetId, "chromeTab:", msg.chromeTabId);
+                break;
+            case "handover_rejected":
+                console.log("[bg] tab handover rejected:", msg.error);
+                // Remove from group if handover failed
+                if (msg.chromeTabId) {
+                    try { chrome.tabs.ungroup(parseInt(msg.chromeTabId, 10)); } catch {}
+                }
                 break;
             case "retry_cdp_result":
                 console.log("[bg] CDP retry:", msg.success ? "OK" : msg.error);
@@ -128,12 +162,9 @@ function requestHelperStatus() {
 async function registerGrant(publicKey, deviceId) {
     if (!authToken) return;
     try {
-        const res = await fetch(`${API_BASE}/api/companion/grant`, {
+        const res = await authFetch(`${API_BASE}/api/companion/grant`, {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${authToken}`,
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ device_id: deviceId, public_key: publicKey }),
         });
         if (!res.ok) {
@@ -173,9 +204,11 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
         // Tab moved INTO group — prompt handover consent
         const confirmed = await showHandoverConfirm(tab);
         if (confirmed) {
+            // Track this tab for future revoke (URL needed by helper)
+            handedOverTabs.set(tabId, { url: tab.url, title: tab.title });
             sendToHelper({
                 type: "tab_handover",
-                targetId: String(tabId),
+                tabId: tabId,
                 url: tab.url,
                 title: tab.title,
             });
@@ -184,45 +217,91 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
             try { chrome.tabs.ungroup(tabId); } catch {}
         }
     } else if (ahvclawGroupId !== null && changeInfo.groupId !== ahvclawGroupId) {
-        // Tab moved OUT of group — notify helper to revoke
+        // Tab moved OUT of group — notify helper to revoke with URL
+        const tracked = handedOverTabs.get(tabId);
         sendToHelper({
             type: "tab_revoke",
-            targetId: String(tabId),
+            tabId: tabId,
+            url: tracked ? tracked.url : tab.url,
         });
+        handedOverTabs.delete(tabId);
     }
 });
 
-// Detect tab closed
+// Detect tab closed — revoke with tracked URL
 chrome.tabs.onRemoved.addListener((tabId) => {
-    sendToHelper({
-        type: "tab_revoke",
-        targetId: String(tabId),
-    });
+    const tracked = handedOverTabs.get(tabId);
+    if (tracked) {
+        sendToHelper({
+            type: "tab_revoke",
+            tabId: tabId,
+            url: tracked.url,
+        });
+        handedOverTabs.delete(tabId);
+    }
 });
 
 // Detect group deleted
 chrome.tabGroups.onRemoved.addListener((group) => {
     if (group.id === ahvclawGroupId) {
         ahvclawGroupId = null;
+        handedOverTabs.clear();
         sendToHelper({ type: "revoke_all" });
     }
 });
 
-async function showHandoverConfirm(tab) {
-    // Use simple notification approach — V2 could use a dedicated confirm dialog
-    const title = tab.title || tab.url || "tab";
-    // For V1, auto-confirm if tab is in AHVclaw group (user explicitly dragged it)
-    // The act of dragging into the named group IS the consent gesture.
-    console.log(`[bg] tab handover: ${title}`);
-    return true;
+// ─── Handover Confirm Dialog ────────────────────────────────────────────
+
+function showHandoverConfirm(tab) {
+    return new Promise((resolve) => {
+        const params = new URLSearchParams({
+            tabId: String(tab.id),
+            title: tab.title || "",
+            url: tab.url || "",
+        });
+        const confirmUrl = chrome.runtime.getURL(`confirm.html?${params.toString()}`);
+
+        // Store pending resolve
+        pendingConfirms.set(tab.id, { resolve });
+
+        chrome.windows.create({
+            url: confirmUrl,
+            type: "popup",
+            width: 420,
+            height: 280,
+            focused: true,
+        }, (win) => {
+            if (!win) {
+                // Failed to create window — deny by default (fail-closed)
+                pendingConfirms.delete(tab.id);
+                resolve(false);
+            }
+        });
+
+        // Timeout after 30s — auto-deny (fail-closed)
+        setTimeout(() => {
+            if (pendingConfirms.has(tab.id)) {
+                pendingConfirms.delete(tab.id);
+                resolve(false);
+            }
+        }, 30000);
+    });
 }
 
 // ─── Kill Switch (from popup) ───────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.type === "handover_confirm_result") {
+        const pending = pendingConfirms.get(msg.tabId);
+        if (pending) {
+            pending.resolve(msg.confirmed === true);
+            pendingConfirms.delete(msg.tabId);
+        }
+        sendResponse({ ok: true });
+        return;
+    }
     if (msg.type === "kill_switch") {
         sendToHelper({ type: "kill" });
-        // Also call server kill endpoint
         serverKill();
         sendResponse({ ok: true });
     }
@@ -248,10 +327,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 async function serverKill() {
     if (!authToken) return;
     try {
-        await fetch(`${API_BASE}/api/companion/kill`, {
-            method: "POST",
-            headers: { "Authorization": `Bearer ${authToken}` },
-        });
+        await authFetch(`${API_BASE}/api/companion/kill`, { method: "POST" });
     } catch (err) {
         console.error("[bg] server kill error:", err);
     }
@@ -262,12 +338,9 @@ async function serverRevoke() {
     const data = await chrome.storage.local.get(["deviceId"]);
     if (!data.deviceId) return;
     try {
-        await fetch(`${API_BASE}/api/companion/revoke`, {
+        await authFetch(`${API_BASE}/api/companion/revoke`, {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${authToken}`,
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ device_id: data.deviceId }),
         });
         chrome.storage.local.set({ grantRegistered: false });

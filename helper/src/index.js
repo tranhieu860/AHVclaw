@@ -129,14 +129,50 @@ async function main() {
         });
     });
 
-    nativeMsg.onMessage("tab_handover", (msg) => {
-        if (msg.targetId && msg.url) {
-            tabManager.addTransferredTab(msg.targetId, msg.url);
-            cdp.attachToTarget(msg.targetId).catch(err => {
-                console.error("[native-messaging] attach error:", err.message);
-            });
-            nativeMsg.send({ type: "handover_accepted", targetId: msg.targetId });
+    nativeMsg.onMessage("tab_handover", async (msg) => {
+        if (!msg.url) {
+            nativeMsg.send({ type: "handover_rejected", error: "url required" });
+            return;
         }
+        // Resolve Chrome tab -> CDP target by URL matching
+        try {
+            const targets = await cdp.getTargets();
+            const match = targets.find(t => t.type === "page" && t.url === msg.url);
+            if (!match) {
+                nativeMsg.send({ type: "handover_rejected", error: "no CDP target for URL: " + msg.url });
+                return;
+            }
+            tabManager.addTransferredTab(match.id, msg.url);
+            await cdp.attachToTarget(match.id);
+            nativeMsg.send({ type: "handover_accepted", targetId: match.id, chromeTabId: msg.tabId });
+            console.log();
+        } catch (err) {
+            console.error("[native-messaging] handover error:", err.message);
+            nativeMsg.send({ type: "handover_rejected", error: err.message });
+        }
+    });
+
+    nativeMsg.onMessage("tab_revoke", async (msg) => {
+        // Extension says tab left AHVclaw group — find and revoke by chrome tabId or URL
+        // Try to find owned tab matching this chrome tab
+        if (msg.url) {
+            for (const [targetId, info] of tabManager.ownedTabs) {
+                if (info.url_at_transfer === msg.url) {
+                    tabManager.revokeTab(targetId);
+                    console.log();
+                    break;
+                }
+            }
+        }
+        // Also try by targetId if extension somehow knows it
+        if (msg.targetId && tabManager.ownedTabs.has(msg.targetId)) {
+            tabManager.revokeTab(msg.targetId);
+        }
+    });
+
+    nativeMsg.onMessage("revoke_all", () => {
+        tabManager.revokeAll();
+        console.log("[native-messaging] revoke_all: AHVclaw group deleted");
     });
 
     nativeMsg.onMessage("kill", () => {
