@@ -10,6 +10,7 @@ class WSClient {
         this.onCommand = options.onCommand || (() => {});
         this.onKill = options.onKill || (() => {});
         this.onConnected = options.onConnected || (() => {});
+        this.onSessionEstablished = options.onSessionEstablished || (() => {});
         this.ws = null;
         this.reconnectDelay = 3000;
         this.maxReconnectDelay = 30000;
@@ -35,6 +36,7 @@ class WSClient {
 
             if (msg.type === "hello_accepted") {
                 this.sessionId = msg.session_id;
+                this.onSessionEstablished(this.sessionId);
                 console.log(`[ws] session established: ${this.sessionId}, expires: ${msg.expires_at}`);
                 this.scheduleRenew(msg.expires_at);
                 return;
@@ -45,6 +47,7 @@ class WSClient {
             }
             if (msg.type === "renew_accepted") {
                 this.sessionId = msg.session_id;
+                this.onSessionEstablished(this.sessionId);
                 console.log(`[ws] session renewed, expires: ${msg.expires_at}`);
                 this.scheduleRenew(msg.expires_at);
                 return;

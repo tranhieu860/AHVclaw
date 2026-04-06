@@ -18,14 +18,34 @@ if (!TOKEN) {
     process.exit(1);
 }
 
+// Extract user_id from JWT payload (base64-decoded, no secret needed).
+function extractUserIdFromJWT(token) {
+    try {
+        const parts = token.split(".");
+        if (parts.length !== 3) return null;
+        const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+        return payload.sub || payload.user_id || null;
+    } catch {
+        return null;
+    }
+}
+
+const USER_ID = process.env.AHVCLAW_USER_ID || extractUserIdFromJWT(TOKEN);
+if (!USER_ID) {
+    console.error("Cannot determine user_id. Set AHVCLAW_USER_ID or use a valid JWT token.");
+    process.exit(1);
+}
+
 async function main() {
     const cdp = new CDPManager();
     const tabManager = new TabManager(cdp);
     const security = new Security();
-    const audit = new AuditLogger(TOKEN);
+    const audit = new AuditLogger(SERVER_URL, TOKEN);
     const keypair = await Keypair.loadOrGenerate();
-    const executor = new CommandExecutor(cdp, tabManager, security, audit);
-    const nativeMsg = new NativeMessaging();
+    const executor = new CommandExecutor(cdp, tabManager, security, audit, {
+        sessionId: null, // set after hello_accepted
+        userId: USER_ID,
+    });
 
     let killing = false;
 
@@ -62,10 +82,10 @@ async function main() {
         onCommand: (cmd) => executor.execute(cmd, ws),
         onKill: killWithTimeout,
         onConnected: () => {
-            // Send signed hello after WebSocket connects
+            // Send signed hello with real user_id
             const nonce = crypto.randomBytes(16).toString("hex");
             const payloadObj = {
-                user_id: "from_token", // server extracts from JWT
+                user_id: USER_ID,
                 device_id: keypair.deviceId,
                 helper_version: "1.0.0",
                 timestamp: new Date().toISOString(),
@@ -76,16 +96,21 @@ async function main() {
 
             ws.sendHello({
                 type: "helper_hello",
-                user_id: "from_token",
+                user_id: USER_ID,
                 device_id: keypair.deviceId,
                 helper_version: "1.0.0",
                 signature: signature,
                 signed_payload: Buffer.from(payloadStr).toString("base64"),
             });
         },
+        onSessionEstablished: (sessionId) => {
+            executor.auth.sessionId = sessionId;
+        },
     });
 
     // Native Messaging handlers (extension communication)
+    const nativeMsg = new NativeMessaging();
+
     nativeMsg.onMessage("get_status", () => {
         nativeMsg.send({
             type: "status",
@@ -111,7 +136,6 @@ async function main() {
     });
 
     nativeMsg.onMessage("generate_keypair", () => {
-        // Keypair already loaded/generated at startup
         nativeMsg.send({
             type: "public_key",
             public_key: keypair.publicKeyPEM,
@@ -124,7 +148,6 @@ async function main() {
         await cdp.connect();
     } catch (err) {
         console.error("[cdp] failed to connect:", err.message);
-        // Continue running — server gets companion_unavailable via status
     }
 
     // Connect to server
@@ -132,7 +155,6 @@ async function main() {
 
     // Start native messaging listener (for extension communication)
     if (process.stdin.isTTY === undefined) {
-        // Only start if stdin is piped (running via Native Messaging)
         nativeMsg.start();
     }
 
@@ -140,7 +162,7 @@ async function main() {
     process.on("SIGTERM", killWithTimeout);
     process.on("SIGINT", killWithTimeout);
 
-    console.log("[helper] AHVclaw Browser Companion started");
+    console.log(`[helper] AHVclaw Browser Companion started for user ${USER_ID}`);
 }
 
 main().catch(err => {

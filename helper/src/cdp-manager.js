@@ -1,7 +1,11 @@
 // /opt/ahvclaw/helper/src/cdp-manager.js
-// CDP connection manager: Chrome detection, launch, and target management.
+// CDP connection manager — spec A+ strategy:
+//   1. State file (previous port) → try connect
+//   2. Chrome running without debug → FAIL CLOSED, ask user to restart
+//   3. Chrome not running → launch with random port, bind 127.0.0.1 only
+//   NEVER self-restart a running Chrome. NEVER scan port ranges.
 const CDP = require("chrome-remote-interface");
-const { spawn } = require("child_process");
+const { execSync, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
@@ -14,41 +18,68 @@ class CDPManager {
     }
 
     async connect() {
-        // Try to find Chrome with debug port already open
-        this.port = await this.findDebugPort();
-
-        if (!this.port) {
-            // Chrome not running with debug port — try to launch
-            const launched = await this.launchChrome();
-            if (!launched) {
-                throw new Error("Cannot connect to Chrome. Please restart Chrome from AHVclaw shortcut.");
-            }
+        // Step 1: Try state file (previous session port)
+        const statePort = this.readStatePort();
+        if (statePort) {
+            try {
+                const version = await CDP.Version({ port: statePort });
+                if (version) {
+                    this.port = statePort;
+                    console.log(`[cdp] connected via state file to Chrome ${version["Browser"]} on port ${this.port}`);
+                    return true;
+                }
+            } catch {}
         }
 
-        const version = await CDP.Version({ port: this.port });
-        console.log(`[cdp] connected to Chrome ${version["Browser"]} on port ${this.port}`);
+        // Step 2: Is Chrome running?
+        const chromeRunning = this.isChromeRunning();
+
+        if (chromeRunning) {
+            // Chrome is running but we have no debug port — FAIL CLOSED.
+            // Do NOT self-restart Chrome. Ask user to restart from AHVclaw shortcut.
+            throw new Error(
+                "Chrome dang chay nhung chua co debug port. " +
+                "Can khoi dong lai Chrome tu shortcut AHVclaw de ket noi. " +
+                "Cookie va tab hien tai se duoc giu nguyen."
+            );
+        }
+
+        // Step 3: Chrome not running — launch with random port, bind 127.0.0.1
+        const launched = await this.launchChrome();
+        if (!launched) {
+            throw new Error("Khong the khoi dong Chrome. Kiem tra Chrome da duoc cai dat.");
+        }
+
         return true;
     }
 
-    async findDebugPort() {
-        // Check state file first for previously used port
+    readStatePort() {
         const stateFile = this.getStateFilePath();
-        if (fs.existsSync(stateFile)) {
-            try {
-                const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
-                const version = await CDP.Version({ port: state.cdp_port });
-                if (version) return state.cdp_port;
-            } catch {}
+        if (!fs.existsSync(stateFile)) return null;
+        try {
+            const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+            return state.cdp_port || null;
+        } catch {
+            return null;
         }
+    }
 
-        // Scan known port range
-        for (let port = 19200; port <= 19210; port++) {
-            try {
-                const version = await CDP.Version({ port });
-                if (version) return port;
-            } catch {}
+    isChromeRunning() {
+        const platform = os.platform();
+        try {
+            if (platform === "win32") {
+                const result = execSync("tasklist /FI \"IMAGENAME eq chrome.exe\" /NH", { encoding: "utf8" });
+                return result.includes("chrome.exe");
+            } else if (platform === "darwin") {
+                const result = execSync("pgrep -x 'Google Chrome' 2>/dev/null || true", { encoding: "utf8" });
+                return result.trim().length > 0;
+            } else {
+                const result = execSync("pgrep -f '(chrome|chromium)' 2>/dev/null || true", { encoding: "utf8" });
+                return result.trim().length > 0;
+            }
+        } catch {
+            return false;
         }
-        return null;
     }
 
     async launchChrome() {
@@ -63,10 +94,11 @@ class CDPManager {
 
         const args = [
             `--remote-debugging-port=${port}`,
+            "--remote-debugging-address=127.0.0.1", // bind localhost only
             `--user-data-dir=${profilePath}`,
         ];
 
-        console.log(`[cdp] launching Chrome on port ${port}`);
+        console.log(`[cdp] launching Chrome on 127.0.0.1:${port}`);
         const chrome = spawn(chromePath, args, {
             detached: true,
             stdio: "ignore",
@@ -77,12 +109,14 @@ class CDPManager {
         for (let i = 0; i < 30; i++) {
             await new Promise(r => setTimeout(r, 500));
             try {
-                await CDP.Version({ port });
+                const version = await CDP.Version({ port });
                 this.port = port;
                 this.saveState(port, chrome.pid);
+                console.log(`[cdp] Chrome ${version["Browser"]} started on 127.0.0.1:${port}`);
                 return true;
             } catch {}
         }
+        console.error("[cdp] Chrome failed to start within 15s");
         return false;
     }
 

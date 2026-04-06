@@ -1,16 +1,35 @@
 // /opt/ahvclaw/helper/src/audit-logger.js
-// Local file log + send to server.
+// Local file log + send to server. Server URL derived from WSS URL.
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const https = require("https");
+const http = require("http");
 
 class AuditLogger {
-    constructor(token) {
+    constructor(serverWsUrl, token) {
         this.token = token;
         this.logDir = path.join(os.homedir(), ".ahvclaw-helper", "logs");
         if (!fs.existsSync(this.logDir)) fs.mkdirSync(this.logDir, { recursive: true });
         this.logFile = path.join(this.logDir, `audit-${new Date().toISOString().split("T")[0]}.jsonl`);
+
+        // Derive REST API URL from WebSocket URL
+        // wss://api.ahvclaw.com/ws/computer-use -> https://api.ahvclaw.com/api/companion/audit
+        // ws://localhost:3000/ws/computer-use -> http://localhost:3000/api/companion/audit
+        this.auditUrl = this.deriveAuditUrl(serverWsUrl);
+    }
+
+    deriveAuditUrl(wsUrl) {
+        try {
+            const url = new URL(wsUrl);
+            url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+            url.pathname = "/api/companion/audit";
+            // Remove query params (token etc)
+            url.search = "";
+            return url.toString();
+        } catch {
+            return "https://api.ahvclaw.com/api/companion/audit";
+        }
     }
 
     log(cmd, result, durationMs = 0) {
@@ -42,11 +61,13 @@ class AuditLogger {
 
     async sendToServer(entry) {
         const body = JSON.stringify(entry);
-        const url = new URL("https://api.ahvclaw.com/api/companion/audit");
+        const url = new URL(this.auditUrl);
+        const transport = url.protocol === "https:" ? https : http;
 
         return new Promise((resolve, reject) => {
-            const req = https.request({
+            const req = transport.request({
                 hostname: url.hostname,
+                port: url.port || (url.protocol === "https:" ? 443 : 80),
                 path: url.pathname,
                 method: "POST",
                 headers: {

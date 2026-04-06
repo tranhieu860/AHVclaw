@@ -1,14 +1,16 @@
 // /opt/ahvclaw/helper/src/command-executor.js
-// Dispatch commands (navigate, extract, click, etc.) to CDP with security checks.
+// Dispatch commands to CDP with session auth + security checks.
 
 class CommandExecutor {
-    constructor(cdpManager, tabManager, security, auditLogger) {
+    constructor(cdpManager, tabManager, security, auditLogger, auth) {
         this.cdp = cdpManager;
         this.tabs = tabManager;
         this.security = security;
         this.audit = auditLogger;
+        this.auth = auth; // { sessionId, userId }
         this.accepting = true;
-        this.pending = new Map(); // commandId -> reject function
+        this.lastSeq = 0; // monotonic sequence for anti-replay
+        this.pending = new Map();
     }
 
     clearPending(reason) {
@@ -16,6 +18,30 @@ class CommandExecutor {
             reject({ id, status: "error", error: reason });
         }
         this.pending.clear();
+    }
+
+    // Validate command auth fields per spec section 4.7
+    validateCommand(cmd) {
+        // session_id must match current session
+        if (cmd.session_id !== this.auth.sessionId) {
+            return "invalid_session";
+        }
+        // user_id must match
+        if (cmd.user_id !== this.auth.userId) {
+            return "user_mismatch";
+        }
+        // seq must be strictly monotonic (anti-replay)
+        if (typeof cmd.seq !== "number" || cmd.seq <= this.lastSeq) {
+            return "replay_detected";
+        }
+        // expires_at must not be past
+        if (cmd.expires_at) {
+            const expiry = new Date(cmd.expires_at);
+            if (Date.now() > expiry.getTime()) {
+                return "expired";
+            }
+        }
+        return null; // valid
     }
 
     async execute(cmd, ws) {
@@ -28,17 +54,28 @@ class CommandExecutor {
             return;
         }
 
-        try {
-            // Validate command expiry
-            if (cmd.expires_at) {
-                const expiry = new Date(cmd.expires_at);
-                if (Date.now() > expiry.getTime()) {
-                    result = { id: cmd.id, status: "error", error: "expired" };
-                    ws.sendResult(result);
-                    return;
-                }
-            }
+        // Kill is special — accepted even without full session binding
+        // (sessions may already be revoked when kill arrives)
+        if (cmd.action === "kill") {
+            result = { id: cmd.id, status: "ok" };
+            ws.sendResult(result);
+            ws.onKill();
+            return;
+        }
 
+        // Command auth validation (spec section 4.7)
+        const authError = this.validateCommand(cmd);
+        if (authError) {
+            result = { id: cmd.id, status: "error", error: authError };
+            ws.sendResult(result);
+            this.audit.log(cmd, result);
+            return;
+        }
+
+        // Auth passed — update last seen seq
+        this.lastSeq = cmd.seq;
+
+        try {
             // Rate limit check
             const rateBlock = this.security.checkRateLimit();
             if (rateBlock) {
@@ -72,11 +109,6 @@ class CommandExecutor {
                 case "tab_close":  result = await this.tabClose(cmd); break;
                 case "tab_focus":  result = await this.tabFocus(cmd); break;
                 case "ping":       result = { id: cmd.id, status: "ok", data: { pong: true } }; break;
-                case "kill":
-                    result = { id: cmd.id, status: "ok" };
-                    ws.sendResult(result);
-                    ws.onKill();
-                    return;
                 default:
                     result = { id: cmd.id, status: "error", error: `unknown action: ${cmd.action}` };
             }
@@ -99,7 +131,6 @@ class CommandExecutor {
 
         let targetId = tabId;
         if (!targetId) {
-            // Create new tab in group
             targetId = await this.tabs.createTab(url);
             return { id: cmd.id, status: "ok", data: { tabId: targetId, url } };
         }
@@ -116,7 +147,6 @@ class CommandExecutor {
         await client.Page.navigate({ url });
         await client.Page.loadEventFired();
 
-        // Post-navigate payment check on final URL
         const { result: evalResult } = await client.Runtime.evaluate({
             expression: "window.location.href"
         });
@@ -150,7 +180,7 @@ class CommandExecutor {
             return { id: cmd.id, status: "error", error: "CDP not attached" };
         }
 
-        // DOM payment check (layer 2) before extraction
+        // DOM payment check (layer 2)
         const { result: domCheck } = await client.Runtime.evaluate({
             expression: this.security.getDOMCheckScript(),
             returnByValue: true,
@@ -167,7 +197,6 @@ class CommandExecutor {
         }
 
         const { result: extractResult } = await client.Runtime.evaluate({ expression });
-
         const { result: urlResult } = await client.Runtime.evaluate({ expression: "window.location.href" });
         const { result: titleResult } = await client.Runtime.evaluate({ expression: "document.title" });
 
@@ -188,7 +217,6 @@ class CommandExecutor {
             return { id: cmd.id, status: "error", error: "CDP not attached" };
         }
         const { data } = await client.Page.captureScreenshot({ format: "png" });
-
         const { result: urlResult } = await client.Runtime.evaluate({ expression: "window.location.href" });
         const { result: titleResult } = await client.Runtime.evaluate({ expression: "document.title" });
 
@@ -205,7 +233,6 @@ class CommandExecutor {
             return { id: cmd.id, status: "blocked", error: "Tab khong thuoc AHVclaw", blocked_reason: "not_owned" };
         }
 
-        // Action context payment check (layer 3)
         const contextBlock = this.security.checkActionContext("click", cmd.params, "");
         if (contextBlock) {
             return { id: cmd.id, status: "blocked", error: contextBlock, blocked_reason: "payment_detected" };
@@ -221,7 +248,6 @@ class CommandExecutor {
             return { id: cmd.id, status: "error", error: "selector or text required" };
         }
 
-        // Find element coordinates via CDP
         const jsSelector = selector ? selector.replace(/'/g, "\\'") : null;
         let findExpr;
         if (jsSelector) {
@@ -232,7 +258,6 @@ class CommandExecutor {
                 return { x: rect.x + rect.width/2, y: rect.y + rect.height/2 };
             })()`;
         } else {
-            // text-based search
             findExpr = `(function() {
                 var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
                 while (walker.nextNode()) {
@@ -271,7 +296,6 @@ class CommandExecutor {
             return { id: cmd.id, status: "blocked", error: "Tab khong thuoc AHVclaw", blocked_reason: "not_owned" };
         }
 
-        // Action context payment check (layer 3)
         const contextBlock = this.security.checkActionContext("type", cmd.params, "");
         if (contextBlock) {
             return { id: cmd.id, status: "blocked", error: contextBlock, blocked_reason: "payment_detected" };
@@ -282,13 +306,11 @@ class CommandExecutor {
             return { id: cmd.id, status: "error", error: "CDP not attached" };
         }
 
-        // Focus the element
         const jsSelector = selector.replace(/'/g, "\\'");
         await client.Runtime.evaluate({
             expression: `document.querySelector('${jsSelector}')?.focus()`
         });
 
-        // Type character by character via CDP Input
         for (const char of text) {
             await client.Input.dispatchKeyEvent({ type: "keyDown", text: char });
             await client.Input.dispatchKeyEvent({ type: "keyUp", text: char });
