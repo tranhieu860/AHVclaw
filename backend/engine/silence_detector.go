@@ -70,9 +70,6 @@ func (s *SilenceDetector) check() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Only detect messages from real channels (telegram, zalo, etc.) \u2014 not web or empty channel
-	// Widen window: 10 min outer, 5 min inner \u2014 give more time for slow tools (browser, etc.)
-	// Max retry_count = 1 (only 1 retry attempt before fallback)
 	rows, err := db.Pool.Query(ctx, `
 		SELECT m.id, m.conversation_id, m.content, m.retry_count,
 		       c.channel, COALESCE(c.channel_chat_id, ''), c.bot_id
@@ -108,45 +105,55 @@ func (s *SilenceDetector) check() {
 			continue
 		}
 
-		// Skip if this chat is currently being processed by HandleInbound
 		if s.isProcessingFn != nil && s.isProcessingFn(chatID) {
 			log.Printf("[silence-detector] message %s chat %s still processing, skipping", msgID, chatID)
 			continue
 		}
 
-		// Double-check: re-query to confirm no assistant reply exists (prevent race)
-		var hasReply bool
-		db.Pool.QueryRow(ctx, `
-			SELECT EXISTS(
-				SELECT 1 FROM messages
-				WHERE conversation_id = $1 AND role = 'assistant' AND created_at > (
-					SELECT created_at FROM messages WHERE id = $2
-				)
-			)
-		`, convID, msgID).Scan(&hasReply)
-		if hasReply {
-			log.Printf("[silence-detector] message %s already answered on re-check, skipping", msgID)
-			continue
-		}
-
 		log.Printf("[silence-detector] unanswered message %s (retry %d) in conv %s channel=%s", msgID, retryCount, convID, channel)
 
-		// Atomic CAS increment: only proceed if retry_count hasn't changed
-		tag, err := db.Pool.Exec(ctx,
-			"UPDATE messages SET retry_count = $1 WHERE id = $2 AND retry_count = $3",
-			retryCount+1, msgID, retryCount)
+		// Atomic: CAS increment + re-verify no assistant reply in one UPDATE
+		// This closes the race window between double-check and CAS
+		tag, err := db.Pool.Exec(ctx, `
+			UPDATE messages SET retry_count = $1
+			WHERE id = $2
+			  AND retry_count = $3
+			  AND NOT EXISTS (
+			      SELECT 1 FROM messages m2
+			      WHERE m2.conversation_id = $4
+			        AND m2.role = 'assistant'
+			        AND m2.created_at > (SELECT created_at FROM messages WHERE id = $2)
+			  )
+		`, retryCount+1, msgID, retryCount, convID)
 		if err != nil || tag.RowsAffected() == 0 {
-			log.Printf("[silence-detector] CAS failed for message %s (concurrent update), skipping", msgID)
+			log.Printf("[silence-detector] atomic CAS failed for message %s (reply arrived or concurrent update), skipping", msgID)
 			continue
 		}
 
 		if retryCount >= 1 {
-			// Max retries reached \u2014 send ONE fallback, then mark as handled
+			// Max retries reached - attempt fallback FIRST, then mark handled
 			log.Printf("[silence-detector] max retries for message %s, sending fallback", msgID)
-			// Set retry_count high to prevent any further processing
-			db.Pool.Exec(ctx, "UPDATE messages SET retry_count = 99 WHERE id = $1", msgID)
+			fallbackSent := false
 			if s.fallbackFn != nil && chatID != "" {
-				s.fallbackFn(channel, chatID, botID, "⚠️ Tớ không xử lý được tin nhắn này. Cậu thử nhắn lại nhé!")
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("[silence-detector] fallback panic for message %s: %v", msgID, r)
+						}
+					}()
+					s.fallbackFn(channel, chatID, botID, "⚠️ Tớ không xử lý được tin nhắn này. Cậu thử nhắn lại nhé!")
+					fallbackSent = true
+				}()
+			}
+
+			if fallbackSent {
+				// Fallback delivered - mark as permanently handled
+				db.Pool.Exec(ctx, "UPDATE messages SET retry_count = 99 WHERE id = $1", msgID)
+			} else {
+				// Fallback failed - set retry_count = 98 (won't re-enter loop since < 2 check,
+				// but distinguishable from 99 = success for debugging)
+				log.Printf("[silence-detector] fallback FAILED for message %s, marking as send_failed (98)", msgID)
+				db.Pool.Exec(ctx, "UPDATE messages SET retry_count = 98 WHERE id = $1", msgID)
 			}
 			continue
 		}
