@@ -1,0 +1,14 @@
+{
+  "name": "ahvclaw-helper",
+  "version": "1.0.0",
+  "description": "AHVclaw Browser Companion Native Helper",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "chrome-remote-interface": "^0.33.2",
+    "ws": "^8.16.0",
+    "node-forge": "^1.3.1"
+  }
+}

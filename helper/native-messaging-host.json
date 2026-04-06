@@ -1,0 +1,7 @@
+{
+    "name": "com.ahvholding.ahvclaw_helper",
+    "description": "AHVclaw Browser Companion Helper",
+    "path": "/opt/ahvclaw/helper/src/index.js",
+    "type": "stdio",
+    "allowed_origins": ["chrome-extension://EXTENSION_ID_PLACEHOLDER/"]
+}
