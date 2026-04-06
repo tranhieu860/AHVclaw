@@ -87,7 +87,6 @@ async function main() {
             onCommand: (cmd) => executor.execute(cmd, ws),
             onKill: killWithTimeout,
             onConnected: () => {
-                // Send signed hello with real user_id
                 const nonce = crypto.randomBytes(16).toString("hex");
                 const payloadObj = {
                     user_id: USER_ID,
@@ -109,7 +108,6 @@ async function main() {
                 });
             },
             onSessionEstablished: (sessionId) => {
-                // Reset anti-replay counter for new session
                 executor.lastSeq = 0;
                 executor.auth.sessionId = sessionId;
             },
@@ -130,8 +128,7 @@ async function main() {
     });
 
     // Tab handover: extension sends chromeTabId + URL + title.
-    // Helper resolves to CDP target. If multiple targets share the same URL,
-    // disambiguate by title. If still ambiguous, reject (fail-closed).
+    // Resolve to CDP target. Reject if ambiguous (>1 match = fail-closed).
     nativeMsg.onMessage("tab_handover", async (msg) => {
         if (!msg.url) {
             nativeMsg.send({ type: "handover_rejected", error: "url required" });
@@ -141,7 +138,6 @@ async function main() {
             const targets = await cdp.getTargets();
             let matches = targets.filter(t => t.type === "page" && t.url === msg.url);
 
-            // Disambiguate by title if multiple matches
             if (matches.length > 1 && msg.title) {
                 const titleMatches = matches.filter(t => t.title === msg.title);
                 if (titleMatches.length > 0) {
@@ -176,7 +172,7 @@ async function main() {
         }
     });
 
-    // Tab revoke: use stable chromeTabId -> targetId mapping (not URL).
+    // Tab revoke: use stable chromeTabId -> targetId mapping.
     nativeMsg.onMessage("tab_revoke", (msg) => {
         const chromeTabId = msg.tabId != null ? Number(msg.tabId) : null;
         if (chromeTabId != null) {
@@ -186,7 +182,6 @@ async function main() {
                 return;
             }
         }
-        // Fallback: if somehow no mapping, log warning
         console.warn(`[native-messaging] tab_revoke: no mapping for chrome:${chromeTabId}`);
     });
 
@@ -196,12 +191,16 @@ async function main() {
     });
 
     // Extension confirms a helper-created tab was grouped.
-    // Now we have the chromeTabId <-> targetId mapping.
+    // This is the ONLY path that promotes pending -> owned.
     nativeMsg.onMessage("tab_grouped", (msg) => {
         const { targetId, chromeTabId } = msg;
         if (targetId && chromeTabId != null) {
-            tabManager.linkIds(Number(chromeTabId), targetId);
-            console.log(`[native-messaging] tab_grouped: chrome:${chromeTabId} <-> cdp:${targetId}`);
+            const ok = tabManager.confirmGrouped(targetId, Number(chromeTabId));
+            if (ok) {
+                console.log(`[native-messaging] tab_grouped confirmed: chrome:${chromeTabId} <-> cdp:${targetId}`);
+            } else {
+                console.warn(`[native-messaging] tab_grouped: no pending tab for ${targetId}`);
+            }
         }
     });
 
@@ -217,7 +216,6 @@ async function main() {
         });
     });
 
-    // Extension can trigger a CDP retry (e.g. after user restarts Chrome)
     nativeMsg.onMessage("retry_cdp", async () => {
         if (cdpReady) {
             nativeMsg.send({ type: "retry_cdp_result", success: true, reason: "already_connected" });
@@ -228,7 +226,6 @@ async function main() {
             cdpReady = true;
             console.log("[cdp] retry succeeded, connecting to server");
             nativeMsg.send({ type: "retry_cdp_result", success: true });
-            // NOW go online
             ws = createWSClient();
             ws.connect();
         } catch (err) {
@@ -237,17 +234,21 @@ async function main() {
         }
     });
 
-    // Hook: after helper creates a tab via command, tell extension to group it
-    const origCreateTab = tabManager.createTab.bind(tabManager);
+    // Hook createTab: deferred ownership via createTabPending + NM round-trip.
+    // Executor.tabCreate() awaits the returned promise, which only resolves
+    // after extension sends tab_grouped ack.
+    const origCreateTab = tabManager.createTab;
     tabManager.createTab = async function (url) {
-        const targetId = await origCreateTab(url);
-        // Ask extension to find this tab and move it into AHVclaw group
+        const { targetId, nonce, promise } = await tabManager.createTabPending(url);
+        // Tell extension to find tab by nonce title and group it
         nativeMsg.send({
             type: "tab_created",
             targetId: targetId,
+            nonce: nonce,
             url: url || "about:blank",
         });
-        return targetId;
+        // Block until extension confirms grouping (or 5s timeout → reject)
+        return promise;
     };
 
     // FAIL-CLOSED: connect to Chrome FIRST. Only go online if CDP succeeds.
@@ -258,8 +259,6 @@ async function main() {
     } catch (err) {
         console.error("[cdp] failed to connect:", err.message);
         console.log("[helper] OFFLINE — waiting for extension retry_cdp or Chrome restart");
-        // Do NOT call ws.connect(). Helper stays offline.
-        // Extension can send "retry_cdp" via Native Messaging after user restarts Chrome.
     }
 
     if (cdpReady) {
@@ -267,12 +266,10 @@ async function main() {
         ws.connect();
     }
 
-    // Start native messaging listener (always, even without CDP — extension needs status)
     if (process.stdin.isTTY === undefined) {
         nativeMsg.start();
     }
 
-    // Handle process signals
     process.on("SIGTERM", killWithTimeout);
     process.on("SIGINT", killWithTimeout);
 

@@ -39,7 +39,6 @@ function loadSettings() {
     });
 }
 
-// React to storage changes (login/logout from popup)
 chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     if (changes.token) {
@@ -66,7 +65,6 @@ async function authFetch(url, options = {}) {
     if (res.status === 401) {
         const refreshed = await tryRefreshToken();
         if (refreshed) {
-            // Retry with new token
             options.headers["Authorization"] = `Bearer ${authToken}`;
             res = await fetch(url, options);
         }
@@ -104,7 +102,6 @@ function connectHelper() {
                 registerGrant(msg.public_key, msg.device_id);
                 break;
             case "handover_accepted":
-                // Helper resolved the mapping — track it
                 if (msg.chromeTabId != null) {
                     console.log("[bg] handover accepted: chrome:" + msg.chromeTabId + " -> cdp:" + msg.targetId);
                 }
@@ -116,8 +113,8 @@ function connectHelper() {
                 }
                 break;
             case "tab_created":
-                // Helper created a tab via CDP — find it and group it
-                groupHelperCreatedTab(msg.targetId, msg.url);
+                // Helper created a tab via CDP — find by nonce title and group it
+                groupHelperCreatedTab(msg.targetId, msg.nonce, msg.url);
                 break;
             case "retry_cdp_result":
                 console.log("[bg] CDP retry:", msg.success ? "OK" : msg.error);
@@ -162,52 +159,50 @@ function requestHelperStatus() {
 
 // ─── Helper-Created Tab Grouping ────────────────────────────────────────
 
-// When helper creates a tab via CDP, the tab exists in Chrome but is NOT
-// in the AHVclaw group. Find it by URL and move it into the group.
-// Then send tab_grouped back so helper has the chromeTabId <-> targetId mapping.
-async function groupHelperCreatedTab(targetId, url) {
+// Helper sets document.title = '_ahvclaw_NONCE' on the new about:blank tab.
+// Extension finds the exact tab by matching this unique title — no URL heuristic.
+// After grouping, sends tab_grouped ack so helper can promote pending -> owned.
+async function groupHelperCreatedTab(targetId, nonce, url) {
+    if (!nonce) {
+        console.warn("[bg] tab_created: no nonce, ignoring");
+        return;
+    }
+    const expectedTitle = "_ahvclaw_" + nonce;
+
     try {
-        // Ensure AHVclaw group exists
         await ensureAHVclawGroup();
 
-        // Find Chrome tab by URL (just created, should be unique or most recent)
-        const tabs = await chrome.tabs.query({ url: url });
-        if (tabs.length === 0) {
-            // about:blank or restricted URL — try broader query
-            const allTabs = await chrome.tabs.query({});
-            const match = allTabs.find(t => t.url === url || (url === "about:blank" && t.url === "chrome://newtab/"));
-            if (!match) {
-                console.warn("[bg] tab_created: cannot find Chrome tab for", url);
-                return;
-            }
-            tabs.push(match);
+        // Query all tabs — the nonce title makes this search deterministic
+        const allTabs = await chrome.tabs.query({});
+        const match = allTabs.find(t => t.title === expectedTitle);
+
+        if (!match) {
+            console.warn("[bg] tab_created: no tab with title", expectedTitle);
+            return;
         }
 
-        // Pick the most recently created tab (last in array, highest id)
-        const tab = tabs.reduce((a, b) => a.id > b.id ? a : b);
-
         // Move tab into AHVclaw group
-        await chrome.tabs.group({ tabIds: [tab.id], groupId: ahvclawGroupId });
+        await chrome.tabs.group({ tabIds: [match.id], groupId: ahvclawGroupId });
 
         // Track it locally
-        handedOverTabs.set(tab.id, { url: url, title: tab.title });
+        handedOverTabs.set(match.id, { url: url, title: match.title });
 
-        // Tell helper the chromeTabId <-> targetId mapping
+        // Ack to helper — this is the ONLY signal that promotes pending -> owned
         sendToHelper({
             type: "tab_grouped",
             targetId: targetId,
-            chromeTabId: tab.id,
+            chromeTabId: match.id,
         });
 
-        console.log("[bg] grouped helper-created tab: chrome:" + tab.id + " -> cdp:" + targetId);
+        console.log("[bg] grouped helper tab by nonce: chrome:" + match.id + " -> cdp:" + targetId);
     } catch (err) {
         console.error("[bg] groupHelperCreatedTab error:", err);
+        // No ack sent → helper's 5s timeout will close tab (fail-closed)
     }
 }
 
 async function ensureAHVclawGroup() {
     if (ahvclawGroupId != null) {
-        // Verify group still exists
         try {
             await chrome.tabGroups.get(ahvclawGroupId);
             return;
@@ -216,7 +211,6 @@ async function ensureAHVclawGroup() {
         }
     }
 
-    // Try to find existing group
     const groups = await chrome.tabGroups.query({ title: GROUP_TITLE });
     if (groups.length > 0) {
         ahvclawGroupId = groups[0].id;
@@ -227,7 +221,6 @@ async function ensureAHVclawGroup() {
     const placeholderTab = await chrome.tabs.create({ url: "about:blank", active: false });
     ahvclawGroupId = await chrome.tabs.group({ tabIds: [placeholderTab.id] });
     await chrome.tabGroups.update(ahvclawGroupId, { title: GROUP_TITLE, color: "cyan" });
-    // Remove placeholder — the actual tab will be grouped right after
     await chrome.tabs.remove(placeholderTab.id);
 }
 
@@ -263,7 +256,6 @@ async function findAHVclawGroup() {
     } catch {}
 }
 
-// Detect AHVclaw group creation/update
 chrome.tabGroups.onUpdated.addListener((group) => {
     if (group.title === GROUP_TITLE) {
         ahvclawGroupId = group.id;
@@ -278,7 +270,6 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
         // Skip if this tab was just grouped by us (helper-created)
         if (handedOverTabs.has(tabId)) return;
 
-        // Tab moved INTO group — prompt handover consent
         const confirmed = await showHandoverConfirm(tab);
         if (confirmed) {
             handedOverTabs.set(tabId, { url: tab.url, title: tab.title });
@@ -349,7 +340,6 @@ function showHandoverConfirm(tab) {
             }
         });
 
-        // Timeout after 30s — auto-deny (fail-closed)
         setTimeout(() => {
             if (pendingConfirms.has(tab.id)) {
                 pendingConfirms.delete(tab.id);
