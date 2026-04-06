@@ -71,6 +71,9 @@ func CompanionKill() fiber.Handler {
 		computeruse.Sessions.RevokeByUser(userID)
 
 		if computeruse.Hub.IsOnline(userID.String()) {
+			// Kill is an out-of-band command sent via legacy protocol since
+			// sessions are already revoked. Helper must accept "kill" action
+			// without session binding.
 			_, _ = computeruse.Hub.SendCommand(userID.String(), computeruse.CUCommand{
 				ID:     uuid.New().String(),
 				Action: "kill",

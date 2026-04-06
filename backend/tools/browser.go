@@ -142,6 +142,12 @@ func (e *Executor) browserExtract(argsJSON json.RawMessage) *ToolResult {
 	mode := e.resolveMode("", args.NeedsAuth, false, args.UseHelper)
 
 	switch mode {
+	case ModeNotifyUser:
+		return &ToolResult{
+			Name:    "browser_extract",
+			Content: "Thao tac nay can dang nhap. Can bat AHVclaw extension de su dung trinh duyet that.",
+		}
+
 	case ModeCDP:
 		params, _ := json.Marshal(map[string]string{"selector": args.Selector})
 		result, err := computeruse.Hub.SendCompanionCommand(e.UserID, "extract", params)
@@ -202,6 +208,12 @@ func (e *Executor) browserScreenshot(argsJSON json.RawMessage) *ToolResult {
 	mode := e.resolveMode("", args.NeedsAuth, false, args.UseHelper)
 
 	switch mode {
+	case ModeNotifyUser:
+		return &ToolResult{
+			Name:    "browser_screenshot",
+			Content: "Thao tac nay can dang nhap. Can bat AHVclaw extension de su dung trinh duyet that.",
+		}
+
 	case ModeCDP:
 		result, err := computeruse.Hub.SendCompanionCommand(e.UserID, "screenshot", nil)
 		if err != nil {
@@ -256,6 +268,12 @@ func (e *Executor) browserClick(argsJSON json.RawMessage) *ToolResult {
 	mode := e.resolveMode("", args.NeedsAuth, true, args.UseHelper)
 
 	switch mode {
+	case ModeNotifyUser:
+		return &ToolResult{
+			Name:    "browser_click",
+			Content: "Thao tac nay can dang nhap. Can bat AHVclaw extension de su dung trinh duyet that.",
+		}
+
 	case ModeCDP:
 		params, _ := json.Marshal(map[string]string{"selector": args.Selector, "text": args.Text})
 		result, err := computeruse.Hub.SendCompanionCommand(e.UserID, "click", params)
@@ -316,6 +334,12 @@ func (e *Executor) browserType(argsJSON json.RawMessage) *ToolResult {
 	mode := e.resolveMode("", args.NeedsAuth, true, args.UseHelper)
 
 	switch mode {
+	case ModeNotifyUser:
+		return &ToolResult{
+			Name:    "browser_type",
+			Content: "Thao tac nay can dang nhap. Can bat AHVclaw extension de su dung trinh duyet that.",
+		}
+
 	case ModeCDP:
 		params, _ := json.Marshal(map[string]string{"selector": args.Selector, "text": args.Text})
 		result, err := computeruse.Hub.SendCompanionCommand(e.UserID, "type", params)
@@ -371,6 +395,12 @@ func (e *Executor) browserScroll(argsJSON json.RawMessage) *ToolResult {
 	mode := e.resolveMode("", args.NeedsAuth, true, args.UseHelper)
 
 	switch mode {
+	case ModeNotifyUser:
+		return &ToolResult{
+			Name:    "browser_scroll",
+			Content: "Thao tac nay can dang nhap. Can bat AHVclaw extension de su dung trinh duyet that.",
+		}
+
 	case ModeCDP:
 		params, _ := json.Marshal(map[string]interface{}{"direction": args.Direction, "amount": args.Amount})
 		result, err := computeruse.Hub.SendCompanionCommand(e.UserID, "scroll", params)
@@ -399,8 +429,7 @@ func (e *Executor) browserTabList(argsJSON json.RawMessage) *ToolResult {
 	if !computeruse.Hub.IsOnline(e.UserID) {
 		return &ToolResult{Name: "browser_tab_list", Error: "tab management requires the browser extension to be installed"}
 	}
-	cmd := computeruse.CUCommand{ID: "tab_list_cmd", Action: "tab_list"}
-	result, err := computeruse.Hub.SendCommand(e.UserID, cmd)
+	result, err := computeruse.Hub.SendCompanionCommand(e.UserID, "tab_list", nil)
 	if err != nil {
 		return &ToolResult{Name: "browser_tab_list", Error: err.Error()}
 	}
@@ -433,8 +462,7 @@ func (e *Executor) browserTabSwitch(argsJSON json.RawMessage) *ToolResult {
 		return &ToolResult{Name: "browser_tab_switch", Error: "invalid arguments"}
 	}
 	paramsJSON, _ := json.Marshal(args)
-	cmd := computeruse.CUCommand{ID: "tab_switch_cmd", Action: "tab_switch", Params: paramsJSON}
-	result, err := computeruse.Hub.SendCommand(e.UserID, cmd)
+	result, err := computeruse.Hub.SendCompanionCommand(e.UserID, "tab_switch", paramsJSON)
 	if err != nil {
 		return &ToolResult{Name: "browser_tab_switch", Error: err.Error()}
 	}

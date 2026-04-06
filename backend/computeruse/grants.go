@@ -29,11 +29,11 @@ type CompanionGrant struct {
 func CreateGrant(ctx context.Context, userID uuid.UUID, deviceID, publicKey string) (*CompanionGrant, error) {
 	const q = `
 		INSERT INTO companion_grants (user_id, device_id, public_key, policy_version, status, granted_at, revoked_at)
-		VALUES ($1, $2, $3, $4, active, now(), NULL)
+		VALUES ($1, $2, $3, $4, 'active', now(), NULL)
 		ON CONFLICT (user_id, device_id) DO UPDATE
 			SET public_key     = EXCLUDED.public_key,
 			    policy_version = EXCLUDED.policy_version,
-			    status         = active,
+			    status         = 'active',
 			    granted_at     = now(),
 			    revoked_at     = NULL
 		RETURNING id, user_id, device_id, public_key, granted_at, revoked_at, status, policy_version
@@ -48,7 +48,7 @@ func GetActiveGrant(ctx context.Context, userID uuid.UUID, deviceID string) (*Co
 	const q = `
 		SELECT id, user_id, device_id, public_key, granted_at, revoked_at, status, policy_version
 		FROM companion_grants
-		WHERE user_id = $1 AND device_id = $2 AND status = active
+		WHERE user_id = $1 AND device_id = $2 AND status = 'active'
 		LIMIT 1
 	`
 	row := db.Pool.QueryRow(ctx, q, userID, deviceID)
@@ -66,8 +66,8 @@ func GetActiveGrant(ctx context.Context, userID uuid.UUID, deviceID string) (*Co
 func RevokeGrant(ctx context.Context, userID uuid.UUID, deviceID string) error {
 	const q = `
 		UPDATE companion_grants
-		SET status = revoked, revoked_at = now()
-		WHERE user_id = $1 AND device_id = $2 AND status = active
+		SET status = 'revoked', revoked_at = now()
+		WHERE user_id = $1 AND device_id = $2 AND status = 'active'
 	`
 	ct, err := db.Pool.Exec(ctx, q, userID, deviceID)
 	if err != nil {
@@ -83,8 +83,8 @@ func RevokeGrant(ctx context.Context, userID uuid.UUID, deviceID string) error {
 func RevokeAllGrants(ctx context.Context, userID uuid.UUID) error {
 	const q = `
 		UPDATE companion_grants
-		SET status = revoked, revoked_at = now()
-		WHERE user_id = $1 AND status = active
+		SET status = 'revoked', revoked_at = now()
+		WHERE user_id = $1 AND status = 'active'
 	`
 	_, err := db.Pool.Exec(ctx, q, userID)
 	return err
