@@ -5,16 +5,14 @@
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
-  width: 320px;
+  width: 340px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: #1a1a2e;
   color: #e0e0e0;
   font-size: 13px;
 }
 .header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  display: flex; align-items: center; gap: 10px;
   padding: 14px 16px;
   background: linear-gradient(135deg, #16213e, #0f3460);
   border-bottom: 1px solid #2962FF;
@@ -27,14 +25,23 @@ body {
 }
 .header-text h1 { font-size: 15px; color: #fff; }
 .header-text .subtitle { font-size: 11px; color: #888; }
-.status-dot {
-  width: 10px; height: 10px; border-radius: 50%;
-  margin-left: auto;
-  background: #F44336;
-  box-shadow: 0 0 6px #F44336;
-  transition: all 0.3s;
+
+/* Status indicators */
+.status-panel {
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
 }
-.status-dot.connected { background: #4CAF50; box-shadow: 0 0 6px #4CAF50; }
+.status-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 4px 0; font-size: 12px;
+}
+.status-label { color: #888; }
+.status-value { font-weight: 500; }
+.status-value.online { color: #4CAF50; }
+.status-value.offline { color: #F44336; }
+.status-value.waiting { color: #FF9800; }
+
+/* Sections */
 .section {
   padding: 12px 16px;
   border-bottom: 1px solid rgba(255,255,255,0.05);
@@ -43,93 +50,96 @@ body {
   display: block; font-size: 11px; color: #888;
   margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;
 }
-input[type="text"], input[type="password"], input[type="email"] {
+input[type="email"], input[type="password"] {
   width: 100%; padding: 8px 10px;
   background: #16213e; border: 1px solid #333; border-radius: 6px;
-  color: #e0e0e0; font-size: 12px; outline: none; transition: border-color 0.2s;
+  color: #e0e0e0; font-size: 12px; outline: none;
 }
 input:focus { border-color: #2962FF; }
-.tabs {
-  display: flex; border-bottom: 1px solid rgba(255,255,255,0.05);
-}
-.tab {
-  flex: 1; padding: 8px; text-align: center; font-size: 12px;
-  cursor: pointer; color: #888; border-bottom: 2px solid transparent;
-  transition: all 0.2s;
-}
-.tab.active { color: #2962FF; border-bottom-color: #2962FF; }
-.tab-content { display: none; }
-.tab-content.active { display: block; }
-.toggle-row {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
-}
-.toggle-label { font-size: 14px; font-weight: 500; }
-.toggle { position: relative; width: 48px; height: 26px; }
-.toggle input { opacity: 0; width: 0; height: 0; }
-.slider {
-  position: absolute; cursor: pointer;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: #444; border-radius: 26px; transition: 0.3s;
-}
-.slider:before {
-  position: absolute; content: "";
-  height: 20px; width: 20px; left: 3px; bottom: 3px;
-  background: white; border-radius: 50%; transition: 0.3s;
-}
-.toggle input:checked + .slider { background: #2962FF; }
-.toggle input:checked + .slider:before { transform: translateX(22px); }
+
+/* Buttons */
 .btn {
   width: 100%; padding: 8px; border-radius: 6px;
-  cursor: pointer; font-size: 12px; transition: all 0.2s; border: none;
+  cursor: pointer; font-size: 12px; border: none; transition: all 0.2s;
 }
 .btn-primary { background: #2962FF; color: white; }
 .btn-primary:hover { background: #1e4fd6; }
-.btn-danger { background: transparent; border: 1px solid #F44336; color: #F44336; }
-.btn-danger:hover { background: #F44336; color: white; }
+.btn-danger { background: #F44336; color: white; }
+.btn-danger:hover { background: #c62828; }
+.btn-outline { background: transparent; border: 1px solid #555; color: #ccc; }
+.btn-outline:hover { border-color: #2962FF; color: #2962FF; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn + .btn { margin-top: 8px; }
+
 .msg { font-size: 11px; margin-top: 6px; text-align: center; }
 .msg.error { color: #F44336; }
 .msg.success { color: #4CAF50; }
+
 .logged-in-info {
   padding: 8px 12px; background: rgba(76,175,80,0.1);
   border: 1px solid rgba(76,175,80,0.2); border-radius: 6px;
-  font-size: 11px; color: #4CAF50; margin-top: 6px;
+  font-size: 11px; color: #4CAF50; margin-bottom: 8px;
 }
-.log-section { padding: 10px 16px; }
-.log-section h3 { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
-.log-list {
-  max-height: 120px; overflow-y: auto;
-  scrollbar-width: thin; scrollbar-color: #333 transparent;
+
+/* Grant section */
+.grant-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
 }
-.log-item {
-  display: flex; align-items: center; gap: 8px;
-  padding: 4px 0; font-size: 11px; color: #aaa;
-  border-bottom: 1px solid rgba(255,255,255,0.03);
+.grant-status {
+  padding: 8px 12px; border-radius: 6px; font-size: 12px; margin-bottom: 8px;
 }
-.log-item .action { color: #2962FF; font-weight: 500; min-width: 65px; }
-.log-item .time { color: #666; margin-left: auto; font-size: 10px; white-space: nowrap; }
-.empty-log { color: #555; font-style: italic; font-size: 12px; padding: 8px 0; }
-.footer { padding: 10px 16px; }
+.grant-status.active { background: rgba(76,175,80,0.1); border: 1px solid rgba(76,175,80,0.2); color: #4CAF50; }
+.grant-status.inactive { background: rgba(244,67,54,0.1); border: 1px solid rgba(244,67,54,0.2); color: #F44336; }
+
+/* Kill switch */
+.kill-section {
+  padding: 12px 16px;
+}
+.kill-btn {
+  width: 100%; padding: 12px; border-radius: 6px;
+  background: #F44336; color: white; font-size: 14px; font-weight: 600;
+  border: none; cursor: pointer; transition: all 0.2s;
+}
+.kill-btn:hover { background: #c62828; }
+
+.info-text {
+  font-size: 10px; color: #555; text-align: center; padding: 8px 16px;
+}
 </style>
 </head>
 <body>
+
 <div class="header">
   <div class="logo">A</div>
   <div class="header-text">
-    <h1>AHVclaw</h1>
-    <div class="subtitle">AI Browser Control</div>
+    <h1>AHVclaw Companion</h1>
+    <div class="subtitle">v2.0 — Native Helper</div>
   </div>
-  <div class="status-dot" id="statusDot"></div>
 </div>
 
-<div class="tabs">
-  <div class="tab active" data-tab="login">Đăng nhập</div>
-  <div class="tab" data-tab="token">Token</div>
+<!-- Status Panel -->
+<div class="status-panel">
+  <div class="status-row">
+    <span class="status-label">Helper</span>
+    <span class="status-value" id="helperStatusText">...</span>
+  </div>
+  <div class="status-row">
+    <span class="status-label">Trình duyệt (CDP)</span>
+    <span class="status-value" id="cdpStatusText">...</span>
+  </div>
+  <div class="status-row">
+    <span class="status-label">Server</span>
+    <span class="status-value" id="serverStatusText">...</span>
+  </div>
+  <div class="status-row">
+    <span class="status-label">Tab đang quản lý</span>
+    <span class="status-value" id="tabCountText">0</span>
+  </div>
 </div>
 
-<!-- Login tab -->
-<div id="tab-login" class="tab-content active">
+<!-- Login -->
+<div id="loginSection">
   <div id="loginForm">
     <div class="section">
       <label>Email</label>
@@ -146,39 +156,27 @@ input:focus { border-color: #2962FF; }
   </div>
   <div id="loggedInBox" class="section" style="display:none;">
     <div class="logged-in-info" id="loggedInInfo"></div>
-    <button class="btn btn-danger" id="logoutBtn" style="margin-top:8px;">Đăng xuất</button>
+    <button class="btn btn-outline" id="logoutBtn">Đăng xuất</button>
   </div>
 </div>
 
-<!-- Token tab (manual) -->
-<div id="tab-token" class="tab-content">
-  <div class="section">
-    <label>Server URL</label>
-    <input type="text" id="serverUrl" placeholder="wss://api.ahvclaw.com/ws/computer-use">
-  </div>
-  <div class="section">
-    <label>Access Token (JWT)</label>
-    <input type="password" id="token" placeholder="Dán token tại đây">
-  </div>
+<!-- Grant / Consent -->
+<div class="grant-section">
+  <label>Quyền điều khiển</label>
+  <div class="grant-status" id="grantStatus"></div>
+  <button class="btn btn-primary" id="grantBtn" style="display:none;">Cấp quyền cho thiết bị này</button>
+  <button class="btn btn-outline" id="revokeBtn" style="display:none;">Thu hồi quyền</button>
+  <button class="btn btn-outline" id="retryCDPBtn" style="display:none;">Kết nối lại Chrome</button>
 </div>
 
-<div class="toggle-row">
-  <span class="toggle-label">Bật điều khiển</span>
-  <label class="toggle">
-    <input type="checkbox" id="enableToggle">
-    <span class="slider"></span>
-  </label>
+<!-- Kill Switch -->
+<div class="kill-section">
+  <button class="kill-btn" id="killBtn">Dừng ngay</button>
 </div>
 
-<div class="log-section">
-  <h3>Hoạt động gần đây</h3>
-  <div class="log-list" id="logList">
-    <div class="empty-log">Chưa có hoạt động</div>
-  </div>
-</div>
-
-<div class="footer">
-  <button class="btn btn-danger" id="disconnectBtn">Ngắt kết nối</button>
+<div class="info-text">
+  Mọi thao tác của AGI chỉ trong tab group "AHVclaw".<br>
+  Nhấn "Dừng ngay" để thu hồi toàn bộ quyền.
 </div>
 
 <script src="popup.js"></script>

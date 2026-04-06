@@ -1,373 +1,320 @@
-// AHVclaw Background Service Worker
-// Maintains WebSocket connection to AGI server and dispatches commands
+// AHVclaw Companion Extension v2 — Background Service Worker
+// NO automation. All automation is done by Native Helper via CDP.
+// This service worker handles: auth, tab group monitoring, native messaging bridge.
 
-let ws = null;
-let reconnectDelay = 3000;
-const MAX_RECONNECT_DELAY = 30000;
-let heartbeatInterval = null;
-let isEnabled = false;
-let serverUrl = "wss://api.ahvclaw.com/ws/computer-use";
+const HELPER_NAME = "com.ahvholding.ahvclaw_helper";
+const API_BASE = "https://api.ahvclaw.com";
+const GROUP_TITLE = "AHVclaw";
+
+let helperPort = null;
+let ahvclawGroupId = null;
+let helperStatus = { connected: false, cdpConnected: false, sessionId: null, ownedTabs: 0 };
 let authToken = "";
 let refreshToken = "";
-let activityLog = [];
-const MAX_LOG_ENTRIES = 50;
-const API_BASE = "https://api.ahvclaw.com";
 
-// --- Initialization ---
+// ─── Initialization ─────────────────────────────────────────────────────
+
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.get(["enabled", "serverUrl", "token", "refreshToken"], (data) => {
-    isEnabled = data.enabled || false;
-    serverUrl = data.serverUrl || "wss://api.ahvclaw.com/ws/computer-use";
-    authToken = data.token || "";
-    refreshToken = data.refreshToken || "";
-    updateBadge();
-    if (isEnabled && authToken) connect();
-  });
+    loadSettings();
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  chrome.storage.local.get(["enabled", "serverUrl", "token", "refreshToken"], (data) => {
-    isEnabled = data.enabled || false;
-    serverUrl = data.serverUrl || "wss://api.ahvclaw.com/ws/computer-use";
-    authToken = data.token || "";
-    refreshToken = data.refreshToken || "";
-    updateBadge();
-    if (isEnabled && authToken) connect();
-  });
+    loadSettings();
 });
 
-// --- React to popup toggle / settings changes ---
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local") return;
-  if (changes.enabled !== undefined) {
-    isEnabled = changes.enabled.newValue;
-    if (isEnabled && authToken) {
-      connect();
-    } else {
-      disconnect();
-    }
-    updateBadge();
-  }
-  if (changes.serverUrl !== undefined) {
-    serverUrl = changes.serverUrl.newValue;
-    if (isEnabled) { disconnect(); connect(); }
-  }
-  if (changes.token !== undefined) {
-    authToken = changes.token.newValue;
-    if (isEnabled && authToken) { disconnect(); connect(); }
-  }
-  if (changes.refreshToken !== undefined) {
-    refreshToken = changes.refreshToken.newValue;
-  }
-});
-
-// --- Badge ---
-function updateBadge() {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    chrome.action.setBadgeText({ text: "ON" });
-    chrome.action.setBadgeBackgroundColor({ color: "#4CAF50" });
-  } else {
-    chrome.action.setBadgeText({ text: isEnabled ? "..." : "OFF" });
-    chrome.action.setBadgeBackgroundColor({ color: isEnabled ? "#FF9800" : "#F44336" });
-  }
-}
-
-// --- Activity Log ---
-function logActivity(action, detail) {
-  const entry = { action, detail, time: Date.now() };
-  activityLog.unshift(entry);
-  if (activityLog.length > MAX_LOG_ENTRIES) activityLog.pop();
-  chrome.storage.local.set({ activityLog: activityLog.slice(0, 10) });
-}
-
-// --- Token Refresh ---
-async function tryRefreshToken() {
-  if (!refreshToken) return false;
-  try {
-    const res = await fetch(`${API_BASE}/api/auth/refresh`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_token: refreshToken })
-    });
-    if (!res.ok) return false;
-    const data = await res.json();
-    if (data.access_token) {
-      authToken = data.access_token;
-      chrome.storage.local.set({ token: authToken });
-      if (data.refresh_token) {
-        refreshToken = data.refresh_token;
-        chrome.storage.local.set({ refreshToken });
-      }
-      logActivity("refreshed", "Token refreshed successfully");
-      return true;
-    }
-  } catch (e) {
-    logActivity("error", "Token refresh failed: " + e.message);
-  }
-  return false;
-}
-
-// --- WebSocket Connection ---
-let authRetried = false;
-
-async function connect() {
-  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
-  if (!authToken) return;
-
-  const url = serverUrl.includes("?") ? `${serverUrl}&token=${authToken}` : `${serverUrl}?token=${authToken}`;
-  
-  try {
-    ws = new WebSocket(url);
-  } catch (e) {
-    logActivity("error", "WebSocket creation failed: " + e.message);
-    scheduleReconnect();
-    return;
-  }
-
-  ws.onopen = () => {
-    console.log("[AHVclaw] Connected to server");
-    reconnectDelay = 3000;
-    authRetried = false;
-    updateBadge();
-    logActivity("connected", serverUrl);
-
-    // Send initial handshake
-    wsSend({
-      type: "extension_hello",
-      version: "1.0.0",
-      capabilities: ["screenshot", "click", "type", "scroll", "navigate", "read_page", "tab_list", "tab_switch"]
-    });
-
-    // Start heartbeat
-    clearInterval(heartbeatInterval);
-    heartbeatInterval = setInterval(() => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        wsSend({ type: "heartbeat", timestamp: Date.now() });
-      }
-    }, 30000);
-  };
-
-  ws.onmessage = (event) => {
-    let msg;
-    try {
-      msg = JSON.parse(event.data);
-    } catch (e) {
-      console.error("[AHVclaw] Invalid message:", event.data);
-      return;
-    }
-    handleServerMessage(msg);
-  };
-
-  ws.onclose = async (event) => {
-    console.log("[AHVclaw] Disconnected:", event.code, event.reason);
-    cleanup();
-    updateBadge();
-
-    // 401 = auth failed, try refresh token once
-    if ((event.code === 1008 || event.code === 4001 || event.code === 1006) && !authRetried) {
-      authRetried = true;
-      logActivity("auth", "Token expired, refreshing...");
-      const refreshed = await tryRefreshToken();
-      if (refreshed) {
-        connect();
-        return;
-      }
-    }
-
-    logActivity("disconnected", `Code: ${event.code}`);
-    if (isEnabled) scheduleReconnect();
-  };
-
-  ws.onerror = (error) => {
-    console.error("[AHVclaw] WebSocket error");
-    logActivity("error", "Connection error");
-  };
-}
-
-function disconnect() {
-  if (ws) {
-    ws.onclose = null;
-    ws.close();
-    ws = null;
-  }
-  cleanup();
-  updateBadge();
-}
-
-function cleanup() {
-  clearInterval(heartbeatInterval);
-  heartbeatInterval = null;
-  ws = null;
-}
-
-function scheduleReconnect() {
-  setTimeout(() => {
-    if (isEnabled && authToken) connect();
-  }, reconnectDelay);
-  reconnectDelay = Math.min(reconnectDelay * 1.5, MAX_RECONNECT_DELAY);
-}
-
-function wsSend(data) {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(data));
-  }
-}
-
-// --- Tab tracking ---
-chrome.tabs.onActivated.addListener((activeInfo) => {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  chrome.tabs.get(activeInfo.tabId, (tab) => {
-    if (chrome.runtime.lastError) return;
-    wsSend({ type: "tab_changed", tabId: tab.id, url: tab.url, title: tab.title });
-  });
-});
-
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  if (changeInfo.status === "complete" && tab.active) {
-    wsSend({ type: "page_loaded", tabId, url: tab.url, title: tab.title });
-  }
-});
-
-// --- Command Handling ---
-// Server sends CUCommand: { id, action, params }
-// We respond with CUResult: { id, status, data, error }
-async function handleServerMessage(msg) {
-  // Heartbeat responses
-  if (msg.type === "heartbeat_ack" || msg.type === "pong") return;
-
-  // Detect command by presence of 'action' field (server CUCommand format)
-  if (!msg.action) return;
-
-  const { id, action, params } = msg;
-  const parsedParams = typeof params === "string" ? JSON.parse(params) : (params || {});
-  
-  logActivity(action, JSON.stringify(parsedParams).substring(0, 100));
-
-  try {
-    let result;
-    switch (action) {
-      case "screenshot":
-        result = await handleScreenshot();
-        break;
-      case "click":
-      case "type":
-      case "scroll":
-      case "read_page":
-        result = await forwardToContent(action, parsedParams);
-        break;
-      case "navigate":
-        result = await handleNavigate(parsedParams);
-        break;
-      case "tab_list":
-        result = await handleTabList();
-        break;
-      case "tab_switch":
-        result = await handleTabSwitch(parsedParams);
-        break;
-      default:
-        result = { success: false, error: `Unknown action: ${action}` };
-    }
-
-    // Send CUResult format: { id, status, data, error }
-    if (result.success) {
-      wsSend({ id, status: "ok", data: result.data || {} });
-    } else {
-      wsSend({ id, status: "error", error: result.error || "unknown error" });
-    }
-  } catch (err) {
-    wsSend({ id, status: "error", error: err.message });
-  }
-}
-
-// --- Screenshot ---
-async function handleScreenshot() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab) return { success: false, error: "No active tab" };
-
-  try {
-    const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: "jpeg", quality: 80 });
-    const base64 = dataUrl.replace(/^data:image\/jpeg;base64,/, "");
-    return { success: true, data: { screenshot: base64, url: tab.url, title: tab.title } };
-  } catch (err) {
-    return { success: false, error: "Screenshot failed: " + err.message };
-  }
-}
-
-// --- Forward to content script ---
-async function forwardToContent(action, params) {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab) return { success: false, error: "No active tab" };
-
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      files: ["content.js"]
-    });
-  } catch (e) {
-    // content script may already be there
-  }
-
-  return new Promise((resolve) => {
-    chrome.tabs.sendMessage(tab.id, { action, params }, (response) => {
-      if (chrome.runtime.lastError) {
-        resolve({ success: false, error: chrome.runtime.lastError.message });
-      } else if (response && response.success) {
-        // Enrich content script response with tab info
-        const data = response.data || {};
-        data.url = tab.url;
-        data.title = tab.title;
-        resolve({ success: true, data });
-      } else {
-        resolve(response || { success: false, error: "No response from content script" });
-      }
-    });
-  });
-}
-
-// --- Navigate ---
-async function handleNavigate(params) {
-  const url = params && params.url;
-  if (!url) return { success: false, error: "No URL provided" };
-
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab) return { success: false, error: "No active tab" };
-
-  return new Promise((resolve) => {
-    chrome.tabs.update(tab.id, { url }, () => {
-      const listener = (tabId, changeInfo, updatedTab) => {
-        if (tabId === tab.id && changeInfo.status === "complete") {
-          chrome.tabs.onUpdated.removeListener(listener);
-          resolve({ success: true, data: { url: updatedTab.url || url, title: updatedTab.title || "" } });
+function loadSettings() {
+    chrome.storage.local.get(["token", "refreshToken"], (data) => {
+        authToken = data.token || "";
+        refreshToken = data.refreshToken || "";
+        if (authToken) {
+            connectHelper();
         }
-      };
-      chrome.tabs.onUpdated.addListener(listener);
-      setTimeout(() => {
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve({ success: true, data: { url, title: "", note: "timeout waiting for load" } });
-      }, 30000);
+        updateBadge();
     });
-  });
 }
 
-// --- Tab List ---
-async function handleTabList() {
-  const tabs = await chrome.tabs.query({});
-  const list = tabs.map(t => ({ id: t.id, url: t.url, title: t.title, active: t.active }));
-  return { success: true, data: { tabs: list } };
+// React to storage changes (login/logout from popup)
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    if (changes.token) {
+        authToken = changes.token.newValue || "";
+        if (authToken && !helperPort) {
+            connectHelper();
+        } else if (!authToken && helperPort) {
+            disconnectHelper();
+        }
+    }
+    if (changes.refreshToken) {
+        refreshToken = changes.refreshToken.newValue || "";
+    }
+});
+
+// ─── Native Messaging ───────────────────────────────────────────────────
+
+function connectHelper() {
+    if (helperPort) return;
+    try {
+        helperPort = chrome.runtime.connectNative(HELPER_NAME);
+    } catch (err) {
+        console.error("[bg] cannot connect to helper:", err);
+        helperStatus = { connected: false, cdpConnected: false, sessionId: null, ownedTabs: 0 };
+        updateBadge();
+        return;
+    }
+
+    helperPort.onMessage.addListener((msg) => {
+        switch (msg.type) {
+            case "status":
+                helperStatus = {
+                    connected: msg.connected || false,
+                    cdpConnected: msg.cdpConnected || false,
+                    sessionId: msg.sessionId || null,
+                    ownedTabs: msg.ownedTabs || 0,
+                };
+                updateBadge();
+                chrome.storage.local.set({ helperStatus });
+                break;
+            case "public_key":
+                // Helper generated keypair — register with server
+                registerGrant(msg.public_key, msg.device_id);
+                break;
+            case "handover_accepted":
+                console.log("[bg] tab handover accepted:", msg.targetId);
+                break;
+            case "retry_cdp_result":
+                console.log("[bg] CDP retry:", msg.success ? "OK" : msg.error);
+                if (msg.success) {
+                    requestHelperStatus();
+                }
+                chrome.storage.local.set({ lastCDPRetry: msg });
+                break;
+        }
+    });
+
+    helperPort.onDisconnect.addListener(() => {
+        console.log("[bg] helper disconnected:", chrome.runtime.lastError?.message);
+        helperPort = null;
+        helperStatus = { connected: false, cdpConnected: false, sessionId: null, ownedTabs: 0 };
+        updateBadge();
+        chrome.storage.local.set({ helperStatus });
+    });
+
+    // Request initial status
+    requestHelperStatus();
 }
 
-// --- Tab Switch ---
-async function handleTabSwitch(params) {
-  const tabId = params && (params.tab_id || params.tabId);
-  if (!tabId) return { success: false, error: "No tab_id provided" };
-
-  try {
-    await chrome.tabs.update(tabId, { active: true });
-    const tab = await chrome.tabs.get(tabId);
-    await chrome.windows.update(tab.windowId, { focused: true });
-    return { success: true, data: { url: tab.url, title: tab.title } };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
+function disconnectHelper() {
+    if (helperPort) {
+        helperPort.disconnect();
+        helperPort = null;
+    }
+    helperStatus = { connected: false, cdpConnected: false, sessionId: null, ownedTabs: 0 };
+    updateBadge();
+    chrome.storage.local.set({ helperStatus });
 }
+
+function sendToHelper(msg) {
+    if (helperPort) {
+        helperPort.postMessage(msg);
+    }
+}
+
+function requestHelperStatus() {
+    sendToHelper({ type: "get_status" });
+}
+
+// ─── Grant Registration ─────────────────────────────────────────────────
+
+async function registerGrant(publicKey, deviceId) {
+    if (!authToken) return;
+    try {
+        const res = await fetch(`${API_BASE}/api/companion/grant`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${authToken}`,
+            },
+            body: JSON.stringify({ device_id: deviceId, public_key: publicKey }),
+        });
+        if (!res.ok) {
+            console.error("[bg] grant registration failed:", await res.text());
+            return;
+        }
+        console.log("[bg] grant registered for device:", deviceId);
+        chrome.storage.local.set({ grantRegistered: true, deviceId });
+    } catch (err) {
+        console.error("[bg] grant registration error:", err);
+    }
+}
+
+// ─── Tab Group Monitoring ───────────────────────────────────────────────
+
+async function findAHVclawGroup() {
+    try {
+        const groups = await chrome.tabGroups.query({ title: GROUP_TITLE });
+        if (groups.length > 0) {
+            ahvclawGroupId = groups[0].id;
+        }
+    } catch {}
+}
+
+// Detect AHVclaw group creation/update
+chrome.tabGroups.onUpdated.addListener((group) => {
+    if (group.title === GROUP_TITLE) {
+        ahvclawGroupId = group.id;
+    }
+});
+
+// Detect tab moved INTO AHVclaw group (user handover)
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+    if (changeInfo.groupId === undefined) return;
+
+    if (changeInfo.groupId === ahvclawGroupId && ahvclawGroupId !== null) {
+        // Tab moved INTO group — prompt handover consent
+        const confirmed = await showHandoverConfirm(tab);
+        if (confirmed) {
+            sendToHelper({
+                type: "tab_handover",
+                targetId: String(tabId),
+                url: tab.url,
+                title: tab.title,
+            });
+        } else {
+            // User declined — remove from group
+            try { chrome.tabs.ungroup(tabId); } catch {}
+        }
+    } else if (ahvclawGroupId !== null && changeInfo.groupId !== ahvclawGroupId) {
+        // Tab moved OUT of group — notify helper to revoke
+        sendToHelper({
+            type: "tab_revoke",
+            targetId: String(tabId),
+        });
+    }
+});
+
+// Detect tab closed
+chrome.tabs.onRemoved.addListener((tabId) => {
+    sendToHelper({
+        type: "tab_revoke",
+        targetId: String(tabId),
+    });
+});
+
+// Detect group deleted
+chrome.tabGroups.onRemoved.addListener((group) => {
+    if (group.id === ahvclawGroupId) {
+        ahvclawGroupId = null;
+        sendToHelper({ type: "revoke_all" });
+    }
+});
+
+async function showHandoverConfirm(tab) {
+    // Use simple notification approach — V2 could use a dedicated confirm dialog
+    const title = tab.title || tab.url || "tab";
+    // For V1, auto-confirm if tab is in AHVclaw group (user explicitly dragged it)
+    // The act of dragging into the named group IS the consent gesture.
+    console.log(`[bg] tab handover: ${title}`);
+    return true;
+}
+
+// ─── Kill Switch (from popup) ───────────────────────────────────────────
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.type === "kill_switch") {
+        sendToHelper({ type: "kill" });
+        // Also call server kill endpoint
+        serverKill();
+        sendResponse({ ok: true });
+    }
+    if (msg.type === "retry_cdp") {
+        sendToHelper({ type: "retry_cdp" });
+        sendResponse({ ok: true });
+    }
+    if (msg.type === "get_helper_status") {
+        requestHelperStatus();
+        sendResponse(helperStatus);
+    }
+    if (msg.type === "init_grant") {
+        sendToHelper({ type: "generate_keypair" });
+        sendResponse({ ok: true });
+    }
+    if (msg.type === "revoke_grant") {
+        serverRevoke();
+        sendResponse({ ok: true });
+    }
+    return true; // async response
+});
+
+async function serverKill() {
+    if (!authToken) return;
+    try {
+        await fetch(`${API_BASE}/api/companion/kill`, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${authToken}` },
+        });
+    } catch (err) {
+        console.error("[bg] server kill error:", err);
+    }
+}
+
+async function serverRevoke() {
+    if (!authToken) return;
+    const data = await chrome.storage.local.get(["deviceId"]);
+    if (!data.deviceId) return;
+    try {
+        await fetch(`${API_BASE}/api/companion/revoke`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${authToken}`,
+            },
+            body: JSON.stringify({ device_id: data.deviceId }),
+        });
+        chrome.storage.local.set({ grantRegistered: false });
+    } catch (err) {
+        console.error("[bg] server revoke error:", err);
+    }
+}
+
+// ─── Token Refresh ──────────────────────────────────────────────────────
+
+async function tryRefreshToken() {
+    if (!refreshToken) return false;
+    try {
+        const res = await fetch(`${API_BASE}/api/auth/refresh`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+        if (!res.ok) return false;
+        const data = await res.json();
+        if (data.access_token) {
+            authToken = data.access_token;
+            chrome.storage.local.set({ token: authToken });
+            if (data.refresh_token) {
+                refreshToken = data.refresh_token;
+                chrome.storage.local.set({ refreshToken });
+            }
+            return true;
+        }
+    } catch {}
+    return false;
+}
+
+// ─── Badge ──────────────────────────────────────────────────────────────
+
+function updateBadge() {
+    if (helperStatus.connected && helperStatus.cdpConnected) {
+        chrome.action.setBadgeText({ text: "ON" });
+        chrome.action.setBadgeBackgroundColor({ color: "#4CAF50" });
+    } else if (helperPort) {
+        chrome.action.setBadgeText({ text: "..." });
+        chrome.action.setBadgeBackgroundColor({ color: "#FF9800" });
+    } else {
+        chrome.action.setBadgeText({ text: "OFF" });
+        chrome.action.setBadgeBackgroundColor({ color: "#F44336" });
+    }
+}
+
+// Init
+findAHVclawGroup();
