@@ -34,7 +34,7 @@ func CompanionGrant() fiber.Handler {
 	}
 }
 
-// POST /api/companion/revoke — revoke device grant
+// POST /api/companion/revoke — revoke a single device grant (FIX 2: per-device, not per-user)
 func CompanionRevoke() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		userID := c.Locals("user_id").(uuid.UUID)
@@ -53,13 +53,14 @@ func CompanionRevoke() fiber.Handler {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		computeruse.Sessions.RevokeByUser(userID)
+		// Revoke only the session for this specific device, not all user sessions.
+		computeruse.Sessions.RevokeByDevice(userID, body.DeviceID)
 
 		return c.JSON(fiber.Map{"status": "revoked"})
 	}
 }
 
-// POST /api/companion/kill — server-side kill switch
+// POST /api/companion/kill — server-side kill switch (revokes ALL devices for this user)
 func CompanionKill() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		userID := c.Locals("user_id").(uuid.UUID)
@@ -68,6 +69,7 @@ func CompanionKill() fiber.Handler {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
+		// Kill all sessions across all devices for this user.
 		computeruse.Sessions.RevokeByUser(userID)
 
 		if computeruse.Hub.IsOnline(userID.String()) {
@@ -134,7 +136,7 @@ func CompanionAuditLog() fiber.Handler {
 	}
 }
 
-// nullableString returns nil for empty strings so the DB stores NULL instead of ''.
+// nullableString returns nil for empty strings so the DB stores NULL instead of .
 func nullableString(s string) interface{} {
 	if s == "" {
 		return nil

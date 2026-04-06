@@ -2,9 +2,11 @@ package computeruse
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -57,29 +59,58 @@ type cuConnection struct {
 	mu      sync.Mutex
 }
 
+// CUHub keys connections by "userID:deviceID" to support multiple devices per user.
 type CUHub struct {
 	mu    sync.RWMutex
-	conns map[string]*cuConnection
+	conns map[string]*cuConnection // key: "userID:deviceID"
 }
 
 var Hub = &CUHub{
 	conns: make(map[string]*cuConnection),
 }
 
+// Nonce cache to prevent hello replay attacks.
+var (
+	usedNonces   = make(map[string]time.Time)
+	usedNoncesMu sync.Mutex
+)
+
+// isNonceUsed checks and records a nonce. Returns true if the nonce was already seen.
+// Nonces older than 10 minutes are evicted on each call.
+func isNonceUsed(nonce string) bool {
+	usedNoncesMu.Lock()
+	defer usedNoncesMu.Unlock()
+	// Cleanup expired nonces (> 10 min).
+	for n, t := range usedNonces {
+		if time.Since(t) > 10*time.Minute {
+			delete(usedNonces, n)
+		}
+	}
+	if _, exists := usedNonces[nonce]; exists {
+		return true
+	}
+	usedNonces[nonce] = time.Now()
+	return false
+}
+
+// IsOnline returns true if any device belonging to userID is currently connected.
 func (h *CUHub) IsOnline(userID string) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	_, ok := h.conns[userID]
-	return ok
+	prefix := userID + ":"
+	for key := range h.conns {
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // SendCommand sends a legacy CUCommand and waits up to 30s for a CUResult.
-// Kept for backward compatibility.
+// Kept for backward compatibility. Uses the first connected device for userID.
 func (h *CUHub) SendCommand(userID string, cmd CUCommand) (*CUResult, error) {
-	h.mu.RLock()
-	cu, ok := h.conns[userID]
-	h.mu.RUnlock()
-	if !ok {
+	cu := h.findFirstConn(userID)
+	if cu == nil {
 		return nil, fmt.Errorf("extension not connected")
 	}
 
@@ -110,10 +141,8 @@ func (h *CUHub) SendCommand(userID string, cmd CUCommand) (*CUResult, error) {
 // SendCompanionCommand sends a session-bound CompanionCommand and waits up to 45s for a CUResult.
 // It looks up the active session for the user, increments the sequence number, and sets ExpiresAt.
 func (h *CUHub) SendCompanionCommand(userID string, action string, params json.RawMessage) (*CUResult, error) {
-	h.mu.RLock()
-	cu, ok := h.conns[userID]
-	h.mu.RUnlock()
-	if !ok {
+	cu := h.findFirstConn(userID)
+	if cu == nil {
 		return nil, fmt.Errorf("extension not connected")
 	}
 
@@ -169,26 +198,44 @@ func (h *CUHub) SendCompanionCommand(userID string, action string, params json.R
 	}
 }
 
-func (h *CUHub) Register(userID string, conn *websocket.Conn) *cuConnection {
+// findFirstConn returns the first cuConnection matching userID, or nil.
+func (h *CUHub) findFirstConn(userID string) *cuConnection {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	prefix := userID + ":"
+	for key, cu := range h.conns {
+		if strings.HasPrefix(key, prefix) {
+			return cu
+		}
+	}
+	return nil
+}
+
+// Register stores a connection keyed by "userID:deviceID".
+// If a previous connection for the same key exists it is closed first.
+func (h *CUHub) Register(userID, deviceID string, conn *websocket.Conn) *cuConnection {
+	key := userID + ":" + deviceID
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if old, ok := h.conns[userID]; ok {
+	if old, ok := h.conns[key]; ok {
 		old.conn.Close()
 	}
 	cu := &cuConnection{
 		conn:    conn,
 		pending: make(map[string]chan *CUResult),
 	}
-	h.conns[userID] = cu
-	log.Printf("[computer-use] extension connected for user %s", userID)
+	h.conns[key] = cu
+	log.Printf("[computer-use] extension connected for user %s device %s", userID, deviceID)
 	return cu
 }
 
-func (h *CUHub) Unregister(userID string) {
+// Unregister removes the connection for "userID:deviceID".
+func (h *CUHub) Unregister(userID, deviceID string) {
+	key := userID + ":" + deviceID
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	delete(h.conns, userID)
-	log.Printf("[computer-use] extension disconnected for user %s", userID)
+	delete(h.conns, key)
+	log.Printf("[computer-use] extension disconnected for user %s device %s", userID, deviceID)
 }
 
 // HandleMessage processes an incoming WebSocket message. Returns true if handled as a result.
@@ -227,11 +274,12 @@ func writeJSON(conn *websocket.Conn, v any) {
 }
 
 // handleHelperHello processes a helper_hello handshake message.
-func handleHelperHello(conn *websocket.Conn, uid uuid.UUID, msg []byte) {
+// Returns the deviceID and session on success, or empty string/nil on failure.
+func handleHelperHello(conn *websocket.Conn, uid uuid.UUID, msg []byte) (deviceID string, sess *Session) {
 	var hello HelperHello
 	if err := json.Unmarshal(msg, &hello); err != nil {
 		writeJSON(conn, map[string]string{"type": "hello_rejected", "error": "invalid hello payload"})
-		return
+		return "", nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -241,23 +289,79 @@ func handleHelperHello(conn *websocket.Conn, uid uuid.UUID, msg []byte) {
 	if err != nil {
 		log.Printf("[computer-use] hello_rejected for user %s device %s: %v", uid, hello.DeviceID, err)
 		writeJSON(conn, map[string]string{"type": "hello_rejected", "error": err.Error()})
-		return
+		return "", nil
 	}
 
 	payload := []byte(hello.SignedPayload)
 	if err := VerifyHelloSignature(grant.PublicKey, payload, hello.Signature); err != nil {
 		log.Printf("[computer-use] hello_rejected signature for user %s: %v", uid, err)
 		writeJSON(conn, map[string]string{"type": "hello_rejected", "error": "signature verification failed"})
-		return
+		return "", nil
 	}
 
-	sess := Sessions.Create(uid, hello.DeviceID)
-	log.Printf("[computer-use] hello_accepted for user %s session %s", uid, sess.ID)
+	// --- FIX 1: Parse and validate the SignedPayload fields ---
+	rawPayload, err := base64.StdEncoding.DecodeString(hello.SignedPayload)
+	if err != nil {
+		// Try URL-safe base64 as fallback.
+		rawPayload, err = base64.URLEncoding.DecodeString(hello.SignedPayload)
+		if err != nil {
+			// SignedPayload may be plain JSON rather than base64.
+			rawPayload = []byte(hello.SignedPayload)
+		}
+	}
+
+	var spFields struct {
+		UserID    string `json:"user_id"`
+		DeviceID  string `json:"device_id"`
+		Timestamp string `json:"timestamp"`
+		Nonce     string `json:"nonce"`
+	}
+	if err := json.Unmarshal(rawPayload, &spFields); err != nil {
+		writeJSON(conn, map[string]string{"type": "hello_rejected", "error": "signed_payload is not valid JSON"})
+		return "", nil
+	}
+
+	// Verify payload fields match the envelope.
+	if spFields.UserID != uid.String() {
+		writeJSON(conn, map[string]string{"type": "hello_rejected", "error": "signed_payload user_id mismatch"})
+		return "", nil
+	}
+	if spFields.DeviceID != hello.DeviceID {
+		writeJSON(conn, map[string]string{"type": "hello_rejected", "error": "signed_payload device_id mismatch"})
+		return "", nil
+	}
+
+	// Verify timestamp freshness (within ±5 minutes).
+	ts, err := time.Parse(time.RFC3339, spFields.Timestamp)
+	if err != nil {
+		writeJSON(conn, map[string]string{"type": "hello_rejected", "error": "signed_payload timestamp invalid"})
+		return "", nil
+	}
+	if diff := time.Since(ts); diff > 5*time.Minute || diff < -5*time.Minute {
+		writeJSON(conn, map[string]string{"type": "hello_rejected", "error": "signed_payload timestamp expired or skewed"})
+		return "", nil
+	}
+
+	// Verify nonce has not been used before.
+	if spFields.Nonce == "" {
+		writeJSON(conn, map[string]string{"type": "hello_rejected", "error": "signed_payload nonce missing"})
+		return "", nil
+	}
+	if isNonceUsed(spFields.Nonce) {
+		log.Printf("[computer-use] hello_rejected replay for user %s nonce %s", uid, spFields.Nonce)
+		writeJSON(conn, map[string]string{"type": "hello_rejected", "error": "nonce already used (replay detected)"})
+		return "", nil
+	}
+	// --- End FIX 1 ---
+
+	newSess := Sessions.Create(uid, hello.DeviceID)
+	log.Printf("[computer-use] hello_accepted for user %s device %s session %s", uid, hello.DeviceID, newSess.ID)
 	writeJSON(conn, map[string]any{
 		"type":       "hello_accepted",
-		"session_id": sess.ID,
-		"expires_at": sess.ExpiresAt.UTC().Format(time.RFC3339),
+		"session_id": newSess.ID,
+		"expires_at": newSess.ExpiresAt.UTC().Format(time.RFC3339),
 	})
+	return hello.DeviceID, newSess
 }
 
 // handleSessionRenew processes a session_renew message.
@@ -322,14 +426,18 @@ func WSHandler(broadcastFn func(userID string, msg []byte), statusFn func(userID
 		}
 
 		uid := userID.String()
-		cu := Hub.Register(uid, conn)
-		if statusFn != nil {
-			statusFn(uid, true)
-		}
+
+		// FIX 3: Do NOT register or broadcast online until helper_hello is verified.
+		var authenticated bool
+		var deviceID string
+		var cu *cuConnection
+
 		defer func() {
-			Hub.Unregister(uid)
-			if statusFn != nil {
-				statusFn(uid, false)
+			if authenticated {
+				Hub.Unregister(uid, deviceID)
+				if statusFn != nil {
+					statusFn(uid, false)
+				}
 			}
 			conn.Close()
 		}()
@@ -354,12 +462,31 @@ func WSHandler(broadcastFn func(userID string, msg []byte), statusFn func(userID
 			if json.Unmarshal(msg, &peek) == nil {
 				switch peek.Type {
 				case "helper_hello":
-					handleHelperHello(conn, userID, msg)
+					dev, _ := handleHelperHello(conn, userID, msg)
+					if dev != "" && !authenticated {
+						// Handshake succeeded — now register and broadcast online.
+						deviceID = dev
+						cu = Hub.Register(uid, deviceID, conn)
+						authenticated = true
+						if statusFn != nil {
+							statusFn(uid, true)
+						}
+					}
 					continue
 				case "session_renew":
+					if !authenticated {
+						writeJSON(conn, map[string]string{"type": "error", "error": "not authenticated"})
+						continue
+					}
 					handleSessionRenew(conn, userID, msg)
 					continue
 				}
+			}
+
+			// Reject all non-hello messages until authenticated.
+			if !authenticated {
+				writeJSON(conn, map[string]string{"type": "error", "error": "not authenticated"})
+				continue
 			}
 
 			if HandleMessage(cu, msg) {

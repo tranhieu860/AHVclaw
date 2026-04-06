@@ -19,12 +19,12 @@ const SessionDuration = 1 * time.Hour
 
 // Session holds an in-memory browser-companion session.
 type Session struct {
-	ID       string
-	UserID   uuid.UUID
-	DeviceID string
+	ID        string
+	UserID    uuid.UUID
+	DeviceID  string
 	ExpiresAt time.Time
-	Seq      int64
-	mu       sync.Mutex
+	Seq       int64
+	mu        sync.Mutex
 }
 
 // ValidateSeq checks that seq is strictly greater than the last seen sequence number.
@@ -40,9 +40,10 @@ func (s *Session) ValidateSeq(seq int64) bool {
 }
 
 // SessionManager is a thread-safe in-memory store of active sessions.
+// byUser is keyed by "userID:deviceID" to support multiple devices per user.
 type SessionManager struct {
-	sessions map[string]*Session  // keyed by session ID
-	byUser   map[string]*Session  // keyed by user ID string (one active session per user)
+	sessions map[string]*Session // keyed by session ID
+	byUser   map[string]*Session // keyed by "userID:deviceID"
 	mu       sync.RWMutex
 }
 
@@ -52,10 +53,10 @@ var Sessions = &SessionManager{
 	byUser:   make(map[string]*Session),
 }
 
-// Create invalidates any existing session for userID, then creates and stores a new one.
-// Returns the new Session.
+// Create invalidates any existing session for the userID+deviceID pair,
+// then creates and stores a new one. Returns the new Session.
 func (m *SessionManager) Create(userID uuid.UUID, deviceID string) *Session {
-	uid := userID.String()
+	key := userID.String() + ":" + deviceID
 	sessionID := uuid.New().String()
 
 	s := &Session{
@@ -68,13 +69,13 @@ func (m *SessionManager) Create(userID uuid.UUID, deviceID string) *Session {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Invalidate existing session for this user.
-	if old, ok := m.byUser[uid]; ok {
+	// Invalidate existing session for this user+device.
+	if old, ok := m.byUser[key]; ok {
 		delete(m.sessions, old.ID)
 	}
 
 	m.sessions[sessionID] = s
-	m.byUser[uid] = s
+	m.byUser[key] = s
 	return s
 }
 
@@ -89,15 +90,19 @@ func (m *SessionManager) Get(sessionID string) *Session {
 	return s
 }
 
-// GetByUser returns the active session for the given user, or nil if none exists / expired.
+// GetByUser returns any active session for the given user (first device found), or nil.
 func (m *SessionManager) GetByUser(userID uuid.UUID) *Session {
+	prefix := userID.String() + ":"
 	m.mu.RLock()
-	s, ok := m.byUser[userID.String()]
-	m.mu.RUnlock()
-	if !ok || time.Now().After(s.ExpiresAt) {
-		return nil
+	defer m.mu.RUnlock()
+	for key, s := range m.byUser {
+		if len(key) > len(prefix) && key[:len(prefix)] == prefix {
+			if time.Now().Before(s.ExpiresAt) {
+				return s
+			}
+		}
 	}
-	return s
+	return nil
 }
 
 // Renew extends the expiry of the session with sessionID by SessionDuration.
@@ -121,23 +126,36 @@ func (m *SessionManager) Revoke(sessionID string) {
 		return
 	}
 	delete(m.sessions, sessionID)
-	uid := s.UserID.String()
-	if cur, ok := m.byUser[uid]; ok && cur.ID == sessionID {
-		delete(m.byUser, uid)
+	key := s.UserID.String() + ":" + s.DeviceID
+	if cur, ok := m.byUser[key]; ok && cur.ID == sessionID {
+		delete(m.byUser, key)
 	}
 }
 
-// RevokeByUser removes all sessions belonging to userID.
-func (m *SessionManager) RevokeByUser(userID uuid.UUID) {
-	uid := userID.String()
+// RevokeByDevice removes the session belonging to userID+deviceID only.
+func (m *SessionManager) RevokeByDevice(userID uuid.UUID, deviceID string) {
+	key := userID.String() + ":" + deviceID
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	s, ok := m.byUser[uid]
+	s, ok := m.byUser[key]
 	if !ok {
 		return
 	}
 	delete(m.sessions, s.ID)
-	delete(m.byUser, uid)
+	delete(m.byUser, key)
+}
+
+// RevokeByUser removes ALL sessions belonging to userID across all devices.
+func (m *SessionManager) RevokeByUser(userID uuid.UUID) {
+	prefix := userID.String() + ":"
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for key, s := range m.byUser {
+		if len(key) > len(prefix) && key[:len(prefix)] == prefix {
+			delete(m.sessions, s.ID)
+			delete(m.byUser, key)
+		}
+	}
 }
 
 // VerifyHelloSignature verifies an RSA PKCS1v15 SHA-256 signature.
