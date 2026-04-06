@@ -139,13 +139,8 @@ func (h *CUHub) SendCommand(userID string, cmd CUCommand) (*CUResult, error) {
 }
 
 // SendCompanionCommand sends a session-bound CompanionCommand and waits up to 45s for a CUResult.
-// It looks up the active session for the user, increments the sequence number, and sets ExpiresAt.
+// It looks up the active session for the user, then routes to the exact device that owns the session.
 func (h *CUHub) SendCompanionCommand(userID string, action string, params json.RawMessage) (*CUResult, error) {
-	cu := h.findFirstConn(userID)
-	if cu == nil {
-		return nil, fmt.Errorf("extension not connected")
-	}
-
 	uid, err := uuid.Parse(userID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid user_id: %w", err)
@@ -154,6 +149,12 @@ func (h *CUHub) SendCompanionCommand(userID string, action string, params json.R
 	sess := Sessions.GetByUser(uid)
 	if sess == nil {
 		return nil, fmt.Errorf("no active session for user")
+	}
+
+	// Route to the exact device that owns this session.
+	cu := h.findConn(userID, sess.DeviceID)
+	if cu == nil {
+		return nil, fmt.Errorf("device %s not connected", sess.DeviceID)
 	}
 
 	expiresAt := time.Now().Add(30 * time.Second)
@@ -198,6 +199,25 @@ func (h *CUHub) SendCompanionCommand(userID string, action string, params json.R
 	}
 }
 
+// SendKillToAllDevices sends a kill command to every connected device for userID.
+// Used by the kill switch — sessions are already revoked, so this uses legacy CUCommand.
+func (h *CUHub) SendKillToAllDevices(userID string) {
+	devConns := h.FindConnsByUser(userID)
+	for devID, cu := range devConns {
+		cmdID := uuid.New().String()
+		cmd := CUCommand{
+			ID:     cmdID,
+			Action: "kill",
+		}
+		payload, _ := json.Marshal(cmd)
+		if err := cu.conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+			log.Printf("[computer-use] failed to send kill to user %s device %s: %v", userID, devID, err)
+		} else {
+			log.Printf("[computer-use] kill sent to user %s device %s", userID, devID)
+		}
+	}
+}
+
 // findFirstConn returns the first cuConnection matching userID, or nil.
 func (h *CUHub) findFirstConn(userID string) *cuConnection {
 	h.mu.RLock()
@@ -209,6 +229,43 @@ func (h *CUHub) findFirstConn(userID string) *cuConnection {
 		}
 	}
 	return nil
+}
+
+// findConn returns the cuConnection for exact userID+deviceID, or nil.
+func (h *CUHub) findConn(userID, deviceID string) *cuConnection {
+	key := userID + ":" + deviceID
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.conns[key]
+}
+
+// FindConnsByUser returns all connections for userID as a map of deviceID -> cuConnection.
+func (h *CUHub) FindConnsByUser(userID string) map[string]*cuConnection {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	prefix := userID + ":"
+	result := make(map[string]*cuConnection)
+	for key, cu := range h.conns {
+		if strings.HasPrefix(key, prefix) {
+			devID := key[len(prefix):]
+			result[devID] = cu
+		}
+	}
+	return result
+}
+
+// UnregisterByUser removes ALL connections for the given userID.
+func (h *CUHub) UnregisterByUser(userID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	prefix := userID + ":"
+	for key, cu := range h.conns {
+		if strings.HasPrefix(key, prefix) {
+			cu.conn.Close()
+			delete(h.conns, key)
+			log.Printf("[computer-use] extension disconnected for user %s (kill-all)", userID)
+		}
+	}
 }
 
 // Register stores a connection keyed by "userID:deviceID".

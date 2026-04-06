@@ -56,6 +56,9 @@ func CompanionRevoke() fiber.Handler {
 		// Revoke only the session for this specific device, not all user sessions.
 		computeruse.Sessions.RevokeByDevice(userID, body.DeviceID)
 
+		// Drop the WebSocket connection for this device so IsOnline reflects reality.
+		computeruse.Hub.Unregister(userID.String(), body.DeviceID)
+
 		return c.JSON(fiber.Map{"status": "revoked"})
 	}
 }
@@ -72,15 +75,9 @@ func CompanionKill() fiber.Handler {
 		// Kill all sessions across all devices for this user.
 		computeruse.Sessions.RevokeByUser(userID)
 
-		if computeruse.Hub.IsOnline(userID.String()) {
-			// Kill is an out-of-band command sent via legacy protocol since
-			// sessions are already revoked. Helper must accept "kill" action
-			// without session binding.
-			_, _ = computeruse.Hub.SendCommand(userID.String(), computeruse.CUCommand{
-				ID:     uuid.New().String(),
-				Action: "kill",
-			})
-		}
+		// Send kill to ALL connected devices for this user, then drop all connections.
+		computeruse.Hub.SendKillToAllDevices(userID.String())
+		computeruse.Hub.UnregisterByUser(userID.String())
 
 		return c.JSON(fiber.Map{"status": "killed"})
 	}
