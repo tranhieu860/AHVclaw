@@ -109,6 +109,8 @@ async function main() {
                 });
             },
             onSessionEstablished: (sessionId) => {
+                // Reset anti-replay counter for new session
+                executor.lastSeq = 0;
                 executor.auth.sessionId = sessionId;
             },
         });

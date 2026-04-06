@@ -54,7 +54,12 @@ class WSClient {
             }
             if (msg.type === "renew_rejected") {
                 console.error(`[ws] renew rejected: ${msg.error}`);
+                // FAIL CLOSED: grant revoked or session invalid — go offline immediately.
+                // Close socket so backend drops connection and IsOnline returns false.
                 this.alive = false;
+                this.sessionId = null;
+                if (this.ws) this.ws.close();
+                this.onKill();
                 return;
             }
 
