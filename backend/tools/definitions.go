@@ -147,9 +147,10 @@ func serverStatusDef() ToolDef {
 }
 
 func browserNavigateDef() ToolDef {
-	return makeTool("browser_navigate", "Open a website URL in browser (PREFERRED for all web pages). Use this instead of http_request for websites. After navigating, use browser_extract to read page content", `{
+	return makeTool("browser_navigate", "Open a website URL in browser. Smart routing: uses server browser for public pages, user's real browser (via companion) for pages requiring login/cookies. Set use_helper=true to explicitly use user's browser. After navigating, use browser_extract to read page content", `{
 		"type":"object","properties":{
-			"url":{"type":"string","description":"URL to navigate to"}
+			"url":{"type":"string","description":"URL to navigate to"},
+			"use_helper":{"type":"boolean","description":"Force using user's real browser via companion helper (for pages needing login/cookies)"}
 		},"required":["url"]
 	}`)
 }
@@ -179,7 +180,7 @@ func browserTypeDef() ToolDef {
 }
 
 func browserExtractDef() ToolDef {
-	return makeTool("browser_extract", "Read/extract all text content from current browser page (after browser_navigate). Gets full rendered content including JavaScript-generated data like prices, tables, etc.", `{
+	return makeTool("browser_extract", "Read/extract text content from current browser page (after browser_navigate). Works with both server browser and user's real browser depending on context. Gets full rendered content including JavaScript-generated data", `{
 		"type":"object","properties":{}
 	}`)
 }
