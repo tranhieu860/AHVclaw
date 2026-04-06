@@ -90,19 +90,25 @@ func (m *SessionManager) Get(sessionID string) *Session {
 	return s
 }
 
-// GetByUser returns any active session for the given user (first device found), or nil.
+// GetByUser returns the most recently active session for the given user, or nil.
+// When multiple devices have sessions, the one with the latest ExpiresAt wins
+// (most recently renewed = most active device). This ensures deterministic routing.
 func (m *SessionManager) GetByUser(userID uuid.UUID) *Session {
 	prefix := userID.String() + ":"
+	now := time.Now()
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	var best *Session
 	for key, s := range m.byUser {
 		if len(key) > len(prefix) && key[:len(prefix)] == prefix {
-			if time.Now().Before(s.ExpiresAt) {
-				return s
+			if now.Before(s.ExpiresAt) {
+				if best == nil || s.ExpiresAt.After(best.ExpiresAt) {
+					best = s
+				}
 			}
 		}
 	}
-	return nil
+	return best
 }
 
 // Renew extends the expiry of the session with sessionID by SessionDuration.

@@ -218,8 +218,20 @@ func (h *CUHub) SendKillToAllDevices(userID string) {
 	}
 }
 
-// findFirstConn returns the first cuConnection matching userID, or nil.
+// findFirstConn returns the connection for the most recently active device.
+// It consults SessionManager to pick the device with the latest session ExpiresAt,
+// ensuring deterministic routing when multiple helpers are online.
+// Falls back to any connected device if no active session exists.
 func (h *CUHub) findFirstConn(userID string) *cuConnection {
+	uid, err := uuid.Parse(userID)
+	if err == nil {
+		if sess := Sessions.GetByUser(uid); sess != nil {
+			if cu := h.findConn(userID, sess.DeviceID); cu != nil {
+				return cu
+			}
+		}
+	}
+	// Fallback: any connection for this user (e.g. pre-hello legacy client).
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	prefix := userID + ":"
@@ -286,13 +298,18 @@ func (h *CUHub) Register(userID, deviceID string, conn *websocket.Conn) *cuConne
 	return cu
 }
 
-// Unregister removes the connection for "userID:deviceID".
+// Unregister removes the connection for "userID:deviceID" and closes the WebSocket.
+// Closing the socket causes the WSHandler read-loop to exit and clean up auth state.
+// Safe to call multiple times — no-op if key is already removed.
 func (h *CUHub) Unregister(userID, deviceID string) {
 	key := userID + ":" + deviceID
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	delete(h.conns, key)
-	log.Printf("[computer-use] extension disconnected for user %s device %s", userID, deviceID)
+	if cu, ok := h.conns[key]; ok {
+		cu.conn.Close()
+		delete(h.conns, key)
+		log.Printf("[computer-use] extension disconnected for user %s device %s", userID, deviceID)
+	}
 }
 
 // HandleMessage processes an incoming WebSocket message. Returns true if handled as a result.
