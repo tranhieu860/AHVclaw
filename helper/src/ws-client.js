@@ -11,6 +11,7 @@ class WSClient {
         this.onKill = options.onKill || (() => {});
         this.onConnected = options.onConnected || (() => {});
         this.onSessionEstablished = options.onSessionEstablished || (() => {});
+        this.onRenewRejected = options.onRenewRejected || (() => {});
         this.ws = null;
         this.reconnectDelay = 3000;
         this.maxReconnectDelay = 30000;
@@ -55,7 +56,7 @@ class WSClient {
             if (msg.type === "renew_rejected") {
                 console.error(`[ws] renew rejected: ${msg.error}`);
                 // FAIL CLOSED: grant revoked or session invalid — go offline immediately.
-                // Close socket so backend drops connection and IsOnline returns false.
+                this.onRenewRejected(msg.error);
                 this.alive = false;
                 this.sessionId = null;
                 if (this.ws) this.ws.close();

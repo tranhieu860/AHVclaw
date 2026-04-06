@@ -51,9 +51,18 @@ async function main() {
     let killing = false;
     let cdpReady = false;
 
+    // Audit helper for critical events (sends to server + local JSONL)
+    function auditCritical(action, result, extra = {}) {
+        audit.log(
+            { action, params: extra },
+            { status: result, blocked_reason: extra.blocked_reason || null },
+        );
+    }
+
     async function killSwitch() {
         if (killing) return;
         killing = true;
+        auditCritical("kill_switch", "triggered", { source: "helper" });
         console.log("[kill] step 1: stop accepting commands");
         executor.accepting = false;
 
@@ -85,7 +94,10 @@ async function main() {
         return new WSClient(SERVER_URL, {
             token: TOKEN,
             onCommand: (cmd) => executor.execute(cmd, ws),
-            onKill: killWithTimeout,
+            onKill: () => {
+                auditCritical("helper_disconnect", "kill_received");
+                killWithTimeout();
+            },
             onConnected: () => {
                 const nonce = crypto.randomBytes(16).toString("hex");
                 const payloadObj = {
@@ -111,6 +123,9 @@ async function main() {
                 executor.lastSeq = 0;
                 executor.auth.sessionId = sessionId;
             },
+            onRenewRejected: (error) => {
+                auditCritical("renew_rejected", "fail_closed", { error });
+            },
         });
     }
 
@@ -131,6 +146,7 @@ async function main() {
     // Resolve to CDP target. Reject if ambiguous (>1 match = fail-closed).
     nativeMsg.onMessage("tab_handover", async (msg) => {
         if (!msg.url) {
+            auditCritical("handover_rejected", "blocked", { error: "url required" });
             nativeMsg.send({ type: "handover_rejected", error: "url required" });
             return;
         }
@@ -146,11 +162,15 @@ async function main() {
             }
 
             if (matches.length === 0) {
-                nativeMsg.send({ type: "handover_rejected", error: "no CDP target for URL: " + msg.url });
+                const error = "no CDP target for URL: " + msg.url;
+                auditCritical("handover_rejected", "blocked", { error, url: msg.url });
+                nativeMsg.send({ type: "handover_rejected", error });
                 return;
             }
             if (matches.length > 1) {
-                nativeMsg.send({ type: "handover_rejected", error: "ambiguous: " + matches.length + " tabs with same URL+title, cannot resolve safely" });
+                const error = "ambiguous: " + matches.length + " tabs with same URL+title";
+                auditCritical("handover_rejected", "blocked", { error, url: msg.url });
+                nativeMsg.send({ type: "handover_rejected", error });
                 return;
             }
 
@@ -168,6 +188,7 @@ async function main() {
             console.log(`[native-messaging] handover: chrome:${chromeTabId} -> cdp:${target.id} (${msg.url})`);
         } catch (err) {
             console.error("[native-messaging] handover error:", err.message);
+            auditCritical("handover_rejected", "error", { error: err.message, url: msg.url });
             nativeMsg.send({ type: "handover_rejected", error: err.message });
         }
     });
@@ -182,11 +203,14 @@ async function main() {
                 return;
             }
         }
+        auditCritical("tab_revoke_no_mapping", "warning", { chromeTabId });
         console.warn(`[native-messaging] tab_revoke: no mapping for chrome:${chromeTabId}`);
     });
 
     nativeMsg.onMessage("revoke_all", () => {
+        const count = tabManager.ownedTabs.size;
         tabManager.revokeAll();
+        auditCritical("revoke_all", "ok", { tabs_revoked: count });
         console.log("[native-messaging] revoke_all: AHVclaw group deleted");
     });
 
@@ -205,6 +229,7 @@ async function main() {
     });
 
     nativeMsg.onMessage("kill", () => {
+        auditCritical("kill_switch", "triggered", { source: "extension" });
         killWithTimeout();
     });
 
@@ -235,12 +260,9 @@ async function main() {
     });
 
     // Hook createTab: deferred ownership via createTabPending + NM round-trip.
-    // Executor.tabCreate() awaits the returned promise, which only resolves
-    // after extension sends tab_grouped ack.
     const origCreateTab = tabManager.createTab;
     tabManager.createTab = async function (url) {
         const { targetId, nonce, promise } = await tabManager.createTabPending(url);
-        // Tell extension to find tab by nonce title and group it
         nativeMsg.send({
             type: "tab_created",
             targetId: targetId,
@@ -248,7 +270,12 @@ async function main() {
             url: url || "about:blank",
         });
         // Block until extension confirms grouping (or 5s timeout → reject)
-        return promise;
+        try {
+            return await promise;
+        } catch (err) {
+            auditCritical("pending_timeout", "fail_closed", { targetId, url });
+            throw err;
+        }
     };
 
     // FAIL-CLOSED: connect to Chrome FIRST. Only go online if CDP succeeds.

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"log"
 
 	"github.com/ahvholding/ahvclaw/computeruse"
 	"github.com/ahvholding/ahvclaw/db"
@@ -27,14 +28,16 @@ func CompanionGrant() fiber.Handler {
 
 		grant, err := computeruse.CreateGrant(c.Context(), userID, body.DeviceID, body.PublicKey)
 		if err != nil {
+			log.Printf("[companion] grant failed user=%s device=%s: %v", userID, body.DeviceID, err)
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
+		log.Printf("[companion] grant registered user=%s device=%s", userID, body.DeviceID)
 		return c.JSON(grant)
 	}
 }
 
-// POST /api/companion/revoke — revoke a single device grant (FIX 2: per-device, not per-user)
+// POST /api/companion/revoke — revoke a single device grant
 func CompanionRevoke() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		userID := c.Locals("user_id").(uuid.UUID)
@@ -50,15 +53,14 @@ func CompanionRevoke() fiber.Handler {
 		}
 
 		if err := computeruse.RevokeGrant(c.Context(), userID, body.DeviceID); err != nil {
+			log.Printf("[companion] revoke failed user=%s device=%s: %v", userID, body.DeviceID, err)
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		// Revoke only the session for this specific device, not all user sessions.
 		computeruse.Sessions.RevokeByDevice(userID, body.DeviceID)
-
-		// Drop the WebSocket connection for this device so IsOnline reflects reality.
 		computeruse.Hub.Unregister(userID.String(), body.DeviceID)
 
+		log.Printf("[companion] revoked user=%s device=%s", userID, body.DeviceID)
 		return c.JSON(fiber.Map{"status": "revoked"})
 	}
 }
@@ -69,16 +71,15 @@ func CompanionKill() fiber.Handler {
 		userID := c.Locals("user_id").(uuid.UUID)
 
 		if err := computeruse.RevokeAllGrants(c.Context(), userID); err != nil {
+			log.Printf("[companion] kill failed user=%s: %v", userID, err)
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		// Kill all sessions across all devices for this user.
 		computeruse.Sessions.RevokeByUser(userID)
-
-		// Send kill to ALL connected devices for this user, then drop all connections.
 		computeruse.Hub.SendKillToAllDevices(userID.String())
 		computeruse.Hub.UnregisterByUser(userID.String())
 
+		log.Printf("[companion] KILL user=%s — all devices killed", userID)
 		return c.JSON(fiber.Map{"status": "killed"})
 	}
 }
@@ -107,6 +108,14 @@ func CompanionAuditLog() fiber.Handler {
 		}
 		if body.Result == "" {
 			body.Result = "logged"
+		}
+
+		// Log critical events to server stdout for journalctl monitoring
+		switch body.Action {
+		case "handover_rejected", "pending_timeout", "renew_rejected",
+			"kill_switch", "revoke_all", "tab_revoke_no_mapping", "helper_disconnect":
+			log.Printf("[companion-audit] CRITICAL user=%s action=%s result=%s blocked=%s",
+				userID, body.Action, body.Result, body.BlockedReason)
 		}
 
 		ctx := context.Background()
