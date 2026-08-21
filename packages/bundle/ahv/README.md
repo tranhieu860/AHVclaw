@@ -1,4 +1,4 @@
-# @ahv/dsh-bundle-ahv
+# @ahvclaw/dsh-bundle-ahv
 
 Profile bundle của AHV Holding. Sits over `@deepseek-ai/dsh-base` và rewire
 harness dùng router LLM riêng của AHV, kèm persona tiếng Việt.

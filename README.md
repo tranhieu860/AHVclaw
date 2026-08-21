@@ -12,8 +12,8 @@ của AHV Holding — không cần config bên ngoài.
 ## Cài đặt
 
 ```bash
-# Từ npm (khi published):
-npm install -g @ahv/cli
+# Từ npm:
+npm install -g @ahvclaw/cli
 
 # Hoặc từ source:
 git clone https://github.com/tranhieu860/AHVclaw.git
@@ -42,7 +42,7 @@ dsh --profile headless "..."     # dsh gốc, cần DEEPSEEK_API_KEY
 
 Lần đầu `ahv` chạy sẽ tự init profile `ahv` tại `$DSH_HOME/profiles/ahv/`
 (mặc định `~/.dsh/profiles/ahv/`) và load bundle
-[`@ahv/dsh-bundle-ahv`](./packages/bundle/ahv/) — bundle này đè config
+[`@ahvclaw/dsh-bundle-ahv`](./packages/bundle/ahv/) — bundle này đè config
 default model trỏ vào router `auto.ahvchat.com/v1`, model `AHV-Holding`,
 persona tiếng Việt.
 
