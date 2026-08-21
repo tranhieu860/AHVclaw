@@ -62,7 +62,7 @@ Kế thừa từ dsh + gói riêng AHV:
 ## Plugin cài sẵn trong bundle `ahv`
 
 Base bundle của dsh đã bật ~40 plugin (bash, fs, web, subagent, todo,
-plan, skill, workflow…). AHV thêm sẵn 6 plugin nữa để user có toolbelt
+plan, skill, workflow…). AHV thêm sẵn 7 plugin nữa để user có toolbelt
 đầy ngay khi cài:
 
 | Nhóm | Plugin | Mục đích |
@@ -70,6 +70,7 @@ plan, skill, workflow…). AHV thêm sẵn 6 plugin nữa để user có toolbel
 | **Terminal** | `dsh-terminal`, `dsh-terminal-bash`, `dsh-tool-terminal` | Persistent PTY session — mở shell sống xuyên tool call. Dùng cho SSH lâu dài, tmux-style flow, script long-running. 6 tool: `terminal_open/send/read/signal/close/list`. |
 | **Self-modify** | `dsh-cordis-host-runner`, `dsh-tool-cordis` | Agent inspect runtime của chính mình và mount plugin ad-hoc in-memory. 5 tool: `cordis_inspect/define/run/stop/undefine`. Không ghi file, không survive restart. |
 | **Plugin Market** | `dshmarket` ([dsh-market/dsh-market](https://github.com/dsh-market/dsh-market)) | UI browse + one-click install 1.5k+ community plugin. Hot-toggle enable/disable. Backup/restore. Chỉ active trong web mode (`ahv web`). |
+| **Superpowers** | `superpowers-dsh` ([LayneChai/superpowers-dsh](https://github.com/LayneChai/superpowers-dsh)) | 14 curated agent skill — TDD, systematic-debugging, brainstorming, writing/executing-plans, subagent-driven-dev, git-worktrees, dispatching-parallel-agents, code-review flow, verification-before-completion, using-superpowers. Adapt từ [obra/superpowers](https://github.com/obra/superpowers) của Claude Code. Model gọi qua `skill_list` / `skill_load` tự động. |
 
 Xem [bundle README](./packages/bundle/ahv/README.md) cho row-by-row config
 và [`docs/plugins.html`](https://ahvclaw.com/docs/plugins.html) cho hướng

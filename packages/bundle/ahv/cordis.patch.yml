@@ -110,3 +110,14 @@
     # ahv-web` where the web-app bundle brings the Settings surface.
     - id: dsh-market
       name: 'dshmarket'
+
+    # Superpowers skill pack (LayneChai/superpowers-dsh, adapted from
+    # obra/superpowers). Adds 14 curated agent skills — TDD,
+    # systematic-debugging, brainstorming, writing-plans, executing-plans,
+    # subagent-driven-development, using-git-worktrees, dispatching-parallel-
+    # agents, verification-before-completion, requesting/receiving code
+    # review, finishing-a-development-branch, writing-skills,
+    # using-superpowers. Registers a skill provider into ctx.skills so the
+    # model sees them via skill_list/skill_load without further config.
+    - id: superpowers-dsh
+      name: 'superpowers-dsh'

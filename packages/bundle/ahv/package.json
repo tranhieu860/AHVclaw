@@ -35,6 +35,7 @@
     "@deepseek-ai/dsh-tool-terminal": "workspace:^",
     "@deepseek-ai/dsh-cordis-host-runner": "workspace:^",
     "@deepseek-ai/dsh-tool-cordis": "workspace:^",
-    "dshmarket": "^1.17.1"
+    "dshmarket": "^1.17.1",
+    "superpowers-dsh": "^0.1.1"
   }
 }

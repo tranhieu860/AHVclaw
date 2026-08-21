@@ -28,7 +28,7 @@ Cần env var `AHV_API_KEY` cho router `auto.ahvchat.com/v1`.
 ## Plugin thêm so với base
 
 Base bundle đã có ~40 plugin (bash, fs, web, subagent, todo, plan,
-skill, workflow…). AHV bundle bật thêm 6 plugin nữa cho toolbelt đầy
+skill, workflow…). AHV bundle bật thêm 7 plugin nữa cho toolbelt đầy
 hơn ngay khi cài:
 
 | Plugin | Mục đích |
@@ -36,6 +36,7 @@ hơn ngay khi cài:
 | `@deepseek-ai/dsh-terminal` + `-terminal-bash` + `-tool-terminal` | Persistent PTY sessions — session shell sống xuyên tool call, cho SSH lâu dài, tmux-style flow, script long-running |
 | `@deepseek-ai/dsh-cordis-host-runner` + `-tool-cordis` | Self-modification — agent tự inspect runtime của chính mình và mount plugin ad-hoc trong-memory (`cordis_inspect`, `cordis_define`, `cordis_run`) |
 | `dshmarket` ([dsh-market/dsh-market](https://github.com/dsh-market/dsh-market)) | Plugin Market UI — browse + one-click install 1.5k+ community plugin. Chỉ active khi profile mount web-app; headless mode silently disabled. |
+| `superpowers-dsh` ([LayneChai/superpowers-dsh](https://github.com/LayneChai/superpowers-dsh)) | 14 curated skill pack (TDD, systematic-debugging, brainstorming, writing/executing-plans, subagent-driven-dev, git-worktrees, dispatching-parallel-agents, verification-before-completion, code-review flow…). Adapted từ [obra/superpowers](https://github.com/obra/superpowers) cho Claude Code. |
 
 Chi tiết row-by-row trong `cordis.patch.yml`.
 
