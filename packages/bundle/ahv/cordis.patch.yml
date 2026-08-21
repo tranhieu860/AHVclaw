@@ -1,0 +1,73 @@
+# The AHV bundle patch: sits over dsh-base and rewires the harness for AHV
+# Holding's LLM router (auto.ahvchat.com) plus a Vietnamese-first persona.
+# Applied by the `ahv` profile so `pnpm ahv "task"` needs zero config.
+#
+# Each row addresses a base row by id, replacing that row's `config` block
+# (patch semantics — not deep merge). Row ids that don't exist in base
+# would be silently ignored, so this file mirrors base's ids exactly.
+
+# --- LLM routing ---------------------------------------------------------
+
+# Point the default agent model at the AHV router. Provider name matches
+# the route key we register in llm-pi-ai below.
+- id: agent-default-model
+  config:
+    provider: ahv-router
+    model: AHV-Holding
+
+# Register the AHV router as a hand-declared OpenAI-compatible route.
+# Base's llm-pi-ai row starts empty; this patch replaces the whole config
+# with one provider profile. Users override in ~/.dsh/settings.yaml.
+- id: llm-pi-ai
+  config:
+    providers:
+      ahv-router:
+        displayName: AHV Router
+        apiKeyEnv: AHV_API_KEY
+        api: openai-completions
+        baseURL: https://auto.ahvchat.com/v1
+        # The router's virtual combos accept streaming + tool-use over the
+        # OpenAI wire; capacities are guesses from public endpoint behavior.
+        # A route mis-sized this way still serves — pi-ai's route defaults
+        # (256K ctx / 32K max) cover unknown models — but pin the ones we
+        # actually use to avoid surprise truncation.
+        models:
+          - id: AHV-Holding
+            name: AHV-Holding (default)
+            contextWindow: 128000
+            maxTokens: 8192
+          - id: AHV-Holding-TroLy
+            name: AHV-Holding-TroLy
+            contextWindow: 128000
+            maxTokens: 8192
+          - id: AHV-Holding-DEV
+            name: AHV-Holding-DEV (dev combo)
+            contextWindow: 128000
+            maxTokens: 8192
+          - id: Grok-SuperHeavy
+            name: Grok SuperHeavy
+            contextWindow: 128000
+            maxTokens: 8192
+
+# Turn off DeepSeek's search route so it doesn't try to authenticate with
+# a DEEPSEEK_API_KEY the AHV user doesn't have. Fetch stays off in base.
+- id: web-search-deepseek
+  disabled: true
+
+# The web-search tool now has no provider mounted. Disable the tool so the
+# model doesn't see a broken option; add a real search provider (Brave,
+# Tavily, or AHV's own once available) in a future patch.
+- id: tool-web
+  disabled: true
+
+# --- Product surface ----------------------------------------------------
+
+# Vietnamese-first persona. Kept short — plan-mode, tool descriptions, and
+# per-command feedback bring the rest of the operational rules.
+- id: system-prompt
+  config:
+    persona: >-
+      Bạn là AHV CLI, agentic dev assistant chạy trong terminal của user Việt
+      Nam. Model hiện tại: {{model}}. Working directory: {{cwd}}. Nói tiếng
+      Việt trừ khi user gõ bằng ngôn ngữ khác. Ngắn gọn, chính xác, dùng tool
+      khi cần thay vì đoán. Xác nhận với user trước mọi thay đổi phá hủy.

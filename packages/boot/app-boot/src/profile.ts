@@ -114,6 +114,10 @@ export function resolveProfileDir(name: string, home: string = resolveDshHome())
 export const PROFILE_TEMPLATES: Record<string, readonly string[]> = {
   web: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'],
   headless: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-headless'],
+  // AHV profile: base + one-shot runner + the AHV rebrand patch layer that
+  // rewires the default model to the AHV router. The rebrand rides last so
+  // its config overrides beat headless's defaults.
+  ahv: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-headless', '@ahv/dsh-bundle-ahv'],
 }
 
 /** Installation-owned bundle tuples normalized to the shipped template. */

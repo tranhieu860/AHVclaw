@@ -1,59 +1,94 @@
-# DeepSeek Harness
+# AHV CLI
 
-English | [中文](README.zh.md)
+[![Website](https://img.shields.io/badge/site-ahvclaw.com-06b6d4)](https://ahvclaw.com)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
+[![Built on: dsh](https://img.shields.io/badge/built%20on-DeepSeek%20Harness-8b5cf6)](https://github.com/deepseek-ai/deepseek-harness)
 
-DeepSeek Harness (`dsh`) is an open-source agent harness developed by [DeepSeek AI](https://deepseek.com).
+**AHV CLI** là agentic dev terminal cho developer Việt, built on
+[DeepSeek Harness (`dsh`)](https://github.com/deepseek-ai/deepseek-harness).
+Cài một dòng, gõ `ahv`, có ngay tool-calling REPL với router LLM riêng
+của AHV Holding — không cần config bên ngoài.
 
-It uses an architecture where **everything is a plugin**, and is powered by [Cordis](https://github.com/cordiverse/cordis), whose design is described in [_A Programming Paradigm for Spatiotemporal Composability_](https://github.com/cordiverse/paper).
+## Cài đặt
 
-## Developer preview
+```bash
+# Từ npm (khi published):
+npm install -g @ahv/cli
 
-DeepSeek Harness is currently in _developer preview_ and is iterating rapidly. **THERE WILL BE COMPATIBILITY-BREAKING CHANGES.**
-
-## Run
-
-### Run from `npm`
-
-Install `Node.js`, then run:
-
-```sh
-npx @deepseek-ai/dsh web
-```
-
-The command starts the Web UI at `http://127.0.0.1:3080` by default and opens it in the default browser for a local launch. An SSH launch only prints the host URL because the SSH client or editor owns the local forwarded address. Pass `--no-open` to run the server without opening a browser. See [Web UI guide](docs/user/guide/index.md).
-
-### Run from source
-
-To run from a repository checkout:
-
-```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git
-cd deepseek-harness
+# Hoặc từ source:
+git clone https://github.com/tranhieu860/AHVclaw.git
+cd AHVclaw
 pnpm install
-pnpm run build
-pnpm dsh web
 ```
 
-`pnpm run build` prepares the repository artifacts. `pnpm dsh web` uses those built artifacts without rebuilding.
+Yêu cầu Node.js ^22.19 hoặc >= 24, pnpm 10+.
 
-## Community and support
+## Chạy
 
-- Feel free to submit feedback or bug reports through [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions).
-- Add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic to your plugin repository for discoverability.
-- Join <a href="https://discord.gg/Ycq5dCaS4">DeepSeek Harness Discord community</a>.
+```bash
+export AHV_API_KEY=sk-...                       # key từ AHV Holding
+ahv "Tìm file lớn nhất trong /var/log rồi tail 20 dòng"
 
-## Contributing
+# Hoặc mode dsh gốc (tự chọn profile):
+dsh --profile ahv "..."
+dsh --profile headless "..."   # cần DEEPSEEK_API_KEY
+dsh --profile web              # UI web local :3080
+```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+Lần đầu `ahv` chạy sẽ tự init profile `ahv` tại `$DSH_HOME/profiles/ahv/`
+(mặc định `~/.dsh/profiles/ahv/`) và load bundle
+[`@ahv/dsh-bundle-ahv`](./packages/bundle/ahv/) — bundle này đè config
+default model trỏ vào router `auto.ahvchat.com/v1`, model `AHV-Holding`,
+persona tiếng Việt.
 
-## Development
+## Tính năng
 
-Start with the [development guide](docs/development.md) and [architecture documentation](docs/architecture.md).
+Kế thừa từ dsh + gói riêng AHV:
 
-For agents, follow [AGENTS.md](AGENTS.md).
+- **Tool-calling REPL** với bash, filesystem, grep, web-search, workflow,
+  subagent (delegate), todo, plan-mode, skill.
+- **Multi-provider** qua `pi-ai`: DeepSeek, Anthropic, OpenAI, và mọi
+  endpoint OpenAI-compat (bao gồm AHV router).
+- **Session persist + resume** tại `$DSH_HOME/sessions/`.
+- **Sandbox permissions** (read-only / workspace-write / danger-full-access)
+  qua env `DSH_PERMISSION_MODE`.
+- **Plugin ecosystem** đầy đủ dsh — `pnpm dsh plugin add <name>` để cài.
+
+## Cấu hình
+
+Ba lớp, sau đè trước:
+
+1. **Bundle** (built-in) — `packages/bundle/ahv/cordis.patch.yml`.
+2. **Profile user layer** — `$DSH_HOME/profiles/ahv/cordis.patch.yml`.
+3. **Settings** — `$DSH_HOME/settings.yaml` (dsh Models page ghi vào đây).
+
+Credentials: `AHV_API_KEY` env var hoặc `$DSH_HOME/.credentials.yaml`.
+
+## Quan hệ với upstream
+
+Repo này là **soft fork** của `deepseek-ai/deepseek-harness`:
+
+- Giữ **nguyên** kiến trúc, package names `@deepseek-ai/*`, và workspace
+  layout — để merge upstream không xung đột.
+- **Thêm**: `packages/bundle/ahv/` (bundle config riêng), `ahv` bin alias
+  trong `apps/cli`, `PROFILE_TEMPLATES.ahv` trong `packages/boot/app-boot`.
+- **Docs**: [`README.dsh-upstream.md`](./README.dsh-upstream.md) là README
+  gốc dsh; [`PULLING_UPSTREAM.md`](./PULLING_UPSTREAM.md) là quy trình
+  merge upstream định kỳ.
+
+Full dev doc từ upstream: [`AGENTS.md`](./AGENTS.md) (test, build,
+snapshot, plugin authoring, capability seam, v.v.).
 
 ## License
 
-[MIT](LICENSE)
+MIT (giữ nguyên upstream). Xem [LICENSE](./LICENSE).
 
-Third-party dependencies and their licenses are disclosed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+"DeepSeek Harness" là trademark của DeepSeek — tuân thủ
+[BRAND_GUIDELINES.md](./BRAND_GUIDELINES.md). AHV CLI dùng tên "AHV" cho
+fork của mình, không dùng trademark trực tiếp.
+
+## Liên hệ
+
+- Landing: <https://ahvclaw.com>
+- Repo: <https://github.com/tranhieu860/AHVclaw>
+- Owner: Hiếu (`tranhieu860@gmail.com`)
