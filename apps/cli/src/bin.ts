@@ -27,18 +27,23 @@ function readVersion(): string {
 
 /**
  * When invoked as `ahv` (AHV Holding rebrand alias), default the profile
- * to `ahv` so the router-preconfigured bundle loads without the user
- * having to pass --profile every call. `dsh` invocation still requires an
- * explicit --profile.
+ * so the router-preconfigured bundle loads without --profile every call.
+ * - `ahv "task"`      → --profile ahv       (headless one-shot, terminal only)
+ * - `ahv web`         → --profile ahv-web   (web UI + Plugin Market)
+ * - `ahv --profile X` → left as-is
+ * - `dsh …`           → left as-is (upstream compat)
  */
 function withAhvDefaultProfile(argv: readonly string[]): string[] {
   const invokedAs = basename(process.argv[1] ?? '').toLowerCase()
   const looksLikeAhv = invokedAs === 'ahv' || invokedAs === 'ahv.js' || invokedAs === 'ahv.mjs'
   if (!looksLikeAhv) return [...argv]
-  // The bin sees the whole argv (post-slice(2) here), so peek before parseDshArgs.
   const hasProfileFlag = argv.some(a => a === '--profile' || a === '-p' || a.startsWith('--profile='))
-  const usesSubcommand = argv.length > 0 && ['web', 'plugin', 'ahv'].includes(argv[0] ?? '')
-  if (hasProfileFlag || usesSubcommand) return [...argv]
+  if (hasProfileFlag) return [...argv]
+  // `ahv web [args…]` → `--profile ahv-web [args…]` (drop the `web` alias).
+  if (argv[0] === 'web') return ['--profile', 'ahv-web', ...argv.slice(1)]
+  // Preserve `plugin` and any other real subcommand as-is.
+  const usesSubcommand = argv.length > 0 && ['plugin'].includes(argv[0] ?? '')
+  if (usesSubcommand) return [...argv]
   return ['--profile', 'ahv', ...argv]
 }
 

@@ -27,12 +27,17 @@ Yêu cầu Node.js ^22.19 hoặc >= 24, pnpm 10+.
 
 ```bash
 export AHV_API_KEY=sk-...                       # key từ AHV Holding
+
+# One-shot terminal (default):
 ahv "Tìm file lớn nhất trong /var/log rồi tail 20 dòng"
 
-# Hoặc mode dsh gốc (tự chọn profile):
+# Web UI + Plugin Market:
+ahv web                          # mở http://127.0.0.1:3080
+
+# Hoặc explicit profile:
 dsh --profile ahv "..."
-dsh --profile headless "..."   # cần DEEPSEEK_API_KEY
-dsh --profile web              # UI web local :3080
+dsh --profile ahv-web            # web mode với AHV router
+dsh --profile headless "..."     # dsh gốc, cần DEEPSEEK_API_KEY
 ```
 
 Lần đầu `ahv` chạy sẽ tự init profile `ahv` tại `$DSH_HOME/profiles/ahv/`
@@ -57,17 +62,27 @@ Kế thừa từ dsh + gói riêng AHV:
 ## Plugin cài sẵn trong bundle `ahv`
 
 Base bundle của dsh đã bật ~40 plugin (bash, fs, web, subagent, todo,
-plan, skill, workflow…). AHV thêm sẵn 5 plugin nữa để user có toolbelt
+plan, skill, workflow…). AHV thêm sẵn 6 plugin nữa để user có toolbelt
 đầy ngay khi cài:
 
 | Nhóm | Plugin | Mục đích |
 |------|--------|----------|
-| **Terminal** | `dsh-terminal`, `dsh-terminal-bash`, `dsh-tool-terminal` | Persistent PTY session — mở shell sống xuyên tool call. Dùng cho SSH lâu dài, tmux-style flow, script long-running. Model có 6 tool: `terminal_open/send/read/signal/close/list`. |
+| **Terminal** | `dsh-terminal`, `dsh-terminal-bash`, `dsh-tool-terminal` | Persistent PTY session — mở shell sống xuyên tool call. Dùng cho SSH lâu dài, tmux-style flow, script long-running. 6 tool: `terminal_open/send/read/signal/close/list`. |
 | **Self-modify** | `dsh-cordis-host-runner`, `dsh-tool-cordis` | Agent inspect runtime của chính mình và mount plugin ad-hoc in-memory. 5 tool: `cordis_inspect/define/run/stop/undefine`. Không ghi file, không survive restart. |
+| **Plugin Market** | `dshmarket` ([dsh-market/dsh-market](https://github.com/dsh-market/dsh-market)) | UI browse + one-click install 1.5k+ community plugin. Hot-toggle enable/disable. Backup/restore. Chỉ active trong web mode (`ahv web`). |
 
 Xem [bundle README](./packages/bundle/ahv/README.md) cho row-by-row config
 và [`docs/plugins.html`](https://ahvclaw.com/docs/plugins.html) cho hướng
 dẫn cài thêm plugin từ npm ecosystem.
+
+## Hai profile
+
+`ahv` bin hỗ trợ 2 profile theo cú pháp bạn gõ:
+
+| Command | Profile | Mode | Dùng khi |
+|---------|---------|------|----------|
+| `ahv "task"` | `ahv` | Headless one-shot | Task nhanh trong terminal, không cần UI |
+| `ahv web` | `ahv-web` | Web UI local :3080 | Cần Plugin Market UI, browse conversation, models page |
 
 ## Auto-update
 

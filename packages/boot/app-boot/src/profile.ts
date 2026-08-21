@@ -118,6 +118,9 @@ export const PROFILE_TEMPLATES: Record<string, readonly string[]> = {
   // rewires the default model to the AHV router. The rebrand rides last so
   // its config overrides beat headless's defaults.
   ahv: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-headless', '@ahv/dsh-bundle-ahv'],
+  // AHV Web: same rebrand + web-app bundle so the browser UI + Plugin
+  // Market UI light up. Used by `ahv web` bin shortcut.
+  'ahv-web': ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@ahv/dsh-bundle-ahv'],
 }
 
 /** Installation-owned bundle tuples normalized to the shipped template. */

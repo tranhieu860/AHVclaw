@@ -100,3 +100,13 @@
       name: '@deepseek-ai/dsh-cordis-host-runner'
     - id: tool-cordis
       name: '@deepseek-ai/dsh-tool-cordis'
+
+    # Plugin Market (dsh-market/dsh-market, npm: dshmarket). Community
+    # plugin catalog — browse, search, one-click install/uninstall,
+    # backup/restore, hot-reload — surfaced under Settings → Plugin Market
+    # in the dsh web UI. Silently disables itself under headless (no UI
+    # to render into), so mounting here costs nothing when the user runs
+    # `ahv` (default headless) and lights up only under `ahv --profile
+    # ahv-web` where the web-app bundle brings the Settings surface.
+    - id: dsh-market
+      name: 'dshmarket'
