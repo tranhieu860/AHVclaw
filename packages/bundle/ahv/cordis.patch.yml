@@ -71,3 +71,32 @@
       Nam. Model hiện tại: {{model}}. Working directory: {{cwd}}. Nói tiếng
       Việt trừ khi user gõ bằng ngôn ngữ khác. Ngắn gọn, chính xác, dùng tool
       khi cần thay vì đoán. Xác nhận với user trước mọi thay đổi phá hủy.
+
+# --- Bundled extras (AHV opinionated defaults over base) ----------------
+# Rows below are `insert`s — they add new plugin fibers rather than
+# patch base rows. Every plugin here is opt-in in dsh upstream but ships
+# on by default in AHV so a new user gets a fuller toolbelt out of the
+# box.
+
+- insert:
+    # Persistent PTY sessions — complements one-shot `bash` with a
+    # shell that survives across tool calls (SSH, tmux-like flows,
+    # long-running scripts you want to poke at).
+    - id: terminal-registry
+      name: '@deepseek-ai/dsh-terminal'
+    - id: terminal-bash
+      name: '@deepseek-ai/dsh-terminal-bash'
+      disabled: !!js process.platform === 'win32'
+    - id: tool-terminal
+      name: '@deepseek-ai/dsh-tool-terminal'
+      config:
+        enableRunInBackground: true
+
+    # Self-modification runtime — the agent can inspect its own live
+    # runtime and mount ephemeral in-process plugins (`cordis_inspect`,
+    # `cordis_define`, `cordis_run`, `cordis_stop`, `cordis_undefine`).
+    # In-memory only; nothing survives restart, no files written.
+    - id: cordis-host-runner
+      name: '@deepseek-ai/dsh-cordis-host-runner'
+    - id: tool-cordis
+      name: '@deepseek-ai/dsh-tool-cordis'

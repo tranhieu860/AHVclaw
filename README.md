@@ -54,6 +54,33 @@ Kế thừa từ dsh + gói riêng AHV:
   qua env `DSH_PERMISSION_MODE`.
 - **Plugin ecosystem** đầy đủ dsh — `pnpm dsh plugin add <name>` để cài.
 
+## Plugin cài sẵn trong bundle `ahv`
+
+Base bundle của dsh đã bật ~40 plugin (bash, fs, web, subagent, todo,
+plan, skill, workflow…). AHV thêm sẵn 5 plugin nữa để user có toolbelt
+đầy ngay khi cài:
+
+| Nhóm | Plugin | Mục đích |
+|------|--------|----------|
+| **Terminal** | `dsh-terminal`, `dsh-terminal-bash`, `dsh-tool-terminal` | Persistent PTY session — mở shell sống xuyên tool call. Dùng cho SSH lâu dài, tmux-style flow, script long-running. Model có 6 tool: `terminal_open/send/read/signal/close/list`. |
+| **Self-modify** | `dsh-cordis-host-runner`, `dsh-tool-cordis` | Agent inspect runtime của chính mình và mount plugin ad-hoc in-memory. 5 tool: `cordis_inspect/define/run/stop/undefine`. Không ghi file, không survive restart. |
+
+Xem [bundle README](./packages/bundle/ahv/README.md) cho row-by-row config
+và [`docs/plugins.html`](https://ahvclaw.com/docs/plugins.html) cho hướng
+dẫn cài thêm plugin từ npm ecosystem.
+
+## Auto-update
+
+Sync upstream dsh + rebuild:
+
+```bash
+./scripts/ahv-update.sh
+# hoặc: pnpm run ahv:update  (nếu có script trong root package.json)
+```
+
+Xem [PULLING_UPSTREAM.md](./PULLING_UPSTREAM.md) cho quy trình chi tiết
++ cách handle conflict.
+
 ## Cấu hình
 
 Ba lớp, sau đè trước:
