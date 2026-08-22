@@ -12,7 +12,7 @@
 [![Latest release](https://img.shields.io/github/v/tag/tranhieu860/AHVclaw?label=release&color=06b6d4&style=flat-square)](https://github.com/tranhieu860/AHVclaw/releases/latest)
 [![Website](https://img.shields.io/badge/site-ahvclaw.com-a78bfa?style=flat-square)](https://ahvclaw.com)
 [![Web UI](https://img.shields.io/badge/live-ahv.ahvclaw.com-06b6d4?style=flat-square)](https://ahv.ahvclaw.com)
-[![Plugin registry](https://img.shields.io/badge/registry-10%20plugin-a78bfa?style=flat-square)](https://ahvclaw.com/admin)
+[![Plugin registry](https://img.shields.io/badge/registry-11%20plugin-a78bfa?style=flat-square)](https://ahvclaw.com/admin)
 [![License MIT](https://img.shields.io/badge/license-MIT-16a34a?style=flat-square)](./LICENSE)
 [![Node ≥22](https://img.shields.io/badge/node-%E2%89%A522-16a34a?style=flat-square)](https://nodejs.org/)
 
@@ -45,7 +45,7 @@ ahv --version                     # ahv v0.2.0-p2 (commit c4b1b07, dsh 0.1.1-rc.
 
 ## 🔌 Plugin cài sẵn
 
-Base bundle của dsh mang ~40 plugin core (bash, fs, web, subagent, todo, plan, skill, workflow). AHV thêm **10 plugin** cho toolbelt xịn ngay từ đầu:
+Base bundle của dsh mang ~40 plugin core (bash, fs, web, subagent, todo, plan, skill, workflow). AHV thêm **11 plugin** cho toolbelt xịn ngay từ đầu:
 
 | Nhóm | Plugin | Mục đích |
 |---|---|---|
@@ -55,6 +55,7 @@ Base bundle của dsh mang ~40 plugin core (bash, fs, web, subagent, todo, plan,
 | 🦸 Superpowers | `superpowers-dsh` | 14 curated skill: TDD, debugging, planning, git-worktrees, code-review flow. |
 | 🔑 Subscriptions | `dsh-plugin-subscriptions` | ChatGPT Codex / Claude Pro / Grok Premium làm LLM provider — không cần API key thêm. |
 | 🤖 Bot adapter | `bot-runner`, `bot-startup` | JSONL streamer cho Telegram/automation. Contract pin theo git tag. |
+| 🌐 Browser runtime | `@anweat/dsh-browser` | Self-contained Playwright + OpenCLI, 15+ tool (open/click/type/screenshot/scroll/fill/execute/auth). Headless-friendly. |
 
 Full catalog live tại **[ahvclaw.com/admin](https://ahvclaw.com/admin)** — auto-track version pinned vs latest mỗi 6h, badge stale/latest cho từng plugin.
 

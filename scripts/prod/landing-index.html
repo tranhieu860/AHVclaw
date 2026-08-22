@@ -146,7 +146,7 @@ footer a { color: var(--muted); }
 </header>
 
 <div class="hero wrap">
-  <span class="pill"><span class="dot"></span>v0.2.0-p2 · bot-ready</span>
+  <span class="pill"><span class="dot"></span>v0.2.1 · browser tool included</span>
   <h1><span class="grad">Agentic terminal</span><br />cho developer Việt.</h1>
   <p class="tagline">
     Cài một dòng, chạy bất cứ đâu. 50+ plugin sẵn (persistent terminal, self-modification, Plugin Market 1.5k+ community, 14 Superpowers skill, ChatGPT/Claude/Grok subscription providers, bot JSONL adapter). Multi-provider. Tool-calling native. Session persist + resume. Tất cả trong terminal của bạn.
@@ -294,7 +294,7 @@ footer a { color: var(--muted); }
     <h2>Plugin cài sẵn</h2>
     <p class="sub">Cài <code>ahv</code> là có ngay ~50 plugin. Base dsh mang 40 plugin cốt lõi (shell, fs, web, subagent…); AHV thêm 10 plugin nữa cho toolbelt xịn ngay từ đầu. Full catalog live tại <a href="/admin" target="_blank" rel="noopener">admin CMS</a> — track version pinned vs latest, auto-refresh mỗi 6h.</p>
 
-    <h3 style="margin-top:32px;font-size:16px;color:var(--muted);text-transform:uppercase;letter-spacing:0.12em;">⭐ AHV bundle (10 plugin thêm)</h3>
+    <h3 style="margin-top:32px;font-size:16px;color:var(--muted);text-transform:uppercase;letter-spacing:0.12em;">⭐ AHV bundle (11 plugin thêm)</h3>
     <div class="grid">
       <div class="card">
         <span class="icon">🖥️</span>
@@ -324,7 +324,12 @@ footer a { color: var(--muted); }
       <div class="card">
         <span class="icon">🤖</span>
         <h3>Bot adapter</h3>
-        <p><code>bot-runner</code> + <code>bot-startup</code> (AHV built-in). Non-interactive JSONL streamer cho Telegram/automation bot: <code>ahv run --prompt-file X --output jsonl --session-id ID</code>. Subscribe session/event bus, emit taxonomy chuẩn (<code>session_meta</code>, <code>assistant_delta</code>, <code>tool_status</code>, <code>assistant_final</code>, <code>turn_end</code>, <code>error</code>). Exit code 0/1/2/124 theo bot spec. Session id caller-supplied + genuine resume. Contract pin: <a href="https://github.com/tranhieu860/AHVclaw/releases/tag/v0.2.0-p2" target="_blank" rel="noopener">v0.2.0-p2 ↗</a></p>
+        <p><code>bot-runner</code> + <code>bot-startup</code> (AHV built-in). Non-interactive JSONL streamer cho Telegram/automation bot: <code>ahv run --prompt-file X --output jsonl --session-id ID</code>. Subscribe session/event bus, emit taxonomy chuẩn (<code>session_meta</code>, <code>assistant_delta</code>, <code>tool_status</code>, <code>assistant_final</code>, <code>turn_end</code>, <code>error</code>). Exit code 0/1/2/124 theo bot spec. Session id caller-supplied + genuine resume. Contract pin: <a href="https://github.com/tranhieu860/AHVclaw/releases/latest" target="_blank" rel="noopener">latest release ↗</a></p>
+      </div>
+      <div class="card">
+        <span class="icon">🌐</span>
+        <h3>Browser runtime</h3>
+        <p><code>@anweat/dsh-browser</code> — self-contained Playwright + OpenCLI, headless-friendly (chạy được cả server, bot, CLI, desktop). 15+ tool: <code>browser_open/read/screenshot/click/type/scroll/execute/recipe_run/userscript_run/auth_profile</code>. Security serious: <code>authProfile.allowedDomains</code> gate, RulePack SHA-256 pinned init scripts, approval mode standard/autonomous/unrestricted. Chromium cache share global 400MB — <code>browser_install</code> tự pull khi thiếu. <a href="https://github.com/anweat/dsh-browser" target="_blank" rel="noopener">anweat/dsh-browser ↗</a></p>
       </div>
     </div>
 
