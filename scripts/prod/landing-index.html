@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AHV CLI — Agentic dev terminal</title>
+<meta name="description" content="AHV CLI — agentic development terminal. Cài một dòng, chạy bất cứ đâu. Multi-provider (Anthropic, OpenAI, DeepSeek). Tool-calling native (bash, file, grep). Plugin-friendly." />
+<meta property="og:title" content="AHV CLI — Agentic dev terminal" />
+<meta property="og:description" content="Cài một dòng, chạy bất cứ đâu. Multi-provider, tool-calling native, plugin-friendly." />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://ahvclaw.com" />
+<meta name="theme-color" content="#0a0a0f" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='28'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E" />
+<style>
+:root {
+  --bg: #0a0a0f;
+  --bg-elev: #12121a;
+  --border: #1f1f2e;
+  --text: #e8e8f0;
+  --muted: #8a8aa0;
+  --accent: #7dd3fc;
+  --accent-2: #a78bfa;
+  --success: #4ade80;
+  --code-bg: #08080d;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: var(--font-sans); line-height: 1.6; -webkit-font-smoothing: antialiased; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.wrap { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+/* Header */
+header { padding: 20px 0; border-bottom: 1px solid var(--border); }
+header .wrap { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.logo { font-family: var(--font-mono); font-weight: 700; font-size: 18px; letter-spacing: -0.02em; color: var(--text); display: inline-flex; align-items: center; gap: 8px; }
+.logo .bolt { color: var(--accent); }
+nav { display: flex; gap: 24px; font-size: 14px; }
+nav a { color: var(--muted); }
+nav a:hover { color: var(--text); text-decoration: none; }
+
+/* Hero */
+.hero { padding: 96px 0 72px; text-align: left; }
+.pill { display: inline-block; padding: 4px 12px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--muted); font-family: var(--font-mono); }
+.pill .dot { display: inline-block; width: 6px; height: 6px; background: var(--success); border-radius: 50%; margin-right: 6px; vertical-align: middle; animation: pulse 2s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+h1 { font-size: clamp(40px, 6vw, 68px); line-height: 1.05; margin: 24px 0 20px; letter-spacing: -0.03em; font-weight: 700; }
+h1 .grad { background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.tagline { font-size: 20px; color: var(--muted); max-width: 640px; margin: 0 0 40px; }
+
+/* Install box */
+.install {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  max-width: 640px;
+  font-family: var(--font-mono);
+}
+.install .prompt { color: var(--accent); user-select: none; }
+.install .cmd { flex: 1; font-size: 15px; overflow-x: auto; white-space: nowrap; }
+.install button {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  transition: all 0.15s;
+}
+.install button:hover { color: var(--text); border-color: var(--accent); }
+.install button.copied { color: var(--success); border-color: var(--success); }
+
+.cta-row { display: flex; gap: 12px; margin-top: 24px; flex-wrap: wrap; }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; border: 1px solid transparent; transition: all 0.15s; }
+.btn-primary { background: var(--accent); color: #0a0a0f; }
+.btn-primary:hover { background: #a5e3fd; text-decoration: none; }
+.btn-secondary { border-color: var(--border); color: var(--text); }
+.btn-secondary:hover { border-color: var(--muted); text-decoration: none; }
+
+/* Sections */
+section { padding: 72px 0; border-top: 1px solid var(--border); }
+h2 { font-size: 32px; margin: 0 0 12px; letter-spacing: -0.02em; font-weight: 600; }
+.sub { color: var(--muted); font-size: 16px; margin: 0 0 40px; }
+
+/* Feature grid */
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; }
+.card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; padding: 24px; transition: border-color 0.15s; }
+.card:hover { border-color: var(--muted); }
+.card .icon { font-size: 24px; margin-bottom: 12px; display: block; }
+.card h3 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
+.card p { font-size: 14px; color: var(--muted); margin: 0; }
+
+/* Terminal demo */
+.term { background: var(--code-bg); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; font-family: var(--font-mono); font-size: 14px; }
+.term-header { background: var(--bg-elev); padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+.term-header .dot { width: 12px; height: 12px; border-radius: 50%; }
+.term-header .dot.r { background: #ff5f56; }
+.term-header .dot.y { background: #ffbd2e; }
+.term-header .dot.g { background: #27c93f; }
+.term-header .title { margin-left: 12px; color: var(--muted); font-size: 12px; }
+.term-body { padding: 20px 24px; line-height: 1.5; overflow-x: auto; }
+.term-body .cmd-line { color: var(--text); }
+.term-body .prompt { color: var(--accent); }
+.term-body .user { color: var(--text); }
+.term-body .out { color: var(--muted); }
+.term-body .tool { color: var(--accent-2); }
+.term-body .ok { color: var(--success); }
+
+/* Provider tags */
+.tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.tag { font-family: var(--font-mono); font-size: 12px; padding: 4px 10px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 6px; color: var(--muted); }
+
+/* Footer */
+footer { border-top: 1px solid var(--border); padding: 40px 0; margin-top: 40px; color: var(--muted); font-size: 14px; }
+footer .wrap { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+footer a { color: var(--muted); }
+
+@media (max-width: 640px) {
+  .hero { padding: 64px 0 48px; }
+  nav { gap: 16px; font-size: 13px; }
+  .install { flex-direction: column; align-items: stretch; padding: 16px; }
+  .install .cmd { white-space: normal; word-break: break-all; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <a href="/" class="logo"><span class="bolt">⚡</span> AHV CLI</a>
+    <nav>
+      <a href="#features">Tính năng</a>
+      <a href="#plugins">Plugins</a>
+      <a href="/docs/">Docs</a>
+      <a href="/apply">Xin key</a>
+      <a href="https://github.com/tranhieu860/AHVclaw" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<div class="hero wrap">
+  <span class="pill"><span class="dot"></span>v0.2.0-p2 · bot-ready</span>
+  <h1><span class="grad">Agentic terminal</span><br />cho developer Việt.</h1>
+  <p class="tagline">
+    Cài một dòng, chạy bất cứ đâu. 50+ plugin sẵn (persistent terminal, self-modification, Plugin Market 1.5k+ community, 14 Superpowers skill, ChatGPT/Claude/Grok subscription providers, bot JSONL adapter). Multi-provider. Tool-calling native. Session persist + resume. Tất cả trong terminal của bạn.
+  </p>
+
+  <div class="install">
+    <span class="prompt">$</span>
+    <span class="cmd" id="cmd">curl -fsSL https://ahvclaw.com/install.sh | bash</span>
+    <button id="copy" aria-label="Copy install command">Copy</button>
+  </div>
+
+  <div class="cta-row">
+    <a class="btn btn-primary" href="/apply">🔑 Xin API key miễn phí</a>
+    <a class="btn btn-secondary" href="#quickstart">Bắt đầu →</a>
+    <a class="btn btn-secondary" href="https://github.com/tranhieu860/AHVclaw" target="_blank" rel="noopener">↗ GitHub</a>
+  </div>
+</div>
+
+<section id="features">
+  <div class="wrap">
+    <h2>Vì sao dùng AHV CLI?</h2>
+    <p class="sub">Xây cho developer đang phải chuyển tab, copy-paste giữa ChatGPT và terminal cả ngày.</p>
+    <div class="grid">
+      <div class="card">
+        <span class="icon">⚡</span>
+        <h3>Zero setup</h3>
+        <p><code>curl … | bash</code> → gõ <code>ahv</code>. Không Docker, không DB. Chỉ cần Node ≥22 và API key.</p>
+      </div>
+      <div class="card">
+        <span class="icon">🧰</span>
+        <h3>Tools tích hợp</h3>
+        <p>bash, file_read, file_write, grep — model gọi trực tiếp, kết quả cắt bounded để không blow context.</p>
+      </div>
+      <div class="card">
+        <span class="icon">🔀</span>
+        <h3>Multi-provider</h3>
+        <p>Anthropic, OpenAI, DeepSeek, hoặc bất kỳ endpoint OpenAI-compat. Đổi bằng 1 flag.</p>
+      </div>
+      <div class="card">
+        <span class="icon">💾</span>
+        <h3>Session persist</h3>
+        <p>Mỗi session lưu tại <code>~/.ahv/sessions/</code>. Resume bất cứ lúc nào bằng <code>ahv --resume &lt;id&gt;</code>.</p>
+      </div>
+      <div class="card">
+        <span class="icon">🇻🇳</span>
+        <h3>Tiếng Việt-first</h3>
+        <p>System prompt + UI tiếng Việt mặc định. Set <code>language: "en"</code> trong config nếu cần English.</p>
+      </div>
+      <div class="card">
+        <span class="icon">🔌</span>
+        <h3>Plugin-friendly</h3>
+        <p>Mọi tool + provider theo cùng 1 interface. Cài thêm từ npm/GitHub qua <code>dsh plugin add</code>. Registry admin ở <a href="/admin" target="_blank" rel="noopener">/admin</a> tự track version pinned vs latest.</p>
+      </div>
+      <div class="card">
+        <span class="icon">🔑</span>
+        <h3>Subscription providers</h3>
+        <p>Đã có ChatGPT Pro/Codex, Claude Pro, Grok Premium? Login OAuth 1 lần qua browser, dùng subscription làm LLM provider — không phải trả API token thêm. <code>ahv login url grok</code> → click browser → xong.</p>
+      </div>
+      <div class="card">
+        <span class="icon">🤖</span>
+        <h3>Bot-ready</h3>
+        <p>JSONL adapter chuẩn cho Telegram/automation bot: <code>ahv run --prompt-file X --output jsonl --session-id ID</code>. Session id caller-supplied, genuine resume, exit code taxonomy 0/1/2/124. Bot pin theo git tag (<code>v0.2.0-p2</code>).</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="quickstart">
+  <div class="wrap">
+    <h2>Bắt đầu trong 30 giây</h2>
+    <p class="sub">Yêu cầu Node.js ≥ 22.</p>
+
+    <div class="term">
+      <div class="term-header">
+        <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+        <span class="title">~ — ahv</span>
+      </div>
+      <div class="term-body">
+        <div class="cmd-line"><span class="prompt">$</span> <span class="user">curl -fsSL https://ahvclaw.com/install.sh | bash</span></div>
+        <div class="out">[ahv-install] OK Node v22.22.2, pnpm 10.11.0, git 2.43.0</div>
+        <div class="out">[ahv-install] Clone github.com/tranhieu860/AHVclaw → ~/.ahv/src</div>
+        <div class="out">[ahv-install] Cài dependencies (mất 3-8 phút)...</div>
+        <div class="out">[ahv-install] OK Symlink → ~/.local/bin/ahv</div>
+        <div class="out"><span class="ok">✓ Cài đặt xong!</span></div>
+        <br />
+        <div class="cmd-line"><span class="prompt">$</span> <span class="user">export AHV_API_KEY=sk-...</span>  <span class="tool"># xin: ahvclaw.com/apply</span></div>
+        <div class="cmd-line"><span class="prompt">$</span> <span class="user">ahv</span></div>
+        <div class="out">✨ AHV CLI · ahv-router/AHV-Holding · session a3f9b2c1</div>
+        <div class="out">Gõ / để xem lệnh, Ctrl-C hoặc /exit để thoát.</div>
+        <br />
+        <div class="cmd-line"><span class="prompt">&gt;</span> <span class="user">Tìm file lớn nhất trong /var/log rồi tail 20 dòng cuối</span></div>
+        <br />
+        <div class="tool">🔧 bash {"command":"ls -lS /var/log | head -2"}</div>
+        <div class="out">[exit 0]</div>
+        <div class="out">total 3.2G</div>
+        <div class="out">-rw-r----- 1 root adm 890M syslog</div>
+        <br />
+        <div class="tool">🔧 bash {"command":"tail -20 /var/log/syslog"}</div>
+        <div class="out"><span class="ok">…</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="providers">
+  <div class="wrap">
+    <h2>Providers hỗ trợ sẵn</h2>
+    <p class="sub">Cả 3 built-in. Config qua <code>~/.ahv/config.json</code> hoặc env var.</p>
+    <div class="grid">
+      <div class="card">
+        <span class="icon">🅰️</span>
+        <h3>Anthropic</h3>
+        <p>Claude Opus, Sonnet, Haiku. Streaming + tool_use native. Env: <code>ANTHROPIC_API_KEY</code>.</p>
+        <div class="tags">
+          <span class="tag">claude-opus-4-7</span>
+          <span class="tag">claude-sonnet-4</span>
+        </div>
+      </div>
+      <div class="card">
+        <span class="icon">🟢</span>
+        <h3>OpenAI</h3>
+        <p>GPT-5.x, GPT-4o. Cũng dùng được cho mọi endpoint OpenAI-compat qua <code>baseURL</code>. Env: <code>OPENAI_API_KEY</code>.</p>
+        <div class="tags">
+          <span class="tag">gpt-5-sol</span>
+          <span class="tag">gpt-4o</span>
+          <span class="tag">custom baseURL</span>
+        </div>
+      </div>
+      <div class="card">
+        <span class="icon">🔷</span>
+        <h3>DeepSeek</h3>
+        <p>DeepSeek-R1, DeepSeek-V3. Alias OpenAI-compat trỏ vào <code>api.deepseek.com</code>. Env: <code>DEEPSEEK_API_KEY</code>.</p>
+        <div class="tags">
+          <span class="tag">deepseek-reasoner</span>
+          <span class="tag">deepseek-chat</span>
+        </div>
+      </div>
+    </div>
+    <p class="sub" style="margin-top: 24px;">Cần provider khác (Google Gemini, Groq, Together, Ollama local…)? Trỏ <code>baseURL</code> vào endpoint OpenAI-compat của họ. Native adapter riêng có thể viết plugin — Phase 2 sắp mở.</p>
+  </div>
+</section>
+
+<section id="plugins">
+  <div class="wrap">
+    <h2>Plugin cài sẵn</h2>
+    <p class="sub">Cài <code>ahv</code> là có ngay ~50 plugin. Base dsh mang 40 plugin cốt lõi (shell, fs, web, subagent…); AHV thêm 10 plugin nữa cho toolbelt xịn ngay từ đầu. Full catalog live tại <a href="/admin" target="_blank" rel="noopener">admin CMS</a> — track version pinned vs latest, auto-refresh mỗi 6h.</p>
+
+    <h3 style="margin-top:32px;font-size:16px;color:var(--muted);text-transform:uppercase;letter-spacing:0.12em;">⭐ AHV bundle (10 plugin thêm)</h3>
+    <div class="grid">
+      <div class="card">
+        <span class="icon">🖥️</span>
+        <h3>Persistent PTY</h3>
+        <p><code>dsh-terminal</code> + <code>-terminal-bash</code> + <code>-tool-terminal</code>. Shell session sống xuyên tool call. Dùng cho SSH lâu dài, tmux flow, script long-running. 6 tool: <code>terminal_open/send/read/signal/close/list</code>.</p>
+      </div>
+      <div class="card">
+        <span class="icon">🧬</span>
+        <h3>Self-modification</h3>
+        <p><code>cordis-host-runner</code> + <code>tool-cordis</code>. Agent tự inspect runtime của chính mình và mount plugin ad-hoc in-memory. 5 tool: <code>cordis_inspect/define/run/stop/undefine</code>. Không ghi file, không survive restart.</p>
+      </div>
+      <div class="card">
+        <span class="icon">🛒</span>
+        <h3>Plugin Market</h3>
+        <p><code>dshmarket</code> — browse, search, one-click install 1.5k+ community plugin. Auto backup/restore, hot-reload. Chỉ active trong web mode: <code>ahv web</code> → Settings → Plugin Market. <a href="https://github.com/dsh-market/dsh-market" target="_blank" rel="noopener">dsh-market/dsh-market ↗</a></p>
+      </div>
+      <div class="card">
+        <span class="icon">🦸</span>
+        <h3>Superpowers</h3>
+        <p><code>superpowers-dsh</code> — 14 curated skill: <code>test-driven-development</code>, <code>systematic-debugging</code>, <code>brainstorming</code>, <code>writing-plans</code>, <code>executing-plans</code>, <code>subagent-driven-development</code>, <code>using-git-worktrees</code>, <code>dispatching-parallel-agents</code>, <code>verification-before-completion</code>, code-review flow. Adapt từ <a href="https://github.com/obra/superpowers" target="_blank" rel="noopener">obra/superpowers</a> của Claude Code. Model gọi tự động qua <code>skill_list</code> / <code>skill_load</code>. <a href="https://github.com/LayneChai/superpowers-dsh" target="_blank" rel="noopener">LayneChai/superpowers-dsh ↗</a></p>
+      </div>
+      <div class="card">
+        <span class="icon">🔑</span>
+        <h3>Subscription providers</h3>
+        <p><code>dsh-plugin-subscriptions</code> — dùng ChatGPT (Codex Plus), Claude Pro, Grok Premium làm LLM provider mà không phải trả API token. OAuth login qua browser 1 lần (<code>ahv login url grok</code>), plugin tự mount route. Sau login là <code>ahv models list</code> thấy full catalog 15+ model từ subscription. <a href="https://github.com/V1ki/dsh-plugin-subscriptions" target="_blank" rel="noopener">V1ki/dsh-plugin-subscriptions ↗</a></p>
+      </div>
+      <div class="card">
+        <span class="icon">🤖</span>
+        <h3>Bot adapter</h3>
+        <p><code>bot-runner</code> + <code>bot-startup</code> (AHV built-in). Non-interactive JSONL streamer cho Telegram/automation bot: <code>ahv run --prompt-file X --output jsonl --session-id ID</code>. Subscribe session/event bus, emit taxonomy chuẩn (<code>session_meta</code>, <code>assistant_delta</code>, <code>tool_status</code>, <code>assistant_final</code>, <code>turn_end</code>, <code>error</code>). Exit code 0/1/2/124 theo bot spec. Session id caller-supplied + genuine resume. Contract pin: <a href="https://github.com/tranhieu860/AHVclaw/releases/tag/v0.2.0-p2" target="_blank" rel="noopener">v0.2.0-p2 ↗</a></p>
+      </div>
+    </div>
+
+    <h3 style="margin-top:40px;font-size:16px;color:var(--muted);text-transform:uppercase;letter-spacing:0.12em;">📦 Base bundle (40 plugin từ dsh)</h3>
+    <div class="grid">
+      <div class="card">
+        <span class="icon">⚙️</span>
+        <h3>Shell &amp; Filesystem</h3>
+        <p><code>bash</code>, <code>pwsh</code>, <code>fs_read_file</code>, <code>fs_write_file</code>, <code>fs_search</code>, <code>str_replace_editor</code>. Sandbox permissions + bounded output.</p>
+      </div>
+      <div class="card">
+        <span class="icon">🌐</span>
+        <h3>Web</h3>
+        <p><code>web_search</code>, <code>web_fetch</code>. Fetch tắt mặc định (SSRF risk); search bật khi có provider (bundle AHV tắt DeepSeek search — mount Brave/Tavily nếu cần).</p>
+      </div>
+      <div class="card">
+        <span class="icon">👥</span>
+        <h3>Subagents</h3>
+        <p><code>subagent</code> (spawn), <code>subagent_fork</code> (kế thừa history). Delegate task cho agent con — parallel hoặc isolated context.</p>
+      </div>
+      <div class="card">
+        <span class="icon">📋</span>
+        <h3>Todo &amp; Plan</h3>
+        <p><code>todo_write</code> — model tự track checkbox realtime. <code>plan-mode</code> — plan trước khi run, user approve <code>exit_plan_mode</code>.</p>
+      </div>
+      <div class="card">
+        <span class="icon">🎓</span>
+        <h3>Skills</h3>
+        <p><code>skill_load</code>, <code>skill_list</code>. Skill = recipe YAML/MD cho task pattern lặp lại. Hot-reload không restart.</p>
+      </div>
+      <div class="card">
+        <span class="icon">⚡</span>
+        <h3>Workflow &amp; Ralph</h3>
+        <p><code>workflow</code> (multi-step trong worker thread), <code>tool-ralph</code> (fresh-agent iterator max 64 rounds).</p>
+      </div>
+      <div class="card">
+        <span class="icon">🎯</span>
+        <h3>Goal &amp; Compaction</h3>
+        <p><code>goal-round-driver</code> — set goal xuyên session. <code>compaction-basic</code> — tự nén context khi vượt threshold.</p>
+      </div>
+      <div class="card">
+        <span class="icon">🔒</span>
+        <h3>Sandbox &amp; Permission</h3>
+        <p><code>sandbox-policy</code> + <code>permission-presets</code>. 3 mode: read-only, workspace-write (default), danger-full-access.</p>
+      </div>
+    </div>
+
+    <p class="sub" style="margin-top:32px;">Cài thêm plugin ngoài bundle: <code>ahv --help</code> hoặc <code>dsh plugin add @some-org/dsh-plugin-name</code>. Chi tiết: <a href="/docs/plugins.html">docs/plugins</a>.</p>
+  </div>
+</section>
+
+<section id="autoupdate">
+  <div class="wrap">
+    <h2>Update — 1 lệnh, luôn bản mới nhất</h2>
+    <p class="sub">Sau cài lần đầu, mỗi lần <code>ahv update</code> tự pull latest commit + tag từ GitHub, cài lại deps, rebuild lib, refresh skin, cập nhật version file. Không phải re-clone, không phải chạy pnpm/git thủ công.</p>
+
+    <div class="term">
+      <div class="term-header">
+        <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+        <span class="title">~ — ahv update</span>
+      </div>
+      <div class="term-body">
+        <div class="cmd-line"><span class="prompt">$</span> <span class="user">ahv --version</span></div>
+        <div class="out">ahv v0.2.0-p1 (commit a347fff, dsh 0.1.1-rc.1)</div>
+        <br />
+        <div class="cmd-line"><span class="prompt">$</span> <span class="user">ahv update</span></div>
+        <div class="out">[ahv update] pulling latest từ https://github.com/tranhieu860/AHVclaw.git</div>
+        <div class="out">From github.com:tranhieu860/AHVclaw</div>
+        <div class="out">   a347fff..c4b1b07  master     -> origin/master</div>
+        <div class="out">   * [new tag]     v0.2.0-p2  -> v0.2.0-p2</div>
+        <div class="out">Fast-forward — 3 files changed, 98 insertions(+), 26 deletions(-)</div>
+        <div class="out">Progress: resolved 1287, reused 1287</div>
+        <div class="out">✓ built in 2.8s</div>
+        <div class="out">[ahv-skin] installed → skin-center/skins/ahv/</div>
+        <div class="out"><span class="ok">[ahv update] done → v0.2.0-p2</span></div>
+        <br />
+        <div class="cmd-line"><span class="prompt">$</span> <span class="user">ahv --version</span></div>
+        <div class="out">ahv v0.2.0-p2 (commit c4b1b07, dsh 0.1.1-rc.1)</div>
+      </div>
+    </div>
+
+    <div class="grid" style="margin-top:24px;">
+      <div class="card">
+        <span class="icon">📦</span>
+        <h3>Plugin cũng auto-latest</h3>
+        <p>AHV bundle đăng ký deps với semver caret (<code>^1.18.0</code>). <code>ahv update</code> chạy <code>pnpm install</code>, tự nhận bản minor mới. Admin CMS <code>/admin</code> hiển thị badge stale khi có bản major mới cần bump thủ công.</p>
+      </div>
+      <div class="card">
+        <span class="icon">🏷️</span>
+        <h3>Pin theo tag cho bot/production</h3>
+        <p><code>git -C ~/.ahv/src checkout v0.2.0-p2</code> — lock version cụ thể, không auto-move. Bot team và integration downstream pin tag này, chỉ <code>ahv update</code> khi anh Hiếu bump.</p>
+      </div>
+      <div class="card">
+        <span class="icon">🔄</span>
+        <h3>Rollback dễ</h3>
+        <p><code>git -C ~/.ahv/src reset --hard v0.2.0-p1</code> rồi <code>pnpm install</code>. Không có DB migration, không có server state — mọi thứ trong <code>~/.dsh</code> giữ nguyên qua rollback.</p>
+      </div>
+    </div>
+
+    <p class="sub" style="margin-top:24px;">Update ngay: <code>ahv update</code>. Chi tiết + rollback: <a href="https://github.com/tranhieu860/AHVclaw/releases" target="_blank" rel="noopener">GitHub Releases</a>.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>© 2026 AHV Holding · MIT License</div>
+    <div>
+      <a href="https://github.com/tranhieu860/AHVclaw" target="_blank" rel="noopener">GitHub</a> ·
+      <a href="https://github.com/tranhieu860/AHVclaw/releases" target="_blank" rel="noopener">Releases</a> ·
+      <a href="/admin" target="_blank" rel="noopener">Plugin registry</a> ·
+      <a href="mailto:hi@ahvclaw.com">hi@ahvclaw.com</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function() {
+  var btn = document.getElementById('copy');
+  var cmd = document.getElementById('cmd');
+  if (!btn || !cmd) return;
+  btn.addEventListener('click', function() {
+    var text = cmd.textContent || '';
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(flash);
+    } else {
+      // fallback for older browsers
+      var t = document.createElement('textarea');
+      t.value = text; document.body.appendChild(t); t.select();
+      try { document.execCommand('copy'); flash(); } catch (e) {}
+      document.body.removeChild(t);
+    }
+  });
+  function flash() {
+    var old = btn.textContent;
+    btn.textContent = '✓ Copied';
+    btn.classList.add('copied');
+    setTimeout(function() {
+      btn.textContent = old;
+      btn.classList.remove('copied');
+    }, 1500);
+  }
+})();
+</script>
+</body>
+</html>
