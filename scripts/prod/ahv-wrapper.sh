@@ -50,7 +50,7 @@ cd "$FORK"
 AHV_BOT="$HOME/.ahv/bin/ahv-bot.mjs"
 
 case "${1:-}" in
-  auth|doctor|sessions|models|version|run)
+  auth|login|doctor|sessions|models|version|run)
     exec node "$AHV_BOT" "$@"
     ;;
   web)

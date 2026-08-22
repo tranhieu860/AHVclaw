@@ -16,7 +16,7 @@
 //   124 = timeout / cancelled
 
 import { spawn } from 'node:child_process'
-import { readFileSync, existsSync, statSync, readdirSync } from 'node:fs'
+import { readFileSync, existsSync, statSync, readdirSync, writeFileSync, chmodSync, mkdirSync } from 'node:fs'
 import { resolve as resolvePath, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { zstdDecompressSync } from 'node:zlib'
@@ -297,6 +297,103 @@ function sessionsShow(sessionId) {
   printJson({ ...meta, tail_events: tail })
 }
 
+// ── subscriptions login (Grok/Codex/Claude via dsh-plugin-subscriptions) ─
+// Plugin lưu auth state ở ~/.dsh/plugins/subscriptions/auth.json (mode 600):
+//   { "grok": {accessToken, refreshToken, expiresAt, tokenEndpoint, scopes, account},
+//     "codex": {...},
+//     "claude": {...} }
+// OAuth PKCE flow của Grok/Codex + Claude Code credentials cần browser tương
+// tác — không automate qua CLI được. Bot điều phối bằng cách:
+//   1. Gọi `ahv login status` → biết provider nào đã login
+//   2. Nếu chưa, gọi `ahv login url <provider>` → nhận URL web UI, forward
+//      user Telegram → user OAuth qua browser → callback lưu file
+//   3. Poll `ahv login status` để confirm login xong
+//   4. `ahv logout <provider>` xoá token khi user request
+const SUBSCRIPTIONS_AUTH_FILE = join(DSH_HOME, 'plugins/subscriptions/auth.json')
+const SUBSCRIPTIONS_LOGIN_URL_BASE = process.env.AHV_WEB_PUBLIC_URL
+  ?? 'https://ahv.ahvclaw.com'
+const SUPPORTED_LOGIN_PROVIDERS = ['grok', 'codex', 'claude']
+
+function readSubscriptionsAuth() {
+  if (!existsSync(SUBSCRIPTIONS_AUTH_FILE)) return {}
+  try {
+    return JSON.parse(readFileSync(SUBSCRIPTIONS_AUTH_FILE, 'utf8'))
+  } catch (e) {
+    return {}
+  }
+}
+
+function writeSubscriptionsAuth(obj) {
+  const dir = dirname(SUBSCRIPTIONS_AUTH_FILE)
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 })
+  writeFileSync(SUBSCRIPTIONS_AUTH_FILE, JSON.stringify(obj, null, 2))
+  chmodSync(SUBSCRIPTIONS_AUTH_FILE, 0o600)
+}
+
+function loginStatus() {
+  const auth = readSubscriptionsAuth()
+  const providers = {}
+  for (const p of SUPPORTED_LOGIN_PROVIDERS) {
+    const entry = auth[p]
+    if (entry && typeof entry === 'object') {
+      providers[p] = {
+        logged_in: true,
+        // KHÔNG expose token/refreshToken/PKCE state — chỉ metadata safe
+        account: entry.account ?? null,
+        expires_at: entry.expiresAt ?? null,
+        scopes: Array.isArray(entry.scopes) ? entry.scopes : null,
+      }
+    } else {
+      providers[p] = { logged_in: false, account: null, expires_at: null, scopes: null }
+    }
+  }
+  printJson({
+    ahv_web_url: SUBSCRIPTIONS_LOGIN_URL_BASE,
+    providers,
+  }, 0)
+}
+
+function loginUrl(provider) {
+  if (!provider) errJson('internal_error', 'login url: cần truyền provider (grok|codex|claude)', true, 0, 2)
+  if (!SUPPORTED_LOGIN_PROVIDERS.includes(provider)) {
+    errJson('internal_error', `provider "${provider}" không hỗ trợ. Chỉ: ${SUPPORTED_LOGIN_PROVIDERS.join(', ')}`, true, 0, 2)
+  }
+  printJson({
+    provider,
+    url: `${SUBSCRIPTIONS_LOGIN_URL_BASE}/`,
+    instruction:
+      `Mở URL trong browser, đăng nhập ahv.ahvclaw.com, vào Settings → ` +
+      `Subscriptions, chọn "${provider}", làm OAuth flow. ` +
+      `Token lưu tại ${SUBSCRIPTIONS_AUTH_FILE} (mode 600). ` +
+      `Sau khi xong, gọi \`ahv login status --json\` để verify.`,
+    // Bot dùng field này correlate poll sau khi user click browser
+    poll_hint: 'Poll `ahv login status --json` mỗi 30s tối đa 10ph, providers[<name>].logged_in=true là xong.',
+  }, 0)
+}
+
+function loginLogout(provider) {
+  if (!provider) errJson('internal_error', 'logout: cần truyền provider', true, 0, 2)
+  if (!SUPPORTED_LOGIN_PROVIDERS.includes(provider)) {
+    errJson('internal_error', `provider "${provider}" không hỗ trợ`, true, 0, 2)
+  }
+  const auth = readSubscriptionsAuth()
+  const wasLoggedIn = Boolean(auth[provider])
+  if (wasLoggedIn) {
+    delete auth[provider]
+    try {
+      writeSubscriptionsAuth(auth)
+    } catch (e) {
+      errJson('permission_denied', `không ghi được ${SUBSCRIPTIONS_AUTH_FILE}: ${e.message}`, true, 0, 1)
+    }
+  }
+  printJson({
+    provider,
+    logged_out: true,
+    was_logged_in: wasLoggedIn,
+    note: wasLoggedIn ? 'token đã xoá khỏi auth.json — cần restart ahv-web service để plugin refresh routes' : 'provider chưa từng login',
+  }, 0)
+}
+
 // ── models ──────────────────────────────────────────────────────────────
 // Nguồn thật của model list là ctx.llm.listProviders() + listModels() ở
 // harness của mình — bao gồm mọi LLM plugin đã mount (llm-pi-ai / AHV
@@ -574,10 +671,13 @@ const [subcommand, ...rest] = process.argv.slice(2)
 
 function usage() {
   process.stderr.write(`Usage:
-  ahv auth status --json
-  ahv auth login --device-auth
+  ahv auth status --json                       (kiểm AHV_API_KEY router key)
+  ahv auth login --device-auth                 (not supported — router dùng static key)
   ahv auth logout
   ahv doctor --json
+  ahv login status --json                      (subscription plugin: Grok/Codex/Claude)
+  ahv login url PROVIDER --json                (return browser OAuth URL)
+  ahv login logout PROVIDER --json             (remove stored token)
   ahv models list --json
   ahv models show MODEL_ID --json
   ahv sessions list --json
@@ -604,6 +704,12 @@ if (subcommand === 'version') {
   else usage()
 } else if (subcommand === 'doctor') {
   doctor()
+} else if (subcommand === 'login') {
+  const action = rest[0]
+  if (action === 'status') loginStatus()
+  else if (action === 'url') loginUrl(rest[1])
+  else if (action === 'logout') loginLogout(rest[1])
+  else usage()
 } else if (subcommand === 'models') {
   const action = rest[0]
   if (action === 'list') modelsList()
