@@ -310,8 +310,13 @@ function sessionsShow(sessionId) {
 //   3. Poll `ahv login status` để confirm login xong
 //   4. `ahv logout <provider>` xoá token khi user request
 const SUBSCRIPTIONS_AUTH_FILE = join(DSH_HOME, 'plugins/subscriptions/auth.json')
+// User cài CLI local qua curl install.sh sẽ không có domain — mặc định
+// trỏ về ahv web local (chạy bằng `ahv web` trước khi login). Anh Hiếu
+// server prod set AHV_WEB_PUBLIC_URL=https://ahv.ahvclaw.com trong
+// /etc/default/ahv-web để bot team dùng URL public. Env override luôn
+// win, hoặc auto-detect systemd env file khi wrapper source ~/.ahv/env.
 const SUBSCRIPTIONS_LOGIN_URL_BASE = process.env.AHV_WEB_PUBLIC_URL
-  ?? 'https://ahv.ahvclaw.com'
+  ?? 'http://127.0.0.1:3080'
 const SUPPORTED_LOGIN_PROVIDERS = ['grok', 'codex', 'claude']
 
 function readSubscriptionsAuth() {
@@ -358,16 +363,26 @@ function loginUrl(provider) {
   if (!SUPPORTED_LOGIN_PROVIDERS.includes(provider)) {
     errJson('internal_error', `provider "${provider}" không hỗ trợ. Chỉ: ${SUPPORTED_LOGIN_PROVIDERS.join(', ')}`, true, 0, 2)
   }
+  const isLocal = SUBSCRIPTIONS_LOGIN_URL_BASE.startsWith('http://127.0.0.1')
+    || SUBSCRIPTIONS_LOGIN_URL_BASE.startsWith('http://localhost')
   printJson({
     provider,
     url: `${SUBSCRIPTIONS_LOGIN_URL_BASE}/`,
-    instruction:
-      `Mở URL trong browser, đăng nhập ahv.ahvclaw.com, vào Settings → ` +
-      `Subscriptions, chọn "${provider}", làm OAuth flow. ` +
-      `Token lưu tại ${SUBSCRIPTIONS_AUTH_FILE} (mode 600). ` +
-      `Sau khi xong, gọi \`ahv login status --json\` để verify.`,
-    // Bot dùng field này correlate poll sau khi user click browser
+    web_public: !isLocal,
+    instruction: isLocal
+      ? `1. Chạy \`ahv web\` để bật local web UI (nếu chưa chạy). ` +
+        `2. Mở ${SUBSCRIPTIONS_LOGIN_URL_BASE}/ trong browser trên cùng máy. ` +
+        `3. Vào Settings → Subscriptions, chọn "${provider}", làm OAuth flow. ` +
+        `4. Token lưu tại ${SUBSCRIPTIONS_AUTH_FILE} (mode 600). ` +
+        `5. \`ahv login status --json\` để verify.`
+      : `Mở URL trong browser, đăng nhập, vào Settings → Subscriptions, ` +
+        `chọn "${provider}", làm OAuth flow. ` +
+        `Token lưu tại ${SUBSCRIPTIONS_AUTH_FILE} (mode 600). ` +
+        `Sau khi xong, gọi \`ahv login status --json\` để verify.`,
     poll_hint: 'Poll `ahv login status --json` mỗi 30s tối đa 10ph, providers[<name>].logged_in=true là xong.',
+    note: isLocal
+      ? 'Default local URL. Set AHV_WEB_PUBLIC_URL env nếu web UI expose ra domain public.'
+      : `Public URL từ env AHV_WEB_PUBLIC_URL=${SUBSCRIPTIONS_LOGIN_URL_BASE}.`,
   }, 0)
 }
 
