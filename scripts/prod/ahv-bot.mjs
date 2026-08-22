@@ -41,8 +41,10 @@ function loadEnvFile(path) {
 loadEnvFile(AHV_ENV_FILE)
 
 function printJson(obj, exitCode = 0) {
-  process.stdout.write(JSON.stringify(obj) + '\n')
-  process.exit(exitCode)
+  // stdout.write async khi output > 64KB pipe buffer + process.exit()
+  // interrupt → truncate. Callback + brief tick đảm bảo flushed trước exit.
+  const payload = JSON.stringify(obj) + '\n'
+  process.stdout.write(payload, () => process.exit(exitCode))
 }
 
 function errJson(code, message, terminal = true, retryAfterSec = 0, exitCode = 1) {
@@ -295,6 +297,151 @@ function sessionsShow(sessionId) {
   printJson({ ...meta, tail_events: tail })
 }
 
+// ── models ──────────────────────────────────────────────────────────────
+// Parse llm-pi-ai section trong cordis.patch.yml để lấy metadata declared
+// tĩnh (contextWindow, maxTokens) — router /v1/models chỉ trả id + tên.
+// Static metadata cho các model AHV pin (default + legacy alias + Grok
+// SuperHeavy) là contract, không phải render.
+function readStaticAhvModels() {
+  const patchPath = join(FORK, 'packages/bundle/ahv/cordis.patch.yml')
+  if (!existsSync(patchPath)) return []
+  const text = readFileSync(patchPath, 'utf8')
+  // Scan for `models:` block trong llm-pi-ai config. Each model entry is
+  // `- id: <id>` với indented fields sau đó. Kết thúc block khi encounter
+  // dòng ngoài cùng level của `models:` (top-level list `- id: xxx` hoặc
+  // key `providers:` etc). Không dùng full YAML parser vì cordis.patch.yml
+  // có `!!js` tags mà js-yaml không handle không có schema riêng.
+  const models = []
+  const lines = text.split('\n')
+  let modelsIndent = -1   // -1 = not in section
+  let entryIndent = -1
+  let cur = null
+  for (const raw of lines) {
+    if (raw.trim() === '' || raw.trim().startsWith('#')) continue
+    const indent = raw.length - raw.trimStart().length
+    const trimmed = raw.trim()
+
+    if (trimmed === 'models:') {
+      modelsIndent = indent
+      continue
+    }
+    if (modelsIndent < 0) continue
+
+    // Kết thúc block khi encounter dòng cùng hoặc thấp hơn modelsIndent
+    if (indent <= modelsIndent) {
+      if (cur) { models.push(cur); cur = null }
+      modelsIndent = -1
+      entryIndent = -1
+      continue
+    }
+
+    // Model entry: `- id: X` bên trong models block
+    const entryMatch = /^-\s+id:\s+(.+)$/.exec(trimmed)
+    if (entryMatch) {
+      if (cur) models.push(cur)
+      cur = { id: entryMatch[1].replace(/^['"]|['"]$/g, '').trim(), source: 'static' }
+      entryIndent = indent
+      continue
+    }
+
+    // Nested field bên trong entry hiện tại
+    if (cur && indent > entryIndent) {
+      const fieldMatch = /^(name|contextWindow|maxTokens):\s+(.+)$/.exec(trimmed)
+      if (fieldMatch) {
+        const key = fieldMatch[1]
+        const val = key === 'name'
+          ? fieldMatch[2].replace(/^['"]|['"]$/g, '')
+          : Number(fieldMatch[2])
+        cur[key] = val
+      }
+    }
+  }
+  if (cur) models.push(cur)
+  return models
+}
+
+async function fetchRouterModels() {
+  const key = process.env.AHV_API_KEY
+  if (!key) return { ok: false, error: 'missing_credential', models: [] }
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 8000)
+    const res = await fetch(`${DEFAULT_BASE_URL}/models`, {
+      headers: { Authorization: `Bearer ${key}` },
+      signal: controller.signal,
+    })
+    clearTimeout(timer)
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}`, models: [] }
+    const body = await res.json()
+    const models = (body.data ?? []).map(m => ({
+      id: m.id,
+      name: m.id,
+      provider: 'ahv-router',
+      source: 'router',
+    }))
+    return { ok: true, models }
+  } catch (e) {
+    return { ok: false, error: e.name === 'AbortError' ? 'timeout' : e.message, models: [] }
+  }
+}
+
+async function modelsList() {
+  const staticModels = readStaticAhvModels()
+  const router = await fetchRouterModels()
+  // Merge: router-advertised list làm base, augment metadata từ static declaration.
+  const staticById = new Map(staticModels.map(m => [m.id, m]))
+  const merged = router.models.map(rm => {
+    const s = staticById.get(rm.id)
+    return {
+      id: rm.id,
+      name: s?.name ?? rm.name,
+      provider: 'ahv-router',
+      context_window: s?.contextWindow ?? null,
+      max_tokens: s?.maxTokens ?? null,
+      pinned: Boolean(s),   // AHV bundle pins metadata → "pinned/featured"
+    }
+  })
+  // Nếu router unreachable, fallback về static list để bot vẫn có options.
+  const models = merged.length > 0 ? merged : staticModels.map(m => ({
+    id: m.id,
+    name: m.name ?? m.id,
+    provider: 'ahv-router',
+    context_window: m.contextWindow ?? null,
+    max_tokens: m.maxTokens ?? null,
+    pinned: true,
+  }))
+  printJson({
+    default: DEFAULT_MODEL,
+    provider: 'ahv-router',
+    base_url: DEFAULT_BASE_URL,
+    count: models.length,
+    router_reachable: router.ok,
+    router_error: router.ok ? null : router.error,
+    models,
+  }, 0)
+}
+
+async function modelsShow(modelId) {
+  if (!modelId) errJson('internal_error', 'models show: cần truyền MODEL_ID', true, 0, 2)
+  const staticModels = readStaticAhvModels()
+  const router = await fetchRouterModels()
+  const s = staticModels.find(m => m.id === modelId)
+  const r = router.models.find(m => m.id === modelId)
+  if (!s && !r) {
+    errJson('internal_error', `model not found: ${modelId}`, true, 0, 1)
+  }
+  printJson({
+    id: modelId,
+    name: s?.name ?? r?.name ?? modelId,
+    provider: 'ahv-router',
+    base_url: DEFAULT_BASE_URL,
+    context_window: s?.contextWindow ?? null,
+    max_tokens: s?.maxTokens ?? null,
+    pinned: Boolean(s),
+    advertised: Boolean(r),
+  }, 0)
+}
+
 // ── run (spawn dsh headless + ahv patch + bot patch) ───────────────────
 // Reuse the working ahv-profile module-resolution: cwd=FORK so pnpm's hoisted
 // @deepseek-ai/* deps resolve, and --patch layers apply on top of headless.
@@ -368,6 +515,8 @@ function usage() {
   ahv auth login --device-auth
   ahv auth logout
   ahv doctor --json
+  ahv models list --json
+  ahv models show MODEL_ID --json
   ahv sessions list --json
   ahv sessions show SESSION_ID --json
   ahv sessions latest --json
@@ -392,6 +541,11 @@ if (subcommand === 'version') {
   else usage()
 } else if (subcommand === 'doctor') {
   doctor()
+} else if (subcommand === 'models') {
+  const action = rest[0]
+  if (action === 'list') modelsList()
+  else if (action === 'show') modelsShow(rest[1])
+  else usage()
 } else if (subcommand === 'sessions') {
   const action = rest[0]
   if (action === 'list') sessionsList()
