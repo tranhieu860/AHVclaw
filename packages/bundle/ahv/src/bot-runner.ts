@@ -199,9 +199,26 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
   const resumed = resumeId !== undefined
 
   // Subscribe to session events BEFORE creating the agent so we catch every append.
+  // Track final turn outcome + saw-assistant-final flag so we can decide the
+  // exit code + emit a bot `error` event when the turn ends with reason=error
+  // (session/persistence load fail, model tool loop trapped, etc). Without this
+  // adapter would silently exit 0 with turn_end reason=error and no
+  // assistant_final — bot would classify as "completed with empty answer".
   const emitLock = { session: undefined as Session | undefined }
+  const turnState = {
+    lastTurnEndReason: null as { kind: string; error?: { code?: string; message?: string } } | null,
+    sawAssistantFinal: false,
+  }
   const dispose = ctx.on('session/event', (session: Session, event: SessionEvent) => {
     if (emitLock.session !== undefined && session.header.id !== emitLock.session.header.id) return
+    if (event.type === 'turn/end') {
+      const data = event.data as { reason?: { kind: string; error?: { code?: string; message?: string } } }
+      turnState.lastTurnEndReason = data.reason ?? null
+    }
+    if (event.type === 'assistant/message') {
+      const hasText = event.data.message.content.some((b): b is { type: 'text'; text: string } => b.type === 'text' && b.text !== '')
+      if (hasText) turnState.sawAssistantFinal = true
+    }
     const translated = translate(event)
     if (translated === null) return
     if (config.output === 'jsonl') emit(io, translated)
@@ -255,6 +272,41 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
           .join('')
         io.stdout.write(text + '\n')
       }
+    }
+
+    // Exit code contract: turn_end reason=completed + có assistant_final →
+    // exit 0. Bất kỳ trạng thái nào khác (turn/end reason=error, agent-loop
+    // dừng vì tool crash, resume corrupted session, ...) emit bot error
+    // event + non-zero exit để bot phân loại terminal vs recoverable.
+    if (turnState.lastTurnEndReason?.kind === 'error') {
+      const err = turnState.lastTurnEndReason.error
+      if (config.output === 'jsonl') {
+        emit(io, {
+          type: 'error',
+          code: 'tool_error',   // agent-loop reason=error covers tool + provider mid-turn failures
+          terminal: false,      // safe default: bot retry với backoff
+          retry_after_sec: 5,
+          message: err?.message ?? err?.code ?? 'turn ended with reason=error (no message)',
+        })
+      } else {
+        io.stderr.write(`ahv-bot: tool_error: ${err?.message ?? err?.code ?? 'unknown'}\n`)
+      }
+      io.exit(2)
+      return
+    }
+    if (!turnState.sawAssistantFinal && config.output === 'jsonl') {
+      // Turn kết thúc completed nhưng model không trả text (rare — tool-only
+      // turn hoặc empty reply). Bot cần phân biệt vs "success + có câu trả
+      // lời", nên emit error stopped để bot handle.
+      emit(io, {
+        type: 'error',
+        code: 'internal_error',
+        terminal: true,
+        retry_after_sec: 0,
+        message: 'turn completed nhưng không có assistant_final message',
+      })
+      io.exit(1)
+      return
     }
     io.exit(0)
   } finally {

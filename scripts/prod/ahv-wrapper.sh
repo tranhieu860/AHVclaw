@@ -73,7 +73,17 @@ case "${1:-}" in
     [ -x "$FORK/scripts/install-ahv-skin.sh" ] && bash "$FORK/scripts/install-ahv-skin.sh" || true
     echo "${C1}[ahv update]${RESET} done → v$(node -p "require('$FORK/apps/cli/package.json').version" 2>/dev/null || echo "?")"
     ;;
-  --version|-v|--help|-h|--dump-config|--dump-default-config)
+  --version|-v)
+    # AHV CLI version = git tag/short SHA của fork + dsh upstream underlying.
+    # Bot team pin theo AHV tag (v0.2.0-p0), không phải dsh 0.1.1-rc.1
+    # (số version của apps/cli/package.json upstream, không đại diện AHV state).
+    AHV_TAG=$(git -C "$FORK" describe --tags --always --dirty 2>/dev/null || echo unknown)
+    AHV_SHA=$(git -C "$FORK" rev-parse --short HEAD 2>/dev/null || echo unknown)
+    DSH_VER=$(node -p "require('$FORK/apps/cli/package.json').version" 2>/dev/null || echo unknown)
+    echo "ahv $AHV_TAG (commit $AHV_SHA, dsh $DSH_VER)"
+    exit 0
+    ;;
+  --help|-h|--dump-config|--dump-default-config)
     exec node --import tsx/esm "$BIN" "$@"
     ;;
   '')
