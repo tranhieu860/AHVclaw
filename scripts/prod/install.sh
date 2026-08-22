@@ -110,6 +110,17 @@ if [ -x "$SRC/scripts/install-ahv-skin.sh" ]; then
   bash "$SRC/scripts/install-ahv-skin.sh" || warn "skin install skipped"
 fi
 
+# Bake version file (2 dòng: tag, short SHA). Wrapper --version ưu tiên
+# đọc file này để không lệ thuộc git command runtime — bot team chạy CLI
+# trong container/systemd/env-restricted vẫn có version chuẩn.
+if [ -d "$SRC/.git" ]; then
+  git -C "$SRC" fetch origin --tags --force >/dev/null 2>&1 || true
+  printf '%s\n%s\n' \
+    "$(git -C "$SRC" describe --tags --always --dirty 2>/dev/null || echo unknown)" \
+    "$(git -C "$SRC" rev-parse --short HEAD 2>/dev/null || echo unknown)" > "$SRC/AHV_VERSION"
+  log "OK Version bake → $(sed -n 1p "$SRC/AHV_VERSION") ($(sed -n 2p "$SRC/AHV_VERSION"))"
+fi
+
 mkdir -p "$AHV_BIN"
 
 WRAPPER="$AHV_HOME/bin/ahv"

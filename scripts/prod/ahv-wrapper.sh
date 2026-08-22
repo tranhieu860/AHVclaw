@@ -73,14 +73,28 @@ case "${1:-}" in
     (cd "$FORK" && pnpm install --prefer-offline || true)
     (cd "$FORK" && PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false pnpm run build)
     [ -x "$FORK/scripts/install-ahv-skin.sh" ] && bash "$FORK/scripts/install-ahv-skin.sh" || true
-    echo "${C1}[ahv update]${RESET} done → $(git -C "$FORK" describe --tags --always --dirty)"
+    # Bake version vào $FORK/AHV_VERSION (2 dòng: tag, short SHA) để
+    # wrapper --version không lệ thuộc git command runtime.
+    printf '%s\n%s\n' \
+      "$(git -C "$FORK" describe --tags --always --dirty)" \
+      "$(git -C "$FORK" rev-parse --short HEAD)" > "$FORK/AHV_VERSION"
+    echo "${C1}[ahv update]${RESET} done → $(sed -n 1p "$FORK/AHV_VERSION")"
     ;;
   --version|-v)
-    # AHV CLI version = git tag/short SHA của fork + dsh upstream underlying.
-    # Bot team pin theo AHV tag (v0.2.0-p0), không phải dsh 0.1.1-rc.1
-    # (số version của apps/cli/package.json upstream, không đại diện AHV state).
-    AHV_TAG=$(git -C "$FORK" describe --tags --always --dirty 2>/dev/null || echo unknown)
-    AHV_SHA=$(git -C "$FORK" rev-parse --short HEAD 2>/dev/null || echo unknown)
+    # AHV CLI version = git tag/short SHA + dsh underlying. Bot pin theo
+    # AHV tag. Ưu tiên file $FORK/AHV_VERSION (bake bởi install.sh/ahv
+    # update) để wrapper không lệ thuộc git command sẵn trong PATH lúc
+    # runtime (systemd env, container, git bị strip khỏi image, ...).
+    AHV_TAG=""
+    AHV_SHA=""
+    if [ -f "$FORK/AHV_VERSION" ]; then
+      AHV_TAG=$(sed -n 1p "$FORK/AHV_VERSION" 2>/dev/null)
+      AHV_SHA=$(sed -n 2p "$FORK/AHV_VERSION" 2>/dev/null)
+    fi
+    [ -z "$AHV_TAG" ] && AHV_TAG=$(git -C "$FORK" describe --tags --always --dirty 2>/dev/null)
+    [ -z "$AHV_SHA" ] && AHV_SHA=$(git -C "$FORK" rev-parse --short HEAD 2>/dev/null)
+    [ -z "$AHV_TAG" ] && AHV_TAG="unknown"
+    [ -z "$AHV_SHA" ] && AHV_SHA="unknown"
     DSH_VER=$(node -p "require('$FORK/apps/cli/package.json').version" 2>/dev/null || echo unknown)
     echo "ahv $AHV_TAG (commit $AHV_SHA, dsh $DSH_VER)"
     exit 0

@@ -103,36 +103,72 @@ function authLogout() {
 
 // ── doctor ──────────────────────────────────────────────────────────────
 async function doctor() {
+  // Severity contract cho bot: 'ok' | 'warn' | 'error'.
+  // - error = blocking (node/fork/cli_bin/credential thiếu → ahv run không
+  //   chạy được. `ok` field aggregate = false, bot phải block user request).
+  // - warn = degraded, non-blocking (route probe timeout/HTTP 4xx nhưng
+  //   POST /v1/chat/completions vẫn work — router có thể gate /v1/models
+  //   khác auth level. `ok` = true, bot vẫn cho run, log warning).
+  // - ok = healthy.
   const checks = []
   const nodeVersion = process.versions.node
   const nodeMajor = Number(nodeVersion.split('.')[0])
-  checks.push({ name: 'node', ok: nodeMajor >= 22, value: `v${nodeVersion}`, required: '>=22' })
+  checks.push({
+    name: 'node', severity: nodeMajor >= 22 ? 'ok' : 'error',
+    ok: nodeMajor >= 22, value: `v${nodeVersion}`, required: '>=22',
+  })
 
   try {
     const pnpmVer = (await execCapture('pnpm', ['-v'])).stdout.trim()
     const pnpmMajor = Number(pnpmVer.split('.')[0])
-    checks.push({ name: 'pnpm', ok: pnpmMajor >= 10, value: pnpmVer, required: '>=10' })
+    checks.push({
+      name: 'pnpm', severity: pnpmMajor >= 10 ? 'ok' : 'error',
+      ok: pnpmMajor >= 10, value: pnpmVer, required: '>=10',
+    })
   } catch (e) {
-    checks.push({ name: 'pnpm', ok: false, value: null, error: 'not found' })
+    checks.push({ name: 'pnpm', severity: 'error', ok: false, value: null, error: 'not found' })
   }
 
-  checks.push({ name: 'fork', ok: existsSync(FORK), value: FORK })
-  checks.push({ name: 'cli_bin', ok: existsSync(join(FORK, 'apps/cli/lib/bin.js')), value: join(FORK, 'apps/cli/lib/bin.js') })
-  checks.push({ name: 'ahv_bundle', ok: existsSync(join(FORK, 'packages/bundle/ahv/lib/bot-runner.js')), value: join(FORK, 'packages/bundle/ahv/lib/bot-runner.js') })
-  checks.push({ name: 'bot_profile', ok: existsSync(join(DSH_HOME, 'profiles/bot/cordis.patch.yml')), value: join(DSH_HOME, 'profiles/bot/cordis.patch.yml') })
+  const forkOk = existsSync(FORK)
+  checks.push({ name: 'fork', severity: forkOk ? 'ok' : 'error', ok: forkOk, value: FORK })
+  const cliBin = join(FORK, 'apps/cli/lib/bin.js')
+  const cliBinOk = existsSync(cliBin)
+  checks.push({ name: 'cli_bin', severity: cliBinOk ? 'ok' : 'error', ok: cliBinOk, value: cliBin })
+  const bundle = join(FORK, 'packages/bundle/ahv/lib/bot-runner.js')
+  const bundleOk = existsSync(bundle)
+  checks.push({ name: 'ahv_bundle', severity: bundleOk ? 'ok' : 'error', ok: bundleOk, value: bundle })
+  const bp = join(DSH_HOME, 'profiles/bot/cordis.patch.yml')
+  // bot_profile là legacy — profile-based bot mode không còn dùng
+  // (wrapper spawn dsh headless + patch chain), nên downgrade thành warn.
+  const bpOk = existsSync(bp)
+  checks.push({ name: 'bot_profile', severity: bpOk ? 'ok' : 'warn', ok: bpOk, value: bp, note: 'optional — chỉ dùng nếu chạy `dsh --profile bot` trực tiếp' })
 
   const keyOk = Boolean(process.env.AHV_API_KEY)
-  checks.push({ name: 'credential', ok: keyOk, value: keyOk ? 'set' : null, required: 'AHV_API_KEY env' })
+  checks.push({
+    name: 'credential', severity: keyOk ? 'ok' : 'error',
+    ok: keyOk, value: keyOk ? 'set' : null, required: 'AHV_API_KEY env',
+  })
 
-  let sessionsDir = { name: 'sessions_dir', value: SESSIONS_ROOT, ok: false }
+  const sessionsDir = { name: 'sessions_dir', value: SESSIONS_ROOT }
   try {
-    if (!existsSync(SESSIONS_ROOT)) sessionsDir.error = 'not created yet'
-    else if (!statSync(SESSIONS_ROOT).isDirectory()) sessionsDir.error = 'not a directory'
-    else sessionsDir.ok = true
-  } catch (e) { sessionsDir.error = e.message }
+    if (!existsSync(SESSIONS_ROOT)) {
+      // Sessions dir chưa tạo là bình thường trước run đầu tiên → warn.
+      sessionsDir.ok = true; sessionsDir.severity = 'warn'; sessionsDir.note = 'chưa tạo (sẽ tự tạo sau run đầu)'
+    } else if (!statSync(SESSIONS_ROOT).isDirectory()) {
+      sessionsDir.ok = false; sessionsDir.severity = 'error'; sessionsDir.error = 'not a directory'
+    } else {
+      sessionsDir.ok = true; sessionsDir.severity = 'ok'
+    }
+  } catch (e) {
+    sessionsDir.ok = false; sessionsDir.severity = 'error'; sessionsDir.error = e.message
+  }
   checks.push(sessionsDir)
 
-  const modelCheck = { name: 'model_route', value: DEFAULT_BASE_URL, ok: false }
+  // model_route: GET /v1/models chỉ là advisory probe. Router có thể trả
+  // 401/404/timeout cho /models nhưng vẫn accept POST /chat/completions.
+  // Nên downgrade thành warn, không phải error. Bot dùng field `ok=false,
+  // severity=warn` để log cảnh báo, không block run.
+  const modelCheck = { name: 'model_route', value: DEFAULT_BASE_URL }
   if (keyOk) {
     try {
       const controller = new AbortController()
@@ -144,21 +180,32 @@ async function doctor() {
       clearTimeout(timer)
       modelCheck.ok = res.ok
       modelCheck.value = `HTTP ${res.status}`
+      modelCheck.severity = res.ok ? 'ok' : 'warn'
+      if (!res.ok) modelCheck.note = 'router /v1/models không accessible, nhưng POST /chat/completions có thể vẫn work — advisory'
     } catch (e) {
+      modelCheck.ok = false
+      modelCheck.severity = 'warn'
       modelCheck.error = e.name === 'AbortError' ? 'timeout' : e.message
+      modelCheck.note = 'probe fail — advisory, không blocking run'
     }
   } else {
+    modelCheck.ok = false
+    modelCheck.severity = 'warn'
     modelCheck.error = 'skipped (no AHV_API_KEY)'
   }
   checks.push(modelCheck)
 
-  // Contract #4: doctor exit 0 khi command chạy xong + JSON hợp lệ.
-  // `ok` field trong body báo trạng thái tổng; degraded route không làm
-  // bot lỡ classify "cli broken" thành "route down". Exit non-zero chỉ
-  // khi doctor không sinh được JSON hợp lệ (đã handled by errJson elsewhere).
-  const allOk = checks.every(c => c.ok)
+  // Aggregate ok = TRUE trừ khi có ít nhất 1 check severity='error'.
+  // Warn không làm ok=false. Bot dùng ok để phân loại "CLI ready" vs
+  // "CLI broken need user action". Duyệt qua severity='error' để list
+  // ra lỗi blocking đầu tiên (bot có thể surface cho user).
+  const errors = checks.filter(c => c.severity === 'error')
+  const warnings = checks.filter(c => c.severity === 'warn')
   printJson({
-    ok: allOk,
+    ok: errors.length === 0,
+    error_count: errors.length,
+    warning_count: warnings.length,
+    blocking_errors: errors.map(c => ({ name: c.name, reason: c.error ?? c.note ?? 'not ok' })),
     checks,
     ahv_home: dirname(AHV_ENV_FILE),
     dsh_home: DSH_HOME,
