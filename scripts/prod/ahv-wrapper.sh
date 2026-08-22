@@ -62,7 +62,9 @@ case "${1:-}" in
     ;;
   update)
     echo "${C1}[ahv update]${RESET} pulling latest từ $(git -C "$FORK" remote get-url origin)"
-    git -C "$FORK" fetch origin --tags
+    # fetch --tags để git describe hiển thị đúng AHV tag (v0.2.0-p1 etc)
+    # thay vì chỉ short SHA. Bot team pin theo tag.
+    git -C "$FORK" fetch origin --tags --force
     if ! git -C "$FORK" diff --quiet || ! git -C "$FORK" diff --cached --quiet; then
       echo "ahv update: source dirty tại $FORK, skip pull. Chạy 'git -C $FORK status' để xem." >&2
       exit 1
@@ -71,7 +73,7 @@ case "${1:-}" in
     (cd "$FORK" && pnpm install --prefer-offline || true)
     (cd "$FORK" && PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false pnpm run build)
     [ -x "$FORK/scripts/install-ahv-skin.sh" ] && bash "$FORK/scripts/install-ahv-skin.sh" || true
-    echo "${C1}[ahv update]${RESET} done → v$(node -p "require('$FORK/apps/cli/package.json').version" 2>/dev/null || echo "?")"
+    echo "${C1}[ahv update]${RESET} done → $(git -C "$FORK" describe --tags --always --dirty)"
     ;;
   --version|-v)
     # AHV CLI version = git tag/short SHA của fork + dsh upstream underlying.
