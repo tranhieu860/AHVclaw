@@ -133,3 +133,14 @@
     # https://github.com/V1ki/dsh-plugin-subscriptions
     - id: llm-subscriptions
       name: 'dsh-plugin-subscriptions'
+
+    # Self-contained browser runtime — bundles Playwright + OpenCLI local,
+    # provides `browser` service + interactive browser_* tools (open, read,
+    # screenshot, click, type, fill, scroll, close, execute, recipe_run,
+    # userscript_run, script_run_builtin, auth_profile, opencli_run…).
+    # Playwright chromium là headless native → chạy được cả server prod
+    # (headless) và desktop user. Cache chromium share global 400MB,
+    # `browser_install` tool pull khi thiếu.
+    # https://github.com/anweat/dsh-browser
+    - id: browser
+      name: '@anweat/dsh-browser'

@@ -97,13 +97,13 @@ log "Cài dependencies (mất 3-8 phút, tốn ~2GB disk)..."
 # pnpm 11 exit 1 khi có build scripts bị ignore (cloudflared/cpu-features/ssh2 —
 # optional deps của các plugin community, không blocker cho AHV core). Chấp nhận
 # non-zero exit ở đây; bước sau (wrapper, skin) sẽ fail rõ ràng nếu thật sự hỏng.
-pnpm install --prefer-offline || warn "pnpm install returned non-zero (thường do build scripts optional bị skip, an toàn bỏ qua)"
+PNPM_CONFIG_MINIMUM_RELEASE_AGE=0 pnpm install --prefer-offline || warn "pnpm install returned non-zero (thường do build scripts optional bị skip, an toàn bỏ qua)"
 
 log "Build workspace (tsc -b + tsdown, mất 5-10 phút)..."
 # pnpm 11 chạy runDepsStatusCheck trước mỗi `pnpm run` → gọi lại pnpm install
 # → exit 1 nếu build scripts optional bị skip → block build. Tắt check qua
 # PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN env để build proceed.
-PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false pnpm run build || fail "build fail — xem log ở trên"
+PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false PNPM_CONFIG_MINIMUM_RELEASE_AGE=0 pnpm run build || fail "build fail — xem log ở trên"
 
 if [ -x "$SRC/scripts/install-ahv-skin.sh" ]; then
   log "Cài skin AHV..."
@@ -192,7 +192,7 @@ case "${1:-}" in
       exit 1
     fi
     git -C "$FORK" pull --ff-only
-    (cd "$FORK" && pnpm install --prefer-offline || true)
+    (cd "$FORK" && PNPM_CONFIG_MINIMUM_RELEASE_AGE=0 pnpm install --prefer-offline || true)
     (cd "$FORK" && PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false pnpm run build)
     [ -x "$FORK/scripts/install-ahv-skin.sh" ] && bash "$FORK/scripts/install-ahv-skin.sh" || true
     echo "${C1}[ahv update]${RESET} done → v$(node -p "require('$FORK/apps/cli/package.json').version" 2>/dev/null || echo "?")"

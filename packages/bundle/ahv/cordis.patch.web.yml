@@ -69,6 +69,12 @@
     # https://github.com/V1ki/dsh-plugin-subscriptions
     - id: llm-subscriptions
       name: 'dsh-plugin-subscriptions'
+
+    # Self-contained Playwright chromium + OpenCLI. See headless patch
+    # for full row description. Web mode benefits from browser tool cùng
+    # với UI surfaces (Plugin Market, Skill Explorer).
+    - id: browser
+      name: '@anweat/dsh-browser'
     # NOTE: @linxin666/dsh-web-ui-all is a BUNDLE (has nested cordis.patch.yml
     # inserting ~15 sub-plugins). It must be added via `dsh plugin --profile web
     # add @linxin666/dsh-web-ui-all` so the profile's `dsh.profile.bundles`

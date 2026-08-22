@@ -70,8 +70,12 @@ case "${1:-}" in
       exit 1
     fi
     git -C "$FORK" pull --ff-only
-    (cd "$FORK" && pnpm install --prefer-offline || true)
-    (cd "$FORK" && PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false pnpm run build)
+    # PNPM_CONFIG_MINIMUM_RELEASE_AGE=0 bypass supply-chain policy cho fresh
+    # plugin releases (<24h). AHV pin exact version qua workspace exclude,
+    # rủi ro attack chain thấp; fresh plugin (dshmarket, @anweat/dsh-browser)
+    # thường patch security nên nên get sớm hơn.
+    (cd "$FORK" && PNPM_CONFIG_MINIMUM_RELEASE_AGE=0 pnpm install --prefer-offline || true)
+    (cd "$FORK" && PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false PNPM_CONFIG_MINIMUM_RELEASE_AGE=0 pnpm run build)
     [ -x "$FORK/scripts/install-ahv-skin.sh" ] && bash "$FORK/scripts/install-ahv-skin.sh" || true
     # Bake version vào $FORK/AHV_VERSION (2 dòng: tag, short SHA) để
     # wrapper --version không lệ thuộc git command runtime.

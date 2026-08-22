@@ -56,8 +56,12 @@ allowBuilds:
   cloudflared: set this to true or false
   cpu-features: set this to true or false
   ssh2: set this to true or false
+  '@jackwener/opencli': set this to true or false
 
 minimumReleaseAgeExclude:
+  - 'dshmarket@1.18.1'
+  - 'dshmarket@1.18.0'
+  - "@anweat/dsh-browser"
   # Fresh pi-ai releases carry the model catalog updates that are the whole
   # point of bumping it; waiting out the release age would defeat that.
   - '@earendil-works/pi-ai@0.82.1'
@@ -88,7 +92,5 @@ minimumReleaseAgeExclude:
   - '@linxin666/dsh-ssh@0.2.7'
   - '@linxin666/dsh-tool-describe-image@0.2.7'
   - '@linxin666/dsh-web-ui-all@0.2.7'
-  - dshmarket@1.18.0
-
 patchedDependencies:
   node-pty@1.2.0-beta.15: patches/node-pty@1.2.0-beta.15.patch
