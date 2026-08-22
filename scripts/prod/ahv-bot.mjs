@@ -58,6 +58,9 @@ function errJson(code, message, terminal = true, retryAfterSec = 0, exitCode = 1
 
 // ── auth ────────────────────────────────────────────────────────────────
 async function authStatus() {
+  // Contract: chỉ kiểm credential presence, KHÔNG probe route, KHÔNG in
+  // token/key/bearer/cookie. Route-health đã có `ahv doctor`. Exit 0 luôn
+  // khi command chạy được (bot đọc field `logged_in` để phân loại).
   const key = process.env.AHV_API_KEY
   if (!key) {
     return printJson({
@@ -65,37 +68,21 @@ async function authStatus() {
       credential_source: null,
       provider: 'ahv-router',
       model: DEFAULT_MODEL,
+      base_url: DEFAULT_BASE_URL,
+      expires_at: null,
       reason: 'AHV_API_KEY chưa được set trong env hoặc ~/.ahv/env',
-    })
+    }, 0)
   }
   const source = process.env.AHV_API_KEY_SOURCE
-    ?? (existsSync(AHV_ENV_FILE) ? `file:${AHV_ENV_FILE}` : 'env')
-  // Probe /v1/models với timeout 4s để xác thực key thực tế. Router có thể
-  // accept key mà không validate — ta báo "logged_in: true, probe: <status>"
-  // để bot decide dựa trên probe field nếu cần.
-  let probe = { ok: false, status: null, error: null }
-  try {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 4000)
-    const res = await fetch(`${DEFAULT_BASE_URL}/models`, {
-      headers: { Authorization: `Bearer ${key}` },
-      signal: controller.signal,
-    })
-    clearTimeout(timer)
-    probe = { ok: res.ok, status: res.status, error: res.ok ? null : `HTTP ${res.status}` }
-  } catch (e) {
-    probe = { ok: false, status: null, error: e.name === 'AbortError' ? 'timeout' : e.message }
-  }
+    ?? (existsSync(AHV_ENV_FILE) ? 'file' : 'env')
   return printJson({
-    logged_in: probe.ok,
+    logged_in: true,
     credential_source: source,
     provider: 'ahv-router',
     model: DEFAULT_MODEL,
     base_url: DEFAULT_BASE_URL,
-    key_prefix: `${key.slice(0, 6)}...`,
     expires_at: null,
-    probe,
-  }, probe.ok ? 0 : 1)
+  }, 0)
 }
 
 function authLogin() {
@@ -163,6 +150,10 @@ async function doctor() {
   }
   checks.push(modelCheck)
 
+  // Contract #4: doctor exit 0 khi command chạy xong + JSON hợp lệ.
+  // `ok` field trong body báo trạng thái tổng; degraded route không làm
+  // bot lỡ classify "cli broken" thành "route down". Exit non-zero chỉ
+  // khi doctor không sinh được JSON hợp lệ (đã handled by errJson elsewhere).
   const allOk = checks.every(c => c.ok)
   printJson({
     ok: allOk,
@@ -170,7 +161,7 @@ async function doctor() {
     ahv_home: dirname(AHV_ENV_FILE),
     dsh_home: DSH_HOME,
     fork: FORK,
-  }, allOk ? 0 : 1)
+  }, 0)
 }
 
 function execCapture(cmd, args, opts = {}) {
@@ -185,9 +176,30 @@ function execCapture(cmd, args, opts = {}) {
 }
 
 // ── sessions ────────────────────────────────────────────────────────────
+// dsh-session-persistence-jsonl ghi mỗi batch append là 1 zstd frame độc
+// lập, các frame concat vào 1 file. `zstdDecompressSync` chỉ decode frame
+// đầu (header), nên bot phải iterate qua từng frame theo zstd magic
+// 0x28B52FFD để có toàn bộ events. Xem
+// packages/session/session-persistence-jsonl/README.md "Physical encoding".
+const ZSTD_MAGIC = Buffer.from([0x28, 0xB5, 0x2F, 0xFD])
+
+function decodeZstdMultiFrame(buf) {
+  const chunks = []
+  let off = 0
+  while (off < buf.length) {
+    if (!buf.subarray(off, off + 4).equals(ZSTD_MAGIC)) break
+    const remaining = buf.subarray(off)
+    chunks.push(zstdDecompressSync(remaining))
+    const nextMagic = remaining.indexOf(ZSTD_MAGIC, 4)
+    if (nextMagic < 0) break
+    off += nextMagic
+  }
+  return Buffer.concat(chunks)
+}
+
 function decodeSessionJsonl(filePath) {
   const buf = readFileSync(filePath)
-  const raw = filePath.endsWith('.zstd') ? zstdDecompressSync(buf) : buf
+  const raw = filePath.endsWith('.zstd') ? decodeZstdMultiFrame(buf) : buf
   const lines = raw.toString('utf8').split('\n').filter(Boolean)
   return lines.map(l => JSON.parse(l))
 }
@@ -220,13 +232,20 @@ function readSessionMeta(entry) {
   try {
     const events = decodeSessionJsonl(entry.path)
     const header = events[0]
-    const turnCount = events.filter(e => e.type === 'turn/start').length
+    // Count turn boundaries + assistant messages để bot phân biệt session
+    // rỗng vs session có nội dung. Packed rows (text-chunks) count as many
+    // events chỉ có 1 row — bot dùng number để status/handoff.
+    const turns = events.filter(e => e.type === 'turn/start').length
+    const assistantMessages = events.filter(e => e.type === 'assistant/message').length
+    const toolCalls = events.filter(e => e.type === 'tool/call').length
     return {
       session_id: header?.id ?? null,
       cwd: header?.cwd ?? null,
       created_at: header?.createdAt ?? null,
       agent_preset: header?.agentPreset ?? null,
-      turns: turnCount,
+      turns,
+      assistant_messages: assistantMessages,
+      tool_calls: toolCalls,
       events: events.length,
       last_modified: new Date(entry.mtime).toISOString(),
       path: entry.path,
@@ -280,6 +299,24 @@ function sessionsShow(sessionId) {
 // Reuse the working ahv-profile module-resolution: cwd=FORK so pnpm's hoisted
 // @deepseek-ai/* deps resolve, and --patch layers apply on top of headless.
 function runBot(argv) {
+  // Contract #3: fail-fast credential check TRƯỚC khi spawn dsh. Nếu thiếu
+  // key, emit JSONL error taxonomy đúng chuẩn để bot phân loại terminal,
+  // không lãng phí boot dsh cả tree chỉ để router silent-fail.
+  const outputMode = argv.includes('--output') ? argv[argv.indexOf('--output') + 1] : 'jsonl'
+  if (!process.env.AHV_API_KEY) {
+    if (outputMode === 'jsonl') {
+      process.stdout.write(JSON.stringify({
+        type: 'error',
+        code: 'missing_credential',
+        terminal: true,
+        retry_after_sec: 0,
+        message: 'AHV_API_KEY chưa được set — cài qua ~/.ahv/env hoặc /etc/default/ahv-web',
+      }) + '\n')
+    } else {
+      process.stderr.write('ahv run: missing_credential (AHV_API_KEY chưa set)\n')
+    }
+    process.exit(1)
+  }
   const AHV_PATCH = join(FORK, 'packages/bundle/ahv/cordis.patch.yml')
   const BOT_PATCH = join(FORK, 'packages/bundle/ahv/cordis.patch.bot.yml')
   // Use tsx-based source launch (--import tsx/esm src/bin.ts), same as dev
