@@ -1,0 +1,34 @@
+# AHV bot adapter patch — one-shot JSONL streamer over the ahv bundle.
+# Applied on top of the ahv patch (dsh-base + LLM router rewire + persona),
+# this file swaps the headless one-shot text runner for the bot-runner that
+# streams SessionEvent → bot JSONL taxonomy on stdout.
+#
+# Prompt/cwd/session-id/resume come from the bot-startup provider, which
+# parses them from `cmdlineArgs`; run one turn per invocation.
+
+# Disable headless runner + startup so their positional-task command line
+# doesn't compete with the bot-runner's --prompt-file flag.
+- id: headless-runner
+  disabled: true
+
+- id: headless-startup
+  disabled: true
+
+- insert:
+    # Provider: parses the bot's CLI flags and publishes botStartup.
+    - id: bot-startup
+      name: '@ahvclaw/dsh-bundle-ahv/bot-startup'
+
+    # Consumer: subscribes to session/event, streams bot JSONL, and drives
+    # one prompt to quiescence with the caller-supplied session identity.
+    - id: bot-runner
+      name: '@ahvclaw/dsh-bundle-ahv/bot-runner'
+      inject: [botStartup]
+      config:
+        prompt: !!js ctx.botStartup.prompt
+        cwd: !!js ctx.botStartup.cwd
+        sessionId: !!js ctx.botStartup.sessionId
+        resumeSessionId: !!js ctx.botStartup.resumeSessionId
+        output: !!js ctx.botStartup.output
+        noColor: !!js ctx.botStartup.noColor
+        noBanner: !!js ctx.botStartup.noBanner
