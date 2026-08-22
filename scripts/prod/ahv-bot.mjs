@@ -298,10 +298,39 @@ function sessionsShow(sessionId) {
 }
 
 // ── models ──────────────────────────────────────────────────────────────
-// Parse llm-pi-ai section trong cordis.patch.yml để lấy metadata declared
-// tĩnh (contextWindow, maxTokens) — router /v1/models chỉ trả id + tên.
-// Static metadata cho các model AHV pin (default + legacy alias + Grok
-// SuperHeavy) là contract, không phải render.
+// Nguồn thật của model list là ctx.llm.listProviders() + listModels() ở
+// harness của mình — bao gồm mọi LLM plugin đã mount (llm-pi-ai / AHV
+// router, dsh-plugin-subscriptions sau khi user OAuth, và bất cứ adapter
+// nào khác). Spawn dsh với patch bot-list-models: plugin mount, dump JSON
+// catalog rồi exit. Fallback về static parser nếu spawn fail.
+function spawnListModels() {
+  return new Promise((resolve) => {
+    const patch = join(FORK, 'packages/bundle/ahv/cordis.patch.list-models.yml')
+    const ahvPatch = join(FORK, 'packages/bundle/ahv/cordis.patch.yml')
+    const args = [
+      '--import', 'tsx/esm',
+      join(FORK, 'apps/cli/src/bin.ts'),
+      '--profile', 'headless',
+      '--patch', ahvPatch,
+      '--patch', patch,
+    ]
+    const env = { ...process.env, NO_COLOR: '1' }
+    const proc = spawn(process.execPath, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env,
+      cwd: FORK,
+    })
+    let stdout = '', stderr = ''
+    proc.stdout.on('data', b => stdout += b.toString('utf8'))
+    proc.stderr.on('data', b => stderr += b.toString('utf8'))
+    proc.on('close', (code) => resolve({ code, stdout, stderr }))
+    proc.on('error', (err) => resolve({ code: -1, stdout, stderr: err.message }))
+    setTimeout(() => { try { proc.kill('SIGKILL') } catch {} }, 60000)
+  })
+}
+
+// Static parser giữ để fallback khi spawn dsh fail (thiếu credential,
+// plugin tree không mount được, etc). Chỉ có AHV router models declared.
 function readStaticAhvModels() {
   const patchPath = join(FORK, 'packages/bundle/ahv/cordis.patch.yml')
   if (!existsSync(patchPath)) return []
@@ -386,59 +415,93 @@ async function fetchRouterModels() {
 }
 
 async function modelsList() {
-  const staticModels = readStaticAhvModels()
-  const router = await fetchRouterModels()
-  // Merge: router-advertised list làm base, augment metadata từ static declaration.
-  const staticById = new Map(staticModels.map(m => [m.id, m]))
-  const merged = router.models.map(rm => {
-    const s = staticById.get(rm.id)
-    return {
-      id: rm.id,
-      name: s?.name ?? rm.name,
-      provider: 'ahv-router',
-      context_window: s?.contextWindow ?? null,
-      max_tokens: s?.maxTokens ?? null,
-      pinned: Boolean(s),   // AHV bundle pins metadata → "pinned/featured"
+  // Primary: spawn dsh với list-models patch, đọc catalog từ ctx.llm.
+  // Bao gồm mọi LLM plugin đang mount (subscriptions ChatGPT/Claude/Grok
+  // sau OAuth, llm-pi-ai router, etc). Đây là source of truth.
+  const result = await spawnListModels()
+  if (result.code === 0 && result.stdout.trim()) {
+    try {
+      const lines = result.stdout.trim().split('\n')
+      const jsonLine = [...lines].reverse().find(l => l.trim().startsWith('{'))
+      if (!jsonLine) throw new Error('no JSON line in dsh stdout')
+      const payload = JSON.parse(jsonLine)
+      const staticModels = readStaticAhvModels()
+      const staticById = new Map(staticModels.map(m => [m.id, m]))
+      // Merge static metadata (contextWindow, maxTokens) vào catalog live.
+      const models = payload.models.map(m => {
+        const s = staticById.get(m.model_id)
+        return {
+          id: m.model_id,
+          name: m.model_name ?? m.model_id,
+          provider: m.provider,
+          provider_name: m.provider_name,
+          context_window: m.context_window ?? s?.contextWindow ?? null,
+          max_tokens: m.max_tokens ?? s?.maxTokens ?? null,
+          pinned: Boolean(s),
+        }
+      })
+      return printJson({
+        default: DEFAULT_MODEL,
+        provider_count: payload.provider_count,
+        providers: payload.providers,
+        count: models.length,
+        source: 'harness',   // ctx.llm.listProviders() + listModels()
+        models,
+      }, 0)
+    } catch (e) {
+      // JSON parse fail — fall through to static fallback
     }
-  })
-  // Nếu router unreachable, fallback về static list để bot vẫn có options.
-  const models = merged.length > 0 ? merged : staticModels.map(m => ({
-    id: m.id,
-    name: m.name ?? m.id,
-    provider: 'ahv-router',
-    context_window: m.contextWindow ?? null,
-    max_tokens: m.maxTokens ?? null,
-    pinned: true,
-  }))
+  }
+  // Fallback: dsh không mount được (thiếu credential, tree broken, timeout).
+  // Trả về static-declared AHV models để bot vẫn có options.
+  const staticModels = readStaticAhvModels()
   printJson({
     default: DEFAULT_MODEL,
-    provider: 'ahv-router',
-    base_url: DEFAULT_BASE_URL,
-    count: models.length,
-    router_reachable: router.ok,
-    router_error: router.ok ? null : router.error,
-    models,
+    provider_count: 1,
+    providers: [{ id: 'ahv-router', name: 'AHV Router' }],
+    count: staticModels.length,
+    source: 'static-fallback',
+    fallback_reason: result.stderr.slice(0, 200) || `exit ${result.code}`,
+    models: staticModels.map(m => ({
+      id: m.id,
+      name: m.name ?? m.id,
+      provider: 'ahv-router',
+      provider_name: 'AHV Router',
+      context_window: m.contextWindow ?? null,
+      max_tokens: m.maxTokens ?? null,
+      pinned: true,
+    })),
   }, 0)
 }
 
 async function modelsShow(modelId) {
   if (!modelId) errJson('internal_error', 'models show: cần truyền MODEL_ID', true, 0, 2)
+  const result = await spawnListModels()
+  let harness = null
+  if (result.code === 0 && result.stdout.trim()) {
+    try {
+      const lines = result.stdout.trim().split('\n')
+      const jsonLine = [...lines].reverse().find(l => l.trim().startsWith('{'))
+      if (jsonLine) {
+        const payload = JSON.parse(jsonLine)
+        harness = payload.models.find(m => m.model_id === modelId)
+      }
+    } catch { /* fall through */ }
+  }
   const staticModels = readStaticAhvModels()
-  const router = await fetchRouterModels()
   const s = staticModels.find(m => m.id === modelId)
-  const r = router.models.find(m => m.id === modelId)
-  if (!s && !r) {
+  if (!harness && !s) {
     errJson('internal_error', `model not found: ${modelId}`, true, 0, 1)
   }
   printJson({
     id: modelId,
-    name: s?.name ?? r?.name ?? modelId,
-    provider: 'ahv-router',
-    base_url: DEFAULT_BASE_URL,
-    context_window: s?.contextWindow ?? null,
-    max_tokens: s?.maxTokens ?? null,
+    name: harness?.model_name ?? s?.name ?? modelId,
+    provider: harness?.provider ?? 'ahv-router',
+    provider_name: harness?.provider_name ?? 'AHV Router',
+    context_window: harness?.context_window ?? s?.contextWindow ?? null,
+    max_tokens: harness?.max_tokens ?? s?.maxTokens ?? null,
     pinned: Boolean(s),
-    advertised: Boolean(r),
+    mounted_in_harness: Boolean(harness),
   }, 0)
 }
 

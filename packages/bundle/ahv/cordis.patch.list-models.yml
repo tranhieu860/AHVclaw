@@ -1,0 +1,19 @@
+# AHV bot list-models patch — mount `bot-list-models` runner over the ahv
+# bundle, disable one-shot task runners (headless + bot-runner), enumerate
+# every LLM provider ctx.llm currently knows about, dump JSON, exit.
+
+- id: headless-runner
+  disabled: true
+
+- id: headless-startup
+  disabled: true
+
+- id: bot-runner
+  disabled: true
+
+- id: bot-startup
+  disabled: true
+
+- insert:
+    - id: bot-list-models
+      name: '@ahvclaw/dsh-bundle-ahv/bot-list-models'

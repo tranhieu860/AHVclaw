@@ -19,18 +19,25 @@
       "types": "./lib/types/bot-startup.d.ts",
       "default": "./lib/bot-startup.js"
     },
+    "./bot-list-models": {
+      "types": "./lib/types/bot-list-models.d.ts",
+      "default": "./lib/bot-list-models.js"
+    },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./cordis.patch.web.yml": "./cordis.patch.web.yml",
     "./cordis.patch.bot.yml": "./cordis.patch.bot.yml",
+    "./cordis.patch.list-models.yml": "./cordis.patch.list-models.yml",
     "./package.json": "./package.json"
   },
   "files": [
     "lib/index.js",
     "lib/bot-runner.js",
     "lib/bot-startup.js",
+    "lib/bot-list-models.js",
     "cordis.patch.yml",
     "cordis.patch.web.yml",
     "cordis.patch.bot.yml",
+    "cordis.patch.list-models.yml",
     "lib/types/**/*.d.ts"
   ],
   "license": "MIT",

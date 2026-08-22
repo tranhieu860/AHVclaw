@@ -7,7 +7,7 @@ import { defineConfig } from 'tsdown'
  * include the bot-runner pair.
  */
 export default defineConfig({
-  entry: ['lib/types/index.js', 'lib/types/invariant.js', 'lib/types/bot-runner.js', 'lib/types/bot-startup.js'],
+  entry: ['lib/types/index.js', 'lib/types/invariant.js', 'lib/types/bot-runner.js', 'lib/types/bot-startup.js', 'lib/types/bot-list-models.js'],
   outDir: 'lib',
   format: ['esm'],
   platform: 'node',
