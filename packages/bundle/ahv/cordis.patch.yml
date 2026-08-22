@@ -13,7 +13,7 @@
 - id: agent-default-model
   config:
     provider: ahv-router
-    model: AHV-Holding
+    model: ahv-qwen38
 
 # Register the AHV router as a hand-declared OpenAI-compatible route.
 # Base's llm-pi-ai row starts empty; this patch replaces the whole config
@@ -25,29 +25,33 @@
         displayName: AHV Router
         apiKeyEnv: AHV_API_KEY
         api: openai-completions
-        baseURL: https://auto.ahvchat.com/v1
+        baseURL: http://15.235.200.66:2022/v1
         # The router's virtual combos accept streaming + tool-use over the
         # OpenAI wire; capacities are guesses from public endpoint behavior.
         # A route mis-sized this way still serves — pi-ai's route defaults
         # (256K ctx / 32K max) cover unknown models — but pin the ones we
         # actually use to avoid surprise truncation.
         models:
-          - id: AHV-Holding
-            name: AHV-Holding (default)
+          - id: ahv-qwen38
+            name: ahv-qwen38 (default — Qwen3-8B, vision + structured tool_calls)
             contextWindow: 128000
-            maxTokens: 8192
+            maxTokens: 64000
+          - id: AHV-Holding
+            name: AHV-Holding (legacy alias)
+            contextWindow: 128000
+            maxTokens: 64000
           - id: AHV-Holding-TroLy
             name: AHV-Holding-TroLy
             contextWindow: 128000
-            maxTokens: 8192
+            maxTokens: 64000
           - id: AHV-Holding-DEV
             name: AHV-Holding-DEV (dev combo)
             contextWindow: 128000
-            maxTokens: 8192
+            maxTokens: 64000
           - id: Grok-SuperHeavy
             name: Grok SuperHeavy
             contextWindow: 128000
-            maxTokens: 8192
+            maxTokens: 64000
 
 # Turn off DeepSeek's search route so it doesn't try to authenticate with
 # a DEEPSEEK_API_KEY the AHV user doesn't have. Fetch stays off in base.
@@ -121,3 +125,11 @@
     # model sees them via skill_list/skill_load without further config.
     - id: superpowers-dsh
       name: 'superpowers-dsh'
+
+    # Use ChatGPT (Codex Plus), Claude Pro, Grok Premium subscriptions as
+    # dsh LLM providers via `pi-ai` — no API cost when the user already
+    # holds the subscription. Web mounts Settings → Subscriptions to log
+    # in; headless can reuse the shared token file after first login.
+    # https://github.com/V1ki/dsh-plugin-subscriptions
+    - id: llm-subscriptions
+      name: 'dsh-plugin-subscriptions'

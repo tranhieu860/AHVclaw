@@ -1,0 +1,34 @@
+/* AHV skin — L3 free-form overrides. Higher sensitivity than skin.css.
+ * Scoped by skin-center to html[data-dsh-skin="ahv"], no scope needed inline.
+ */
+
+/* Rebrand the sidebar's fallback header text "DSH Local Build" → "AHV CLI".
+ * The class name is content-hashed (HYkrHa_fallbackBrandName etc.); attribute
+ * substring selector matches every hash variant across rebuilds.
+ *
+ * Trick: hide original text via zero font-size, insert AHV via ::before at
+ * normal size. The wrapper's inline-flex still lays out the ::before pill.
+ */
+[class*="fallbackBrandName"] {
+  font-size: 0 !important;
+  line-height: 1 !important;
+}
+[class*="fallbackBrandName"]::before {
+  content: "AHV CLI";
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-primary, #fff);
+  background: linear-gradient(135deg, #7dd3fc 0%, #a78bfa 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: 0.02em;
+}
+
+/* Hide the tiny commit-hash pill next to the brand — it leaks
+ * DSH_CLIENT_COMMIT_HASH which reads dsh-branded. */
+[class*="buildRevision"] {
+  display: none !important;
+}

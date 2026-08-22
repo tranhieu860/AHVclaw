@@ -53,6 +53,9 @@ allowBuilds:
   # The Python runtime deploy includes the reviewed workspace postinstall that
   # restores the executable bit on node-pty's macOS spawn helper.
   '@deepseek-ai/dsh-subprocess-local@file:packages/subprocess/subprocess-local': true
+  cloudflared: set this to true or false
+  cpu-features: set this to true or false
+  ssh2: set this to true or false
 
 minimumReleaseAgeExclude:
   # Fresh pi-ai releases carry the model catalog updates that are the whole
@@ -67,6 +70,24 @@ minimumReleaseAgeExclude:
   - node-addon-require-builtin-win32-ia32-msvc@0.1.4
   - node-addon-require-builtin-win32-x64-msvc@0.1.4
   - node-addon-require-builtin@0.1.4
+  - dshmarket@1.17.1
+  - '@linxin666/dsh-chat-recovery@0.2.7'
+  - '@linxin666/dsh-client-ui-aionui-panel@0.2.7'
+  - '@linxin666/dsh-client-ui-community-plugins@0.2.7'
+  - '@linxin666/dsh-client-ui-git-graph@0.2.7'
+  - '@linxin666/dsh-client-ui-plugin-manager@0.2.7'
+  - '@linxin666/dsh-client-ui-skill-explorer@0.2.7'
+  - '@linxin666/dsh-client-ui-skin-center@0.2.7'
+  - '@linxin666/dsh-client-ui-task-board@0.2.7'
+  - '@linxin666/dsh-client-ui-web-ui-settings@0.2.7'
+  - '@linxin666/dsh-desktop-launcher@0.2.7'
+  - '@linxin666/dsh-liangshen@0.2.7'
+  - '@linxin666/dsh-pet@0.2.7'
+  - '@linxin666/dsh-remote-web-ui@0.2.7'
+  - '@linxin666/dsh-skins@0.2.7'
+  - '@linxin666/dsh-ssh@0.2.7'
+  - '@linxin666/dsh-tool-describe-image@0.2.7'
+  - '@linxin666/dsh-web-ui-all@0.2.7'
 
 patchedDependencies:
   node-pty@1.2.0-beta.15: patches/node-pty@1.2.0-beta.15.patch

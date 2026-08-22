@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schemas.linxin666.org/dsh-skin/v2.json",
+  "skinManifestVersion": 2,
+  "id": "ahv",
+  "name": "AHV",
+  "nameEn": "AHV Holding",
+  "author": "AHV Holding",
+  "version": "0.1.0",
+  "accent": "#7dd3fc",
+  "order": -100,
+  "tagline": "AHV CLI · Cyan/Purple gradient · Vietnamese-first",
+  "description": "Skin thương hiệu AHV Holding: gradient cyan (#7dd3fc) → purple (#a78bfa) khớp landing ahvclaw.com. Rebrand app title, favicon, sidebar. Zero patch dsh source — upstream update mãi giữ nguyên.",
+  "tags": ["ahv", "vietnamese", "brand", "cyan", "purple"],
+  "contributes": {
+    "stylesheet": "skin.css",
+    "patches": "patches.css"
+  },
+  "facets": {
+    "client": {
+      "entry": "hooks.mjs",
+      "apiVersion": "x-org.linxin666.skin-center/v1alpha1"
+    }
+  }
+}

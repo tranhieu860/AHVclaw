@@ -69,6 +69,9 @@ fi
 log "pnpm install (workspace deps may have moved)"
 pnpm install
 
+log "reinstalling AHV skin (pnpm regens skin-center store, drops skins/ahv/)"
+"$(dirname "$0")/install-ahv-skin.sh"
+
 log "pnpm run build"
 pnpm run build
 

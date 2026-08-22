@@ -1,54 +1,43 @@
 {
   "name": "@ahvclaw/dsh-bundle-ahv",
-  "description": "AHV Holding profile bundle for the DeepSeek Harness (`dsh`). Rewires dsh-base to the AHV router (auto.ahvchat.com), pins a Vietnamese persona, and adds terminal-PTY, self-modification, Plugin Market, and Superpowers skills. Consumed via `@ahvclaw/cli` or `dsh --patch $(node -p \"require.resolve('@ahvclaw/dsh-bundle-ahv/cordis.patch.yml')\")`.",
+  "description": "AHV Holding profile bundle: rewires dsh-base to the AHV router (auto.ahvchat.com) with a Vietnamese-first persona. Loaded by `dsh --profile ahv` or the `ahv` bin default profile.",
   "version": "0.1.0",
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org/"
-  },
+  "private": true,
   "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
   "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
+    "lib/index.js",
     "cordis.patch.yml",
-    "README.md"
+    "lib/types/**/*.d.ts"
   ],
   "license": "MIT",
-  "keywords": [
-    "dsh",
-    "deepseek-harness",
-    "ahv",
-    "ahvclaw",
-    "bundle",
-    "vietnamese"
-  ],
-  "homepage": "https://ahvclaw.com",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/tranhieu860/AHVclaw.git",
-    "directory": "packages/bundle/ahv"
-  },
-  "bugs": {
-    "url": "https://github.com/tranhieu860/AHVclaw/issues"
-  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
   },
   "dependencies": {
-    "@deepseek-ai/dsh-base": "^0.0.1-rc.1",
-    "@deepseek-ai/dsh-terminal": "^0.0.1-rc.3",
-    "@deepseek-ai/dsh-terminal-bash": "^0.0.1-rc.3",
-    "@deepseek-ai/dsh-tool-terminal": "^0.0.1-rc.5",
-    "@deepseek-ai/dsh-cordis-host-runner": "^0.0.1-rc.3",
-    "@deepseek-ai/dsh-tool-cordis": "^0.0.1-rc.1",
-    "@deepseek-ai/dsh-llm-pi-ai": "^0.0.1-rc.1",
-    "@deepseek-ai/dsh-agent-default-model": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-system-prompt": "^0.0.1-rc.1",
+    "@deepseek-ai/dsh-base": "workspace:^",
+    "@deepseek-ai/dsh-llm-pi-ai": "workspace:^",
+    "@deepseek-ai/dsh-agent-default-model": "workspace:^",
+    "@deepseek-ai/dsh-system-prompt": "workspace:^",
+    "@deepseek-ai/dsh-terminal": "workspace:^",
+    "@deepseek-ai/dsh-terminal-bash": "workspace:^",
+    "@deepseek-ai/dsh-tool-terminal": "workspace:^",
+    "@deepseek-ai/dsh-cordis-host-runner": "workspace:^",
+    "@deepseek-ai/dsh-tool-cordis": "workspace:^",
     "dshmarket": "^1.17.1",
-    "superpowers-dsh": "^0.1.1"
+    "superpowers-dsh": "^0.1.1",
+    "@linxin666/dsh-web-ui-all": "^0.2.7",
+    "dsh-plugin-subscriptions": "^0.5.0"
   }
 }

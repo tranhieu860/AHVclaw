@@ -1,0 +1,123 @@
+/* AHV skin — L1 token remaps + L2 semantic tweaks.
+ * Scoped by skin-center to html[data-dsh-skin="ahv"], no scope needed inline.
+ *
+ * Color source: landing hero @ ahvclaw.com — cyan #7dd3fc, purple #a78bfa,
+ * dark bg #050510 → #12121e. Accent gradient at brand-heavy surfaces (top
+ * bar, primary buttons, active nav items).
+ */
+
+/* ── L1: DSH design tokens ─────────────────────────────────────────── */
+
+:root {
+  /* AHV brand palette */
+  --ahv-cyan: #7dd3fc;
+  --ahv-cyan-glow: rgba(125, 211, 252, 0.35);
+  --ahv-purple: #a78bfa;
+  --ahv-purple-glow: rgba(167, 139, 250, 0.35);
+  --ahv-bg-a: #050510;
+  --ahv-bg-b: #0a0a1f;
+  --ahv-bg-c: #0d0d2a;
+  --ahv-panel: #12121e;
+  --ahv-border: rgba(255, 255, 255, 0.09);
+
+  /* DSH tokens — accent chain */
+  --dsw-accent: var(--ahv-cyan);
+  --dsw-accent-hover: #a5e3fd;
+  --dsw-accent-active: #67c1ec;
+  --dsw-accent-fg: #0a0a0f;
+  --dsw-accent-muted: rgba(125, 211, 252, 0.15);
+
+  /* Focus rings + selection */
+  --dsw-focus-ring: var(--ahv-cyan-glow);
+  --dsw-selection-bg: var(--ahv-cyan-glow);
+
+  /* Link */
+  --dsw-link: var(--ahv-cyan);
+  --dsw-link-hover: #a5e3fd;
+}
+
+/* Dark theme surface (default DSH web is dark) */
+:root,
+html[data-theme="dark"] {
+  --dsw-bg: var(--ahv-bg-a);
+  --dsw-bg-elevated: var(--ahv-panel);
+  --dsw-bg-input: var(--ahv-bg-b);
+  --dsw-surface: var(--ahv-panel);
+  --dsw-surface-hover: #181828;
+  --dsw-border: var(--ahv-border);
+  --dsw-border-strong: rgba(255, 255, 255, 0.16);
+}
+
+/* ── L2: semantic decorations ─────────────────────────────────────── */
+
+/* App shell — subtle brand gradient orbs backdrop */
+body {
+  background:
+    radial-gradient(900px 500px at 15% -10%, rgba(125, 211, 252, 0.06), transparent 55%),
+    radial-gradient(700px 400px at 90% 110%, rgba(167, 139, 250, 0.06), transparent 55%),
+    var(--ahv-bg-a) !important;
+}
+
+/* Top nav / sidebar — brand accent stripe */
+[data-dsh-surface="sidebar"],
+nav[role="navigation"],
+aside[role="complementary"] {
+  border-right: 1px solid var(--ahv-border);
+}
+
+/* Primary buttons — gradient */
+button[data-dsh-part="primary"],
+button.primary,
+[role="button"][data-variant="primary"] {
+  background: linear-gradient(135deg, var(--ahv-cyan) 0%, var(--ahv-purple) 100%) !important;
+  color: #0a0a0f !important;
+  border: 0 !important;
+  box-shadow: 0 4px 16px -4px var(--ahv-cyan-glow) !important;
+}
+
+button[data-dsh-part="primary"]:hover,
+button.primary:hover {
+  box-shadow: 0 8px 24px -6px var(--ahv-cyan-glow) !important;
+  transform: translateY(-1px);
+  transition: transform 100ms, box-shadow 120ms;
+}
+
+/* Chat bubbles — user assistant differentiation */
+[data-dsh-part="message-user"] {
+  background: rgba(125, 211, 252, 0.08);
+  border: 1px solid rgba(125, 211, 252, 0.2);
+}
+[data-dsh-part="message-assistant"] {
+  background: var(--ahv-panel);
+  border: 1px solid var(--ahv-border);
+}
+
+/* Code blocks — dsh accent border */
+pre, code {
+  background: var(--ahv-bg-b) !important;
+  border: 1px solid var(--ahv-border);
+  color: var(--ahv-cyan);
+}
+
+/* Input composer at bottom */
+[data-dsh-part="composer"] {
+  background: var(--ahv-panel);
+  border: 1px solid var(--ahv-border);
+  border-radius: 12px;
+}
+[data-dsh-part="composer"]:focus-within {
+  border-color: var(--ahv-cyan);
+  box-shadow: 0 0 0 4px rgba(125, 211, 252, 0.14);
+}
+
+/* Scrollbars — thin cyan */
+::-webkit-scrollbar { width: 10px; height: 10px }
+::-webkit-scrollbar-track { background: var(--ahv-bg-b) }
+::-webkit-scrollbar-thumb {
+  background: rgba(125, 211, 252, 0.25);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(125, 211, 252, 0.4) }
+
+/* Selection */
+::selection { background: var(--ahv-cyan-glow); color: white }
