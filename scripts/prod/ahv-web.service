@@ -1,0 +1,26 @@
+[Unit]
+Description=AHV CLI Web UI — dsh web mode with AHV bundle
+After=network.target
+Documentation=https://ahvclaw.com
+
+[Service]
+Type=simple
+User=claudeproxy
+Group=claudeproxy
+WorkingDirectory=/home/claudeproxy/.ahv/src
+EnvironmentFile=/etc/default/ahv-web
+
+# Expand AHV_WEB_PUBLIC_HOSTS (space-separated) into repeated --trusted-host.
+# Using bash -c so systemd expansion doesn't try to do argv splitting itself.
+ExecStart=/bin/bash -c 'HOSTS=""; for h in $$AHV_WEB_PUBLIC_HOSTS; do HOSTS="$$HOSTS --trusted-host $$h"; done; exec /usr/local/bin/ahv web --host $$AHV_WEB_BIND_HOST --port $$AHV_WEB_BIND_PORT --no-open $$HOSTS'
+
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=HOME=/home/claudeproxy
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target
