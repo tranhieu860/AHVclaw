@@ -11,3 +11,20 @@
 # Pairing records are generated from the three confirmed owner-blob pairs.
 # The worktree-local installer registers the fail-closed driver command.
 *.i18n.yaml merge=dsh-translation-pairing
+
+# Upstream-owned (from deepseek-harness fork) — hide từ GitHub language stats
+# và folder highlights. Files vẫn checkout bình thường, chỉ giảm noise trên
+# repo landing page.
+vendor/**            linguist-vendored
+docs/**              linguist-documentation
+website/**           linguist-vendored
+examples/**          linguist-documentation
+python/**            linguist-vendored
+native/**            linguist-vendored
+patches/**           linguist-vendored
+.agents/**           linguist-documentation
+BRAND_GUIDELINES*    linguist-documentation
+CONTRIBUTING*        linguist-documentation
+*.i18n.yaml          linguist-generated
+scripts/snapshots/** linguist-generated
+scripts/fixtures/**  linguist-generated
