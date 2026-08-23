@@ -434,6 +434,177 @@ function writeSubscriptionsAuth(obj) {
   chmodSync(SUBSCRIPTIONS_AUTH_FILE, 0o600)
 }
 
+/**
+ * Where each provider reports the quota left on the logged-in account.
+ *
+ * These are the same endpoints the subscriptions plugin calls. They are read
+ * directly rather than by booting the harness: the console refreshes this on a
+ * timer across every server, and a full plugin boot per refresh would cost far
+ * more than the request itself. The trade is that a change to these endpoints
+ * has to be mirrored here — the shape below is deliberately the plugin's.
+ */
+export const USAGE_ENDPOINTS = {
+  claude: {
+    url: 'https://api.anthropic.com/api/oauth/usage',
+    headers: (s) => ({
+      authorization: `Bearer ${s.accessToken}`,
+      'anthropic-beta': 'oauth-2025-04-20',
+      accept: 'application/json',
+    }),
+  },
+  codex: {
+    url: 'https://chatgpt.com/backend-api/wham/usage',
+    headers: (s) => ({
+      authorization: `Bearer ${s.accessToken}`,
+      ...(s.accountId ? { 'chatgpt-account-id': s.accountId } : {}),
+      originator: 'codex_cli_rs',
+      accept: 'application/json',
+    }),
+  },
+  grok: {
+    url: 'https://cli-chat-proxy.grok.com/v1/billing?format=credits',
+    headers: (s) => ({
+      authorization: `Bearer ${s.accessToken}`,
+      'x-xai-token-auth': 'xai-grok-cli',
+      accept: 'application/json',
+    }),
+  },
+}
+
+/** Keep a reported percentage inside the range a meter can draw. */
+function clampPercent(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  return Math.max(0, Math.min(100, Math.round(value * 10) / 10))
+}
+
+function isoOrNull(value) {
+  if (typeof value === 'string' && value !== '') return value
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return new Date(value > 1e11 ? value : value * 1000).toISOString()
+  }
+  return null
+}
+
+/**
+ * Turn one provider's payload into the same window list for all three.
+ *
+ * Each provider answers in its own shape — Claude in percentages, Codex in
+ * rate-limit windows, Grok in credits — so the console would otherwise need
+ * three renderers and would show nothing at all for a shape it did not know.
+ *
+ * @param kind - provider id.
+ * @param payload - the provider's parsed JSON response.
+ * @returns normalised windows, or supported:false when the shape is unknown.
+ */
+export function normaliseUsagePayload(kind, payload) {
+  const windows = []
+  const body = payload ?? {}
+  if (kind === 'claude') {
+    if (Array.isArray(body.limits)) {
+      for (const entry of body.limits) {
+        const pct = clampPercent(entry?.percent)
+        if (pct === null) continue
+        windows.push({
+          kind: entry.kind === 'session' ? 'session'
+            : (entry.kind === 'weekly_all' || entry.kind === 'weekly_scoped') ? 'weekly' : 'other',
+          ...(typeof entry?.scope?.model?.display_name === 'string'
+            ? { scope: entry.scope.model.display_name } : {}),
+          used_percent: pct,
+          resets_at: isoOrNull(entry?.resets_at),
+        })
+      }
+    }
+    // Only when the modern list is absent: the two describe the same limits, and
+    // reporting both showed every window twice.
+    if (windows.length === 0) {
+      for (const [field, windowKind] of [['five_hour', 'session'], ['seven_day', 'weekly']]) {
+        const legacy = body[field]
+        const pct = clampPercent(legacy?.utilization)
+        if (pct === null) continue
+        windows.push({ kind: windowKind, used_percent: pct, resets_at: isoOrNull(legacy?.resets_at) })
+      }
+    }
+  } else if (kind === 'codex') {
+    for (const [field, windowKind] of [['primary_window', 'session'], ['secondary_window', 'weekly']]) {
+      const entry = body.rate_limit?.[field]
+      const pct = clampPercent(entry?.used_percent)
+      if (pct === null) continue
+      const resets = typeof entry?.resets_in_seconds === 'number'
+        ? new Date(Date.now() + entry.resets_in_seconds * 1000).toISOString()
+        : isoOrNull(entry?.resets_at)
+      windows.push({ kind: windowKind, used_percent: pct, resets_at: resets })
+    }
+  } else if (kind === 'grok') {
+    // The live account reports a percentage over a billing period. A credits
+    // balance is the older shape and is still accepted.
+    const period = body.config?.currentPeriod ?? {}
+    const pct = clampPercent(body.config?.creditUsagePercent)
+    if (pct !== null) {
+      windows.push({
+        kind: String(period.type ?? '').includes('WEEKLY') ? 'weekly' : 'session',
+        used_percent: pct,
+        resets_at: isoOrNull(period.end),
+      })
+    }
+    const total = Number(body.credits?.total)
+    const remaining = Number(body.credits?.remaining)
+    if (windows.length === 0 && Number.isFinite(total) && total > 0 && Number.isFinite(remaining)) {
+      windows.push({
+        kind: 'credits',
+        used_percent: clampPercent(((total - remaining) / total) * 100),
+        remaining,
+        total,
+        resets_at: isoOrNull(body.credits?.resets_at),
+      })
+    }
+  }
+  return windows.length > 0 ? { supported: true, windows } : { supported: false, windows: [] }
+}
+
+/**
+ * Read one provider's remaining quota.
+ *
+ * Never throws: the console renders every server it knows about, and one
+ * provider being unreachable or its token expired must show as that, beside the
+ * ones that answered, rather than blanking the panel.
+ *
+ * @param kind - provider id.
+ * @param session - the stored session for that provider.
+ * @param fetchFn - injected for tests.
+ * @returns normalised usage, or supported:false with a reason.
+ */
+export async function fetchProviderUsage(kind, session, fetchFn = fetch) {
+  const endpoint = USAGE_ENDPOINTS[kind]
+  if (endpoint === undefined) return { supported: false, windows: [], error: `unknown provider ${kind}` }
+  if (!session || typeof session.accessToken !== 'string' || session.accessToken === '') {
+    return { supported: false, windows: [], error: 'chua login provider nay' }
+  }
+  try {
+    const response = await fetchFn(endpoint.url, { headers: endpoint.headers(session) })
+    if (!response.ok) {
+      const detail = typeof response.text === 'function' ? String(await response.text()).slice(0, 120) : ''
+      return { supported: false, windows: [], error: `HTTP ${response.status}${detail ? `: ${detail}` : ''}` }
+    }
+    return normaliseUsagePayload(kind, await response.json())
+  } catch (error) {
+    return { supported: false, windows: [], error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/** Report the quota left on every logged-in subscription. */
+async function loginUsage() {
+  const auth = readSubscriptionsAuth()
+  const providers = {}
+  await Promise.all(SUPPORTED_LOGIN_PROVIDERS.map(async (kind) => {
+    const entry = auth[kind]
+    providers[kind] = {
+      logged_in: Boolean(entry && typeof entry === 'object' && entry.accessToken),
+      ...(await fetchProviderUsage(kind, entry)),
+    }
+  }))
+  printJson({ checked_at: new Date().toISOString(), providers }, 0)
+}
+
 function loginStatus() {
   const auth = readSubscriptionsAuth()
   const providers = {}
@@ -1131,6 +1302,7 @@ function usage() {
   ahv login url PROVIDER --json                (return browser OAuth URL)
   ahv login logout PROVIDER --json             (remove stored token)
   ahv login import --json                      (import codex/grok CLI login vao AHV)
+  ahv login usage --json                       (han muc con lai that tu grok/codex/claude)
   ahv models list --json
   ahv models show MODEL_ID --json
   ahv sessions list --json
@@ -1179,6 +1351,7 @@ if (subcommand === 'version') {
   else if (action === 'url') loginUrl(rest[1])
   else if (action === 'logout') loginLogout(rest[1])
   else if (action === 'import') loginImport()
+  else if (action === 'usage') void loginUsage()
   else usage()
 } else if (subcommand === 'models') {
   const action = rest[0]
