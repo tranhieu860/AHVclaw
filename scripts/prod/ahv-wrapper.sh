@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # AHV CLI wrapper — installed by ahvclaw.com/install.sh
 set -e
-FORK="/home/claudeproxy/.ahv/src"
+FORK="__AHV_SRC__"
 BIN="apps/cli/src/bin.ts"
 PATCH="$FORK/packages/bundle/ahv/cordis.patch.yml"
 PATCH_WEB="$FORK/packages/bundle/ahv/cordis.patch.web.yml"
@@ -47,7 +47,7 @@ EOF
 
 cd "$FORK"
 
-AHV_BOT="$HOME/.ahv/bin/ahv-bot.mjs"
+AHV_BOT="__AHV_BIN_DIR__/ahv-bot.mjs"
 
 case "${1:-}" in
   auth|login|doctor|sessions|models|version|run)
@@ -82,6 +82,30 @@ case "${1:-}" in
     printf '%s\n%s\n' \
       "$(git -C "$FORK" describe --tags --always --dirty)" \
       "$(git -C "$FORK" rev-parse --short HEAD)" > "$FORK/AHV_VERSION"
+    # Refresh the wrapper and bot adapter too. They live beside the source but
+    # are copies, so without this an update pulls new harness code while the
+    # CLI surface stays frozen at whatever shipped the day it was installed —
+    # every fix we make to the adapter would never reach an existing install.
+    # Written via temp + mv: replacing the inode leaves this running script's
+    # own file descriptor intact, while truncating in place would corrupt it.
+    AHV_BIN_DIR="$(dirname "$AHV_BOT")"
+    if [ -f "$FORK/scripts/prod/ahv-wrapper.sh" ] && [ -f "$FORK/scripts/prod/ahv-bot.mjs" ]; then
+      TMP_WRAPPER="$AHV_BIN_DIR/.ahv.update.$$"
+      sed -e "s|__AHV_SRC__|$FORK|g" -e "s|__AHV_BIN_DIR__|$AHV_BIN_DIR|g" \
+        "$FORK/scripts/prod/ahv-wrapper.sh" > "$TMP_WRAPPER"
+      if grep -q '__AHV_SRC__\|__AHV_BIN_DIR__' "$TMP_WRAPPER"; then
+        rm -f "$TMP_WRAPPER"
+        echo "ahv update: wrapper còn placeholder, giữ nguyên bản cũ" >&2
+      else
+        chmod 755 "$TMP_WRAPPER"
+        mv -f "$TMP_WRAPPER" "$AHV_BIN_DIR/ahv"
+        TMP_BOT="$AHV_BIN_DIR/.ahv-bot.update.$$"
+        cp "$FORK/scripts/prod/ahv-bot.mjs" "$TMP_BOT"
+        chmod 755 "$TMP_BOT"
+        mv -f "$TMP_BOT" "$AHV_BOT"
+        echo "${C1}[ahv update]${RESET} wrapper + bot adapter refreshed"
+      fi
+    fi
     echo "${C1}[ahv update]${RESET} done → $(sed -n 1p "$FORK/AHV_VERSION")"
     ;;
   --version|-v)

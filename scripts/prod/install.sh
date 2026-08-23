@@ -126,105 +126,27 @@ mkdir -p "$AHV_BIN"
 WRAPPER="$AHV_HOME/bin/ahv"
 mkdir -p "$AHV_HOME/bin"
 
-cat > "$WRAPPER" <<'WRAPPER_EOF'
-#!/usr/bin/env bash
-# AHV CLI wrapper — installed by ahvclaw.com/install.sh
-set -e
-FORK="__AHV_SRC__"
-BIN="apps/cli/src/bin.ts"
-PATCH="$FORK/packages/bundle/ahv/cordis.patch.yml"
-PATCH_WEB="$FORK/packages/bundle/ahv/cordis.patch.web.yml"
-DEFAULT_AGENTS_MD="$FORK/packages/bundle/ahv/AGENTS.md"
+# Wrapper and bot adapter ship as files in the repo, not as a copy embedded
+# here. An inline heredoc drifts silently: the version this installer wrote
+# lost the bot subcommands entirely, so a fresh install had no `ahv run`,
+# `ahv models`, or `ahv doctor` while the servers we had patched by hand kept
+# working. Copying the tracked files means what we test is what users get.
+SRC_WRAPPER="$SRC/scripts/prod/ahv-wrapper.sh"
+SRC_BOT="$SRC/scripts/prod/ahv-bot.mjs"
+[ -f "$SRC_WRAPPER" ] || fail "thiếu $SRC_WRAPPER — repo không đầy đủ"
+[ -f "$SRC_BOT" ] || fail "thiếu $SRC_BOT — repo không đầy đủ"
 
-if [ -t 1 ] && [ -z "$NO_COLOR" ]; then
-  C1=$'\033[38;5;123m'; C2=$'\033[38;5;147m'
-  DIM=$'\033[2m'; BOLD=$'\033[1m'; RESET=$'\033[0m'
-else
-  C1=""; C2=""; DIM=""; BOLD=""; RESET=""
+install -m 755 "$SRC_WRAPPER" "$WRAPPER"
+sed -i.bak -e "s|__AHV_SRC__|$SRC|g" -e "s|__AHV_BIN_DIR__|$AHV_HOME/bin|g" "$WRAPPER" && rm -f "$WRAPPER.bak"
+# `cmd && fail` would abort the whole installer under `set -e` on the common
+# path where grep finds nothing.
+if grep -q '__AHV_SRC__\|__AHV_BIN_DIR__' "$WRAPPER"; then
+  fail "wrapper còn placeholder chưa thay"
 fi
-
-if [ ! -f "$FORK/$BIN" ]; then
-  echo "ahv: source missing at $FORK/$BIN — reinstall: curl -fsSL https://ahvclaw.com/install.sh | bash" >&2
-  exit 127
-fi
-
-[ -f "$HOME/.ahv/env" ] && . "$HOME/.ahv/env"
-
-DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
-INSTALL_MARKER="$DSH_HOME/.ahv-agents-installed"
-if [ -f "$DEFAULT_AGENTS_MD" ] && [ ! -f "$INSTALL_MARKER" ]; then
-  mkdir -p "$DSH_HOME"
-  [ ! -f "$DSH_HOME/AGENTS.md" ] && cp "$DEFAULT_AGENTS_MD" "$DSH_HOME/AGENTS.md" && \
-    echo "ahv: cài default agent rules → $DSH_HOME/AGENTS.md" >&2
-  touch "$INSTALL_MARKER"
-fi
-
-print_banner() {
-  local model="${AHV_MODEL:-ahv-qwen38}"
-  local version
-  version=$(node -p "require('$FORK/apps/cli/package.json').version" 2>/dev/null || echo "?")
-  cat >&2 <<EOF
-
-${C1}   █████╗ ██╗  ██╗██╗   ██╗${RESET}
-${C1}  ██╔══██╗██║  ██║██║   ██║${RESET}
-${C1}  ███████║███████║██║   ██║${RESET}   ${BOLD}AHV CLI${RESET}${DIM}  v${version}${RESET}
-${C2}  ██╔══██║██╔══██║╚██╗ ██╔╝${RESET}   ${DIM}Model: ${RESET}${C1}${model}${RESET}
-${C2}  ██║  ██║██║  ██║ ╚████╔╝ ${RESET}   ${DIM}Docs:  ${RESET}${C1}https://ahvclaw.com/docs${RESET}
-${C2}  ╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ${RESET}
-EOF
-}
-
-cd "$FORK"
-
-case "${1:-}" in
-  web)
-    shift
-    exec node --import tsx/esm "$BIN" --profile web --patch "$PATCH_WEB" "$@"
-    ;;
-  plugin)
-    exec node --import tsx/esm "$BIN" "$@"
-    ;;
-  update)
-    echo "${C1}[ahv update]${RESET} pulling latest từ $(git -C "$FORK" remote get-url origin)"
-    git -C "$FORK" fetch origin --tags
-    if ! git -C "$FORK" diff --quiet || ! git -C "$FORK" diff --cached --quiet; then
-      echo "ahv update: source dirty tại $FORK, skip pull. Chạy 'git -C $FORK status' để xem." >&2
-      exit 1
-    fi
-    git -C "$FORK" pull --ff-only
-    (cd "$FORK" && PNPM_CONFIG_MINIMUM_RELEASE_AGE=0 pnpm install --prefer-offline || true)
-    (cd "$FORK" && PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false pnpm run build)
-    [ -x "$FORK/scripts/install-ahv-skin.sh" ] && bash "$FORK/scripts/install-ahv-skin.sh" || true
-    echo "${C1}[ahv update]${RESET} done → v$(node -p "require('$FORK/apps/cli/package.json').version" 2>/dev/null || echo "?")"
-    ;;
-  --version|-v|--help|-h|--dump-config|--dump-default-config)
-    exec node --import tsx/esm "$BIN" "$@"
-    ;;
-  '')
-    print_banner
-    cat >&2 <<HINT
-  Usage:
-    ${BOLD}ahv "task"${RESET}                 gõ task, model chạy 1 lượt rồi exit
-    ${BOLD}ahv web${RESET}                    mở web UI local (127.0.0.1:3080)
-    ${BOLD}ahv update${RESET}                 kéo bản mới nhất từ GitHub
-    ${BOLD}ahv --help${RESET}                 xem toàn bộ dsh options
-    ${BOLD}ahv plugin add <pkg>${RESET}       cài plugin từ npm / GitHub
-
-  Ví dụ:
-    ${DIM}ahv "tìm file lớn nhất trong /var/log rồi tail 20 dòng"${RESET}
-    ${DIM}ahv "explain what this repo does"${RESET}
-
-HINT
-    exit 0
-    ;;
-  *)
-    exec node --import tsx/esm "$BIN" --profile headless --patch "$PATCH" "$@"
-    ;;
-esac
-WRAPPER_EOF
-
-sed -i.bak "s|__AHV_SRC__|$SRC|g" "$WRAPPER" && rm -f "$WRAPPER.bak"
 chmod +x "$WRAPPER"
+
+install -m 755 "$SRC_BOT" "$AHV_HOME/bin/ahv-bot.mjs"
+log "OK Bot adapter → $AHV_HOME/bin/ahv-bot.mjs"
 
 ln -sfn "$WRAPPER" "$AHV_BIN/ahv"
 log "OK Wrapper → $WRAPPER"
