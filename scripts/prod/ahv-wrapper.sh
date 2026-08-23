@@ -47,7 +47,12 @@ EOF
 
 cd "$FORK"
 
-AHV_BOT="__AHV_BIN_DIR__/ahv-bot.mjs"
+# Derived from where this wrapper actually is, not substituted at install time.
+# Two different installers write this file — ahvclaw.com/install.sh and the bot
+# package's own wrapper step — and the second only rewrites the FORK line. A
+# placeholder here therefore survived into the installed wrapper and broke every
+# bot subcommand. readlink resolves the ~/.local/bin symlink to the real file.
+AHV_BOT="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)/ahv-bot.mjs"
 
 case "${1:-}" in
   auth|login|doctor|sessions|models|version|run)
@@ -101,9 +106,12 @@ case "${1:-}" in
     AHV_BIN_DIR="$(dirname "$AHV_BOT")"
     if [ -f "$FORK/scripts/prod/ahv-wrapper.sh" ] && [ -f "$FORK/scripts/prod/ahv-bot.mjs" ]; then
       TMP_WRAPPER="$AHV_BIN_DIR/.ahv.update.$$"
-      sed -e "s|__AHV_SRC__|$FORK|g" -e "s|__AHV_BIN_DIR__|$AHV_BIN_DIR|g" \
-        "$FORK/scripts/prod/ahv-wrapper.sh" > "$TMP_WRAPPER"
-      if grep -q '__AHV_SRC__\|__AHV_BIN_DIR__' "$TMP_WRAPPER"; then
+      # Split so this line does not match its own pattern: the installers sed
+      # the whole file, which would otherwise rewrite the substitution code here
+      # into the concrete path and leave the next update unable to substitute.
+      TOKEN="__AHV""_SRC__"
+      sed -e "s|$TOKEN|$FORK|g" "$FORK/scripts/prod/ahv-wrapper.sh" > "$TMP_WRAPPER"
+      if grep -q "$TOKEN" "$TMP_WRAPPER"; then
         rm -f "$TMP_WRAPPER"
         echo "ahv update: wrapper còn placeholder, giữ nguyên bản cũ" >&2
       else

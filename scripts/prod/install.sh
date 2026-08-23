@@ -152,10 +152,10 @@ SRC_BOT="$SRC/scripts/prod/ahv-bot.mjs"
 [ -f "$SRC_BOT" ] || fail "thiếu $SRC_BOT — repo không đầy đủ"
 
 install -m 755 "$SRC_WRAPPER" "$WRAPPER"
-sed -i.bak -e "s|__AHV_SRC__|$SRC|g" -e "s|__AHV_BIN_DIR__|$AHV_HOME/bin|g" "$WRAPPER" && rm -f "$WRAPPER.bak"
+sed -i.bak -e "s|__AHV_SRC__|$SRC|g" "$WRAPPER" && rm -f "$WRAPPER.bak"
 # `cmd && fail` would abort the whole installer under `set -e` on the common
 # path where grep finds nothing.
-if grep -q '__AHV_SRC__\|__AHV_BIN_DIR__' "$WRAPPER"; then
+if grep -q '__AHV_SRC__' "$WRAPPER"; then
   fail "wrapper còn placeholder chưa thay"
 fi
 # Checking only for leftover placeholders is not enough: a wrapper from an older
