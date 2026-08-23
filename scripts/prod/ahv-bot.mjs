@@ -18,7 +18,7 @@
 import { spawn } from 'node:child_process'
 import { readFileSync, existsSync, statSync, readdirSync, writeFileSync, chmodSync, mkdirSync } from 'node:fs'
 import { resolve as resolvePath, dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { zstdDecompressSync } from 'node:zlib'
 import { homedir } from 'node:os'
 
@@ -804,6 +804,144 @@ function runBot(argv) {
 }
 
 // ── dispatch ────────────────────────────────────────────────────────────
+// ── CLI-native credential import ────────────────────────────────────────
+// `claude` credentials are already shared: the subscriptions plugin reads
+// ~/.claude/.credentials.json directly. `codex` and `grok` are not — each
+// keeps its own OAuth store, so a user who ran `codex login` still had to
+// repeat the flow through AHV. These helpers translate the CLI-native stores
+// into the plugin's schema so one login per CLI is enough.
+
+/**
+ * Read the `exp` claim from a JWT without verifying its signature.
+ * Only the expiry is needed, and the token itself is already trusted local
+ * state written by the CLI that owns it.
+ * @param {string} token - a JWT.
+ * @returns {number | null} expiry in epoch milliseconds, or null when absent.
+ */
+export function decodeJwtExpiry(token) {
+  if (typeof token !== 'string') return null
+  const parts = token.split('.')
+  if (parts.length < 2) return null
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'))
+    return typeof payload.exp === 'number' ? payload.exp * 1000 : null
+  } catch {
+    return null
+  }
+}
+
+/** Translate ~/.codex/auth.json into the plugin's codex session shape. */
+function readCodexCliSession(home) {
+  const path = join(home, '.codex', 'auth.json')
+  if (!existsSync(path)) return { session: null, reason: 'cli_not_logged_in' }
+  let raw
+  try {
+    raw = JSON.parse(readFileSync(path, 'utf8'))
+  } catch {
+    return { session: null, reason: 'cli_unreadable' }
+  }
+  const tokens = raw?.tokens
+  if (!tokens?.access_token || !tokens?.refresh_token) {
+    return { session: null, reason: 'cli_not_logged_in' }
+  }
+  const expiresAt = decodeJwtExpiry(tokens.access_token)
+  return {
+    session: {
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      expiresAt: expiresAt ?? Date.now(),
+      accountId: tokens.account_id ?? null,
+      idToken: tokens.id_token ?? null,
+    },
+    reason: null,
+  }
+}
+
+/** Translate ~/.grok/auth.json into the plugin's grok session shape. */
+function readGrokCliSession(home) {
+  const path = join(home, '.grok', 'auth.json')
+  if (!existsSync(path)) return { session: null, reason: 'cli_not_logged_in' }
+  let raw
+  try {
+    raw = JSON.parse(readFileSync(path, 'utf8'))
+  } catch {
+    return { session: null, reason: 'cli_unreadable' }
+  }
+  const accessToken = raw?.access_token ?? raw?.accessToken
+  const refreshToken = raw?.refresh_token ?? raw?.refreshToken
+  if (!accessToken || !refreshToken) return { session: null, reason: 'cli_not_logged_in' }
+  const expiresAt = raw?.expires_at ?? raw?.expiresAt ?? decodeJwtExpiry(accessToken)
+  return {
+    session: {
+      accessToken,
+      refreshToken,
+      expiresAt: typeof expiresAt === 'number' ? expiresAt : Date.now(),
+      tokenEndpoint: raw?.token_endpoint ?? 'https://auth.x.ai/oauth2/token',
+      account: raw?.email ?? raw?.account ?? null,
+    },
+    reason: null,
+  }
+}
+
+/**
+ * Import codex/grok credentials from their CLI-native stores into the
+ * subscriptions plugin store. An existing plugin entry with a later expiry
+ * wins, so a token the plugin refreshed itself is never rolled back to the
+ * older copy the CLI still holds. Other providers in the store are preserved.
+ * @param {{home?: string}} options - override HOME for tests.
+ * @returns {Record<string, {imported: boolean, reason: string | null}>} per-provider outcome.
+ */
+export function importCliCredentials({ home = homedir() } = {}) {
+  const storePath = join(home, '.dsh', 'plugins', 'subscriptions', 'auth.json')
+  let store = {}
+  if (existsSync(storePath)) {
+    try {
+      store = JSON.parse(readFileSync(storePath, 'utf8')) ?? {}
+    } catch {
+      store = {}
+    }
+  }
+
+  const readers = { codex: readCodexCliSession, grok: readGrokCliSession }
+  const report = {}
+  let changed = false
+
+  for (const [provider, read] of Object.entries(readers)) {
+    const { session, reason } = read(home)
+    if (!session) {
+      report[provider] = { imported: false, reason }
+      continue
+    }
+    const existing = store[provider]
+    const existingExpiry = typeof existing?.expiresAt === 'number' ? existing.expiresAt : 0
+    if (existingExpiry >= session.expiresAt) {
+      report[provider] = { imported: false, reason: 'plugin_token_newer' }
+      continue
+    }
+    store[provider] = { ...existing, ...session }
+    report[provider] = { imported: true, reason: null }
+    changed = true
+  }
+
+  if (changed) {
+    const dir = dirname(storePath)
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 })
+    writeFileSync(storePath, JSON.stringify(store, null, 2))
+    chmodSync(storePath, 0o600)
+  }
+  return report
+}
+
+function loginImport() {
+  const report = importCliCredentials()
+  const importedCount = Object.values(report).filter(r => r.imported).length
+  printJson({
+    imported_count: importedCount,
+    providers: report,
+    note: 'claude dung chung ~/.claude/.credentials.json nen khong can import.',
+  }, 0)
+}
+
 const [subcommand, ...rest] = process.argv.slice(2)
 
 function usage() {
@@ -815,6 +953,7 @@ function usage() {
   ahv login status --json                      (subscription plugin: Grok/Codex/Claude)
   ahv login url PROVIDER --json                (return browser OAuth URL)
   ahv login logout PROVIDER --json             (remove stored token)
+  ahv login import --json                      (import codex/grok CLI login vao AHV)
   ahv models list --json
   ahv models show MODEL_ID --json
   ahv sessions list --json
@@ -826,6 +965,10 @@ function usage() {
   process.exit(2)
 }
 
+const RUN_AS_CLI = process.argv[1] !== undefined
+  && import.meta.url === pathToFileURL(process.argv[1]).href
+
+if (RUN_AS_CLI) {
 if (!subcommand) usage()
 
 if (subcommand === 'version') {
@@ -846,6 +989,7 @@ if (subcommand === 'version') {
   if (action === 'status') loginStatus()
   else if (action === 'url') loginUrl(rest[1])
   else if (action === 'logout') loginLogout(rest[1])
+  else if (action === 'import') loginImport()
   else usage()
 } else if (subcommand === 'models') {
   const action = rest[0]
@@ -862,4 +1006,5 @@ if (subcommand === 'version') {
   runBot(rest)
 } else {
   usage()
+}
 }
