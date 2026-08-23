@@ -2,11 +2,11 @@
  * Scoped by skin-center to html[data-dsh-skin="ahv"], no scope needed inline.
  */
 
-/* Rebrand the sidebar's fallback header text "DSH Local Build" → "AHV CLI".
+/* Rebrand the sidebar's fallback header text "DSH Local Build" → "AHV Harness".
  * The class name is content-hashed (HYkrHa_fallbackBrandName etc.); attribute
  * substring selector matches every hash variant across rebuilds.
  *
- * Trick: hide original text via zero font-size, insert AHV via ::before at
+ * Trick: hide original text via zero font-size, insert the AHV name via ::before at
  * normal size. The wrapper's inline-flex still lays out the ::before pill.
  */
 [class*="fallbackBrandName"] {
@@ -14,7 +14,7 @@
   line-height: 1 !important;
 }
 [class*="fallbackBrandName"]::before {
-  content: "AHV CLI";
+  content: "AHV Harness";
   font-size: 17px;
   font-weight: 600;
   letter-spacing: 0;

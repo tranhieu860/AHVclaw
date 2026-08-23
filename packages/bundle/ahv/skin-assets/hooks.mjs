@@ -8,13 +8,13 @@
 // Longest-first so composite phrases match before their prefix.
 // Sensitive to word order — "DSH Local Build" must match before bare "DSH".
 const LABEL_REPLACEMENTS = new Map([
-  ['DSH Local Build', 'AHV CLI'],
-  ['DSH local build', 'AHV CLI'],
-  ['DeepSeek Harness', 'AHV CLI'],
+  ['DSH Local Build', 'AHV Harness'],
+  ['DSH local build', 'AHV Harness'],
+  ['DeepSeek Harness', 'AHV Harness'],
   ['DSH Web', 'AHV Web'],
   ['dsh-web-app', 'ahv-web'],
   ['dsh web', 'ahv web'],
-  ['DSH', 'AHV CLI'],
+  ['DSH', 'AHV Harness'],
   ['dsh', 'ahv'],
 ])
 
@@ -62,6 +62,50 @@ function installTextRebrand() {
   return () => observer.disconnect()
 }
 
+/** The AHV mark: a rounded tile carrying an A, in the brand gradient. */
+const AHV_MARK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="100%" height="100%" role="img" aria-label="AHV Harness">
+  <defs><linearGradient id="ahvMark" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#7dd3fc"/><stop offset="1" stop-color="#a78bfa"/>
+  </linearGradient></defs>
+  <rect width="32" height="32" rx="8" fill="url(#ahvMark)"/>
+  <path d="M9.6 23 15.1 9h2.4l5.5 14h-2.9l-1.25-3.4h-5.1L12.5 23Z" fill="#0a0a0f"/>
+  <path d="M14.6 17.2h3.7L16.45 12Z" fill="url(#ahvMark)"/>
+</svg>`
+
+/**
+ * Put our mark in the slots the app publishes for it.
+ *
+ * These are the app's own extension points (`sidebar.brand.mark`,
+ * `conversation.hero.brand.mark`), so an upstream release that restyles the
+ * shell keeps rendering our logo — nothing here patches dsh source, which is
+ * what makes the branding survive updates.
+ *
+ * The observer matters because the shell re-renders these nodes on navigation;
+ * a one-shot write is stomped the first time the view changes.
+ */
+function installBrandMark() {
+  const SLOTS = ['sidebar.brand.mark', 'conversation.hero.brand.mark']
+
+  function paint() {
+    for (const slot of SLOTS) {
+      for (const host of document.querySelectorAll(`[data-slot="${slot}"]`)) {
+        if (host.dataset.ahvMark === '1') continue
+        host.dataset.ahvMark = '1'
+        host.innerHTML = AHV_MARK_SVG
+        host.style.display = 'inline-flex'
+        host.style.alignItems = 'center'
+        host.style.width = host.style.width || '22px'
+        host.style.height = host.style.height || '22px'
+      }
+    }
+  }
+
+  paint()
+  const observer = new MutationObserver(paint)
+  observer.observe(document.body, { childList: true, subtree: true })
+  return () => observer.disconnect()
+}
+
 /** Set favicon to AHV bolt emoji. */
 function installFavicon() {
   const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>
@@ -87,7 +131,7 @@ function installFavicon() {
  * document.title routes every future setter through our sanitizer instead.
  */
 function installTitleGuard() {
-  const AHV_TITLE = 'AHV CLI'
+  const AHV_TITLE = 'AHV Harness'
 
   function sanitize(input) {
     if (!input) return AHV_TITLE
@@ -270,15 +314,40 @@ function installThinkStripper() {
 /** Skin-center calls this after activation. */
 export function activate() {
   installFavicon()
+  const disposeMark = installBrandMark()
   const disposeText = installTextRebrand()
   const disposeTitle = installTitleGuard()
   const disposeSweep = installSweepFallback()
   const disposeThink = installThinkStripper()
   return () => {
+    disposeMark()
     disposeText()
     disposeTitle()
     disposeSweep()
     disposeThink()
     // Favicon left in place — cheap, no leak; skin swap will re-run.
+  }
+}
+
+/**
+ * skin-center contract "x-org.linxin666.skin-center/v1alpha1": hooks.mjs must
+ * default-export this factory. The runtime calls it once per activation, then
+ * apply(); loading the module must not execute anything. The teardown lives in
+ * the closure rather than at module level because every skin switch is a new
+ * activation identity and dispose may run 0, 1 or N times.
+ */
+export default function defineSkinHooks() {
+  let teardown = null
+  return {
+    apply() {
+      if (teardown) return
+      teardown = activate()
+    },
+    dispose() {
+      if (!teardown) return
+      const fn = teardown
+      teardown = null
+      fn()
+    },
   }
 }
