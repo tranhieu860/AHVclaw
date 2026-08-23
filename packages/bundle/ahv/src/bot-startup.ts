@@ -37,6 +37,8 @@ export interface BotStartupValues {
   readonly sessionId: string | undefined
   /** Resume an existing session by id (mutually exclusive with sessionId). */
   readonly resumeSessionId: string | undefined
+  /** Model to run this turn on; `provider/model` pins the provider too. */
+  readonly model: string | undefined
   /** Output format: jsonl (machine) or text (legacy final-only). */
   readonly output: OutputMode
   /** Suppress ANSI escape sequences. */
@@ -54,6 +56,7 @@ function botCommand(): Command {
     .option('--cwd <dir>', 'absolute working directory for the agent', process.cwd())
     .option('--session-id <id>', 'caller-supplied session id (creates if new, mutually exclusive with --resume)')
     .option('--resume <id>', 'resume an existing session by id (mutually exclusive with --session-id)')
+    .option('--model <id>', 'model for this turn; accepts `model` or `provider/model`')
     .addOption(new Option('--output <mode>', 'stdout format').choices(['jsonl', 'text']).default('jsonl'))
     .option('--no-color', 'suppress ANSI escape sequences')
     .option('--no-banner', 'suppress the launcher banner')
@@ -84,6 +87,7 @@ export function apply(ctx: Context): void {
       cwd: string
       sessionId?: string
       resume?: string
+      model?: string
       output: OutputMode
       color: boolean
       banner: boolean
@@ -103,6 +107,7 @@ export function apply(ctx: Context): void {
       cwd,
       sessionId: opts.sessionId,
       resumeSessionId: opts.resume,
+      model: opts.model,
       output: opts.output,
       noColor: !opts.color,
       noBanner: !opts.banner,

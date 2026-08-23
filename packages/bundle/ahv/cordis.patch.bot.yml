@@ -29,6 +29,7 @@
         cwd: !!js ctx.botStartup.cwd
         sessionId: !!js ctx.botStartup.sessionId
         resumeSessionId: !!js ctx.botStartup.resumeSessionId
+        model: !!js ctx.botStartup.model
         output: !!js ctx.botStartup.output
         noColor: !!js ctx.botStartup.noColor
         noBanner: !!js ctx.botStartup.noBanner

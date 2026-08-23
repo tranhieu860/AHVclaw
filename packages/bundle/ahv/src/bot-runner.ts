@@ -29,7 +29,9 @@ import type {} from '@deepseek-ai/dsh-cmdline'
 export const name = 'bot-runner'
 
 /** Core services required before the bot turn can start. */
-export const inject = ['agentDefaultModel', 'agents', 'sessions', 'botStartup']
+// `llm` is required so a bare `--model` id can be placed on its owning
+// provider without the caller having to know which one that is.
+export const inject = ['agentDefaultModel', 'agents', 'sessions', 'botStartup', 'llm']
 
 /** Runner config: everything the bot-startup provider resolved. */
 export interface Config {
@@ -37,6 +39,7 @@ export interface Config {
   readonly cwd: string
   readonly sessionId?: string | null
   readonly resumeSessionId?: string | null
+  readonly model?: string | null
   readonly output: 'jsonl' | 'text'
   readonly noColor: boolean
   readonly noBanner: boolean
@@ -47,6 +50,7 @@ export const Config: z<Config> = z.object({
   cwd: z.string().required(),
   sessionId: z.string(),
   resumeSessionId: z.string(),
+  model: z.string(),
   output: z.union([z.const('jsonl' as const), z.const('text' as const)]).default('jsonl'),
   noColor: z.boolean().default(true),
   noBanner: z.boolean().default(true),
@@ -180,6 +184,48 @@ function fail(io: BotIo, error: unknown, output: 'jsonl' | 'text'): void {
 }
 
 /**
+ * Resolve a requested model to a provider/model pair.
+ *
+ * `provider/model` is taken as given. A bare id is searched across the mounted
+ * providers; an unknown id fails loud rather than silently running the default
+ * model, because the caller asked for a specific one.
+ *
+ * @param ctx - plugin context carrying the llm registry.
+ * @param requested - the `--model` value.
+ * @param fallback - the configured default, used as the provider for a bare id
+ *   that the registry cannot place.
+ * @returns the provider and model to run.
+ */
+async function resolveModelSelection(
+  ctx: Context,
+  requested: string,
+  fallback: { provider: string; model: string },
+): Promise<{ provider: string; model: string }> {
+  const slash = requested.indexOf('/')
+  if (slash > 0) {
+    return { provider: requested.slice(0, slash), model: requested.slice(slash + 1) }
+  }
+  const llm = ctx.get('llm')
+  if (llm !== undefined) {
+    for (const provider of llm.listProviders()) {
+      let models: readonly unknown[] = []
+      try {
+        models = await llm.listModels(provider.id)
+      } catch {
+        // A provider that cannot list right now simply cannot match.
+        continue
+      }
+      for (const raw of models) {
+        if ((raw as { id?: string }).id === requested) {
+          return { provider: provider.id, model: requested }
+        }
+      }
+    }
+  }
+  return { provider: fallback.provider, model: requested }
+}
+
+/**
  * Drive one prompt to quiescence and emit the JSONL stream.
  * @param ctx - plugin context carrying agents, default model, sessions, session bus.
  * @param config - resolved bot config (prompt + session identity).
@@ -193,6 +239,13 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
   if (agents === undefined || defaultModel === undefined || sessions === undefined) return
 
   const selection = defaultModel.currentSelection()
+  // `--model` overrides the default for this turn. A bare id is resolved
+  // against the mounted providers so the caller does not have to know which
+  // provider owns it; `provider/model` pins both without a lookup.
+  const requested = config.model != null && config.model !== '' ? config.model : undefined
+  const chosen = requested === undefined
+    ? { provider: selection.provider, model: selection.model }
+    : await resolveModelSelection(ctx, requested, selection)
   const resumeId = config.resumeSessionId != null && config.resumeSessionId !== '' ? config.resumeSessionId : undefined
   const explicitId = config.sessionId != null && config.sessionId !== '' ? config.sessionId : undefined
   const targetId = resumeId ?? explicitId ?? `bot-session-${randomUUID()}`
@@ -231,16 +284,16 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
     }
     const { agent } = resumed
       ? await agents.resume({
-          resumeSessionId: SessionId(targetId),
-          agentOptions: { provider: selection.provider, model: selection.model },
-          setup,
-        })
+        resumeSessionId: SessionId(targetId),
+        agentOptions: { provider: chosen.provider, model: chosen.model },
+        setup,
+      })
       : await agents.create({
-          sessionId: SessionId(targetId),
-          meta: { cwd: config.cwd },
-          agentOptions: { provider: selection.provider, model: selection.model },
-          setup,
-        })
+        sessionId: SessionId(targetId),
+        meta: { cwd: config.cwd },
+        agentOptions: { provider: chosen.provider, model: chosen.model },
+        setup,
+      })
 
     emitLock.session = agent.session
     if (config.output === 'jsonl') {
@@ -248,7 +301,7 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
         type: 'session_meta',
         session_id: agent.session.header.id,
         cwd: agent.session.header.cwd ?? config.cwd,
-        model: selection.model,
+        model: chosen.model,
         resumed,
       })
     }
