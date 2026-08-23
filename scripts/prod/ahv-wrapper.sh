@@ -52,10 +52,44 @@ cd "$FORK"
 # package's own wrapper step — and the second only rewrites the FORK line. A
 # placeholder here therefore survived into the installed wrapper and broke every
 # bot subcommand. readlink resolves the ~/.local/bin symlink to the real file.
+# Make the profile's module farm reach this install's plugins.
+#
+# dsh builds `$DSH_HOME/profiles/node_modules` from `apps/cli/node_modules`,
+# which carries neither the AHV bundle nor the plugins the bundle depends on. On
+# one machine the farm was a symlink into another user's home, so the bot ran
+# that user's older plugin code: installing a newer CLI changed nothing, and the
+# only symptom was that a fix "did not work". Linking from this install makes
+# the running code the installed code.
+#
+# The farm is left alone when absent — dsh scaffolds it on first run, and an
+# empty one makes the whole plugin tree fail to load.
+ensure_profile_plugins() {
+  local fork="$1"
+  local farm="${DSH_HOME:-$HOME/.dsh}/profiles/node_modules"
+  local bundle="$fork/packages/bundle/ahv"
+  [ -d "$farm" ] || return 0
+  [ -d "$bundle" ] || return 0
+
+  mkdir -p "$farm/@ahvclaw" 2>/dev/null || return 0
+  ln -sfn "$bundle" "$farm/@ahvclaw/dsh-bundle-ahv" 2>/dev/null || true
+
+  local dep target scope
+  for dep in dshmarket superpowers-dsh dsh-plugin-subscriptions \
+             @anweat/dsh-browser @linxin666/dsh-web-ui-all; do
+    target="$bundle/node_modules/$dep"
+    [ -e "$target" ] || continue
+    case "$dep" in
+      */*) scope="${dep%%/*}"; mkdir -p "$farm/$scope" 2>/dev/null || continue ;;
+    esac
+    ln -sfn "$(cd "$target" && pwd -P)" "$farm/$dep" 2>/dev/null || true
+  done
+}
+
 AHV_BOT="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)/ahv-bot.mjs"
 
 case "${1:-}" in
   auth|login|doctor|sessions|models|version|run)
+    ensure_profile_plugins "$FORK"
     exec node "$AHV_BOT" "$@"
     ;;
   web)

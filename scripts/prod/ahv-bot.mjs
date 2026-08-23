@@ -102,6 +102,56 @@ function authLogout() {
 }
 
 // ── doctor ──────────────────────────────────────────────────────────────
+/**
+ * Check that the plugin code a run will load belongs to this install.
+ *
+ * Every run resolves `@ahvclaw/dsh-bundle-ahv` through the profile's module
+ * farm. When that link pointed into another user's home, installing a newer CLI
+ * changed nothing at all: the harness kept loading the other tree's plugins, and
+ * the only symptom was that a fix "did not work".
+ *
+ * @param fork - the install's source tree.
+ * @param dshHome - the dsh home whose profile farm is inspected.
+ * @returns a doctor check describing what the farm resolves to.
+ */
+export function checkProfileBundleLink(fork, dshHome) {
+  const farm = join(dshHome, 'profiles', 'node_modules')
+  const link = join(farm, '@ahvclaw', 'dsh-bundle-ahv')
+  const expected = join(fork, 'packages', 'bundle', 'ahv')
+  const check = { name: 'profile_bundle', value: link }
+  if (!existsSync(farm)) {
+    // dsh builds the farm on first run; a fresh install simply has none yet.
+    check.ok = true
+    check.severity = 'ok'
+    check.value = 'not built yet'
+    return check
+  }
+  if (!existsSync(link)) {
+    check.ok = false
+    check.severity = 'warn'
+    check.note = 'profile chưa link bundle — wrapper sẽ tự link ở lần chạy tới'
+    return check
+  }
+  let actual = link
+  let want = expected
+  try {
+    actual = realpathSync(link)
+    want = realpathSync(expected)
+  } catch {
+    // Fall through with the unresolved paths; the comparison below still holds.
+  }
+  check.value = actual
+  if (actual !== want) {
+    check.ok = false
+    check.severity = 'error'
+    check.note = `profile dang nap plugin tu ${actual}, khong phai ban da install tai ${want} — moi update se khong co tac dung`
+    return check
+  }
+  check.ok = true
+  check.severity = 'ok'
+  return check
+}
+
 async function doctor() {
   // Severity contract cho bot: 'ok' | 'warn' | 'error'.
   // - error = blocking (node/fork/cli_bin/credential thiếu → ahv run không
@@ -194,6 +244,8 @@ async function doctor() {
     modelCheck.error = 'skipped (no AHV_API_KEY)'
   }
   checks.push(modelCheck)
+
+  checks.push(checkProfileBundleLink(FORK, DSH_HOME))
 
   // Aggregate ok = TRUE trừ khi có ít nhất 1 check severity='error'.
   // Warn không làm ok=false. Bot dùng ok để phân loại "CLI ready" vs
@@ -497,6 +549,70 @@ function spawnListModels() {
 // {at: timestamp, models: [...]}). Bot có sẵn kết quả cached ngay, không
 // phải chờ spawn lần sau.
 const SUBSCRIPTIONS_MODELS_CACHE = join(DSH_HOME, 'plugins/subscriptions/models.json')
+/**
+ * Restore providers that a live listing lost, from the cache.
+ *
+ * The harness lists each provider separately and drops any that does not answer
+ * in time, so the same command has returned 32, then 22, then 29 models — the
+ * model the operator picked could simply be absent that minute.
+ *
+ * Only providers with a live session are restored. The cache once carried
+ * Claude entries for a user who had never logged in, which made an unwired
+ * subscription look present; a cache is evidence of what a provider offers, not
+ * of whether this machine may use it.
+ *
+ * @param liveModels - models the harness returned this time.
+ * @param cache - the subscriptions model cache, as read from disk.
+ * @param loggedInProviders - provider ids that currently hold a session.
+ * @returns the merged list and which providers were restored from cache.
+ */
+/**
+ * Provider ids that currently hold a session in the subscriptions store.
+ *
+ * Read from the store rather than the model cache: the cache says what a
+ * provider offers, not whether this machine is allowed to use it.
+ * @param home - the user's home directory.
+ * @returns the logged-in provider ids.
+ */
+export function readLoggedInProviders(home = homedir()) {
+  const storePath = join(home, '.dsh', 'plugins', 'subscriptions', 'auth.json')
+  if (!existsSync(storePath)) return []
+  try {
+    const store = JSON.parse(readFileSync(storePath, 'utf8'))
+    return Object.entries(store)
+      .filter(([, entry]) => typeof entry?.accessToken === 'string' && entry.accessToken !== '')
+      .map(([provider]) => provider)
+  } catch {
+    return []
+  }
+}
+
+export function topUpMissingProviders(liveModels, cache, loggedInProviders) {
+  const models = [...liveModels]
+  const restored = []
+  const cached = Array.isArray(cache?.models) ? cache.models : []
+  if (cached.length === 0) return { models, restored }
+  const present = new Set(liveModels.map(m => m.provider))
+  const allowed = new Set(loggedInProviders ?? [])
+  for (const entry of cached) {
+    const provider = entry?.provider
+    if (typeof provider !== 'string') continue
+    if (present.has(provider) || !allowed.has(provider)) continue
+    if (!restored.includes(provider)) restored.push(provider)
+    models.push({
+      id: entry.model_id,
+      name: entry.model_name ?? entry.model_id,
+      provider,
+      provider_name: entry.provider_name ?? provider,
+      context_window: entry.context_window ?? null,
+      max_tokens: entry.max_tokens ?? null,
+      pinned: false,
+      stale: true,
+    })
+  }
+  return { models, restored }
+}
+
 function readSubscriptionsModelsCache() {
   if (!existsSync(SUBSCRIPTIONS_MODELS_CACHE)) return { providers: [], models: [] }
   try {
@@ -639,13 +755,27 @@ async function modelsList() {
           pinned: Boolean(s),
         }
       })
+      // A provider that failed to answer this time would otherwise disappear
+      // from the catalog, and with it the model the operator had chosen.
+      const { models: merged, restored } = topUpMissingProviders(
+        models,
+        readSubscriptionsModelsCache(),
+        readLoggedInProviders(),
+      )
+      const providers = [...payload.providers]
+      for (const id of restored) {
+        if (!providers.some(p => p.id === id)) {
+          providers.push({ id, name: merged.find(m => m.provider === id)?.provider_name ?? id })
+        }
+      }
       return printJson({
         default: DEFAULT_MODEL,
-        provider_count: payload.provider_count,
-        providers: payload.providers,
-        count: models.length,
+        provider_count: providers.length,
+        providers,
+        count: merged.length,
         source: 'harness',   // ctx.llm.listProviders() + listModels()
-        models,
+        ...(restored.length > 0 ? { restored_from_cache: restored } : {}),
+        models: merged,
       }, 0)
     } catch (e) {
       // JSON parse fail — fall through to static fallback
