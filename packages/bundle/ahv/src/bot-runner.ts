@@ -191,41 +191,85 @@ function fail(io: BotIo, error: unknown, output: 'jsonl' | 'text'): void {
 /**
  * Resolve a requested model to a provider/model pair.
  *
- * `provider/model` is taken as given. A bare id is searched across the mounted
- * providers; an unknown id fails loud rather than silently running the default
- * model, because the caller asked for a specific one.
+ * A request the registry can disprove is rejected rather than quietly served by
+ * something else. Answering a request for `claude/...` from the router looks
+ * like success while the Claude subscription is not wired up at all, so the
+ * operator sees a working reply and never learns the account is unused.
+ *
+ * Absence has to be proven, not assumed. Providers drop out of the catalog
+ * intermittently, so a provider that is mounted but cannot list right now, or a
+ * registry that is missing entirely, leaves the request permitted; only a
+ * registry that answered in full and did not contain the request is treated as
+ * a genuine mistake.
  *
  * @param ctx - plugin context carrying the llm registry.
  * @param requested - the `--model` value.
  * @param fallback - the configured default, used as the provider for a bare id
  *   that the registry cannot place.
  * @returns the provider and model to run.
+ * @throws when the registry positively shows the request cannot be served.
  */
-async function resolveModelSelection(
+export async function resolveModelSelection(
   ctx: Context,
   requested: string,
   fallback: { provider: string; model: string },
 ): Promise<{ provider: string; model: string }> {
-  const slash = requested.indexOf('/')
-  if (slash > 0) {
-    return { provider: requested.slice(0, slash), model: requested.slice(slash + 1) }
-  }
   const llm = ctx.get('llm')
-  if (llm !== undefined) {
-    for (const provider of llm.listProviders()) {
-      let models: readonly unknown[] = []
-      try {
-        models = await llm.listModels(provider.id)
-      } catch {
-        // A provider that cannot list right now simply cannot match.
-        continue
-      }
-      for (const raw of models) {
-        if ((raw as { id?: string }).id === requested) {
-          return { provider: provider.id, model: requested }
-        }
+  const slash = requested.indexOf('/')
+  if (llm === undefined) {
+    return slash > 0
+      ? { provider: requested.slice(0, slash), model: requested.slice(slash + 1) }
+      : { provider: fallback.provider, model: requested }
+  }
+
+  const providers = llm.listProviders()
+  const known = providers.map(provider => provider.id)
+
+  if (slash > 0) {
+    const provider = requested.slice(0, slash)
+    const model = requested.slice(slash + 1)
+    if (!known.includes(provider)) {
+      throw new Error(
+        `Unknown provider "${provider}". Available: ${known.join(', ') || '(none)'}`,
+      )
+    }
+    let models: readonly unknown[]
+    try {
+      models = await llm.listModels(provider)
+    } catch {
+      // Mounted but not answering: absence is unproven, so let it through.
+      return { provider, model }
+    }
+    const ids = models.map(raw => (raw as { id?: string }).id)
+    if (!ids.includes(model)) {
+      throw new Error(
+        `Provider "${provider}" does not offer model "${model}". Available: ${ids.filter(Boolean).join(', ') || '(none)'}`,
+      )
+    }
+    return { provider, model }
+  }
+
+  let everyProviderAnswered = true
+  for (const provider of providers) {
+    let models: readonly unknown[] = []
+    try {
+      models = await llm.listModels(provider.id)
+    } catch {
+      // A provider that cannot list right now simply cannot match, and its
+      // silence must not be read as proof the model does not exist.
+      everyProviderAnswered = false
+      continue
+    }
+    for (const raw of models) {
+      if ((raw as { id?: string }).id === requested) {
+        return { provider: provider.id, model: requested }
       }
     }
+  }
+  if (everyProviderAnswered && providers.length > 0) {
+    throw new Error(
+      `Unknown model "${requested}". Available providers: ${known.join(', ')}`,
+    )
   }
   return { provider: fallback.provider, model: requested }
 }

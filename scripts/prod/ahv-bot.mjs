@@ -858,6 +858,49 @@ function readCodexCliSession(home) {
 }
 
 /** Translate ~/.grok/auth.json into the plugin's grok session shape. */
+/**
+ * Read the Claude login the `claude` CLI stores.
+ *
+ * The subscriptions plugin never runs an OAuth flow for Claude: it copies this
+ * file. A user who has never run `claude` therefore has no Claude provider at
+ * all — and a request naming a Claude model still answers, having fallen
+ * through to the router, so the gap looks like everything is fine.
+ *
+ * `CLAUDE_CONFIG_DIR` is honoured because the plugin honours it: pointing it at
+ * an existing login is how one account is shared by every CLI on a server.
+ * @param home - the user's home directory.
+ * @param claudeConfigDir - overrides where the login is read from.
+ * @returns the session to store, or why there is none.
+ */
+function readClaudeCliSession(home, claudeConfigDir) {
+  const dir = claudeConfigDir ?? process.env.CLAUDE_CONFIG_DIR ?? join(home, '.claude')
+  const path = join(dir, '.credentials.json')
+  if (!existsSync(path)) return { session: null, reason: 'cli_not_logged_in' }
+  let raw
+  try {
+    raw = JSON.parse(readFileSync(path, 'utf8'))
+  } catch {
+    return { session: null, reason: 'cli_unreadable' }
+  }
+  const oauth = raw?.claudeAiOauth ?? raw
+  const accessToken = oauth?.accessToken ?? oauth?.access_token
+  const refreshToken = oauth?.refreshToken ?? oauth?.refresh_token
+  if (!accessToken || !refreshToken) return { session: null, reason: 'cli_not_logged_in' }
+  const expiresAt = oauth?.expiresAt ?? oauth?.expires_at ?? decodeJwtExpiry(accessToken)
+  const scopes = Array.isArray(oauth?.scopes) ? oauth.scopes : undefined
+  return {
+    session: {
+      accessToken,
+      refreshToken,
+      expiresAt: typeof expiresAt === 'number' ? expiresAt : Date.now(),
+      ...(scopes === undefined ? {} : { scopes }),
+      ...(typeof oauth?.emailAddress === 'string' ? { emailAddress: oauth.emailAddress } : {}),
+      ...(typeof oauth?.subscriptionType === 'string' ? { subscriptionType: oauth.subscriptionType } : {}),
+    },
+    reason: null,
+  }
+}
+
 function readGrokCliSession(home) {
   const path = join(home, '.grok', 'auth.json')
   if (!existsSync(path)) return { session: null, reason: 'cli_not_logged_in' }
@@ -891,7 +934,7 @@ function readGrokCliSession(home) {
  * @param {{home?: string}} options - override HOME for tests.
  * @returns {Record<string, {imported: boolean, reason: string | null}>} per-provider outcome.
  */
-export function importCliCredentials({ home = homedir() } = {}) {
+export function importCliCredentials({ home = homedir(), claudeConfigDir } = {}) {
   const storePath = join(home, '.dsh', 'plugins', 'subscriptions', 'auth.json')
   let store = {}
   if (existsSync(storePath)) {
@@ -902,7 +945,11 @@ export function importCliCredentials({ home = homedir() } = {}) {
     }
   }
 
-  const readers = { codex: readCodexCliSession, grok: readGrokCliSession }
+  const readers = {
+    codex: readCodexCliSession,
+    grok: readGrokCliSession,
+    claude: (userHome) => readClaudeCliSession(userHome, claudeConfigDir),
+  }
   const report = {}
   let changed = false
 
@@ -938,7 +985,7 @@ function loginImport() {
   printJson({
     imported_count: importedCount,
     providers: report,
-    note: 'claude dung chung ~/.claude/.credentials.json nen khong can import.',
+    note: 'claude lay tu CLAUDE_CONFIG_DIR hoac ~/.claude/.credentials.json.',
   }, 0)
 }
 
