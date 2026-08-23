@@ -102,32 +102,37 @@ function emit(io: BotIo, event: BotEvent): void {
 function classifyError(error: unknown): { code: BotErrorCode; terminal: boolean; retryAfterSec: number; message: string } {
   const raw = error instanceof Error ? error.message : String(error)
   const lower = raw.toLowerCase()
+  // Every branch keeps the underlying text. Replacing it with a fixed phrase
+  // makes a production failure undiagnosable: the operator, and anyone reading
+  // the JSONL later, sees only the category and not what actually failed.
+  // Bounded so one huge provider error cannot flood a chat message.
+  const detail = raw.length > 400 ? `${raw.slice(0, 400)}…` : raw
 
   if (lower.includes('missing credential') || lower.includes('apikeyenv') || lower.includes('ahv_api_key')) {
-    return { code: 'missing_credential', terminal: true, retryAfterSec: 0, message: 'Missing AHV_API_KEY — set env or credential file' }
+    return { code: 'missing_credential', terminal: true, retryAfterSec: 0, message: `Missing AHV_API_KEY: ${detail}` }
   }
   if (lower.includes('unauthorized') || lower.includes('401') || lower.includes('invalid api key')) {
-    return { code: 'not_logged_in', terminal: true, retryAfterSec: 0, message: 'Auth rejected — key invalid or expired' }
+    return { code: 'not_logged_in', terminal: true, retryAfterSec: 0, message: `Auth rejected: ${detail}` }
   }
   if (lower.includes('quota') || lower.includes('402') || lower.includes('billing')) {
-    return { code: 'quota_limit', terminal: true, retryAfterSec: 0, message: 'Quota exhausted — top up account' }
+    return { code: 'quota_limit', terminal: true, retryAfterSec: 0, message: `Quota exhausted: ${detail}` }
   }
   if (lower.includes('rate limit') || lower.includes('429') || lower.includes('too many requests')) {
-    return { code: 'rate_limit', terminal: false, retryAfterSec: 30, message: 'Rate limited — retry after backoff' }
+    return { code: 'rate_limit', terminal: false, retryAfterSec: 30, message: `Rate limited: ${detail}` }
   }
   if (lower.includes('econnrefused') || lower.includes('etimedout') || lower.includes('enotfound') || lower.includes('fetch failed')) {
-    return { code: 'network_transient', terminal: false, retryAfterSec: 5, message: 'Network fault — retry' }
+    return { code: 'network_transient', terminal: false, retryAfterSec: 5, message: `Network fault: ${detail}` }
   }
   if (lower.includes('model_not_found') || lower.includes('model unavailable') || lower.includes('503') || lower.includes('502')) {
-    return { code: 'model_unavailable', terminal: false, retryAfterSec: 15, message: 'Model temporarily unavailable — retry' }
+    return { code: 'model_unavailable', terminal: false, retryAfterSec: 15, message: `Model unavailable: ${detail}` }
   }
   if (lower.includes('context_length_exceeded') || lower.includes('token limit') || lower.includes('too long')) {
-    return { code: 'context_too_large', terminal: true, retryAfterSec: 0, message: 'Context exceeded model window — start new session' }
+    return { code: 'context_too_large', terminal: true, retryAfterSec: 0, message: `Context exceeded: ${detail}` }
   }
   if (lower.includes('eacces') || lower.includes('permission denied') || lower.includes('403')) {
-    return { code: 'permission_denied', terminal: true, retryAfterSec: 0, message: 'Permission denied' }
+    return { code: 'permission_denied', terminal: true, retryAfterSec: 0, message: `Permission denied: ${detail}` }
   }
-  return { code: 'internal_error', terminal: true, retryAfterSec: 0, message: `Internal: ${raw}` }
+  return { code: 'internal_error', terminal: true, retryAfterSec: 0, message: `Internal: ${detail}` }
 }
 
 /** Convert a core SessionEvent → optional bot JSONL event (returns null for events with no external analog). */
@@ -339,7 +344,7 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
           code: 'tool_error',   // agent-loop reason=error covers tool + provider mid-turn failures
           terminal: false,      // safe default: bot retry với backoff
           retry_after_sec: 5,
-          message: err?.message ?? err?.code ?? 'turn ended with reason=error (no message)',
+          message: `Turn failed: ${err?.message ?? err?.code ?? JSON.stringify(turnState.lastTurnEndReason).slice(0, 300)}`,
         })
       } else {
         io.stderr.write(`ahv-bot: tool_error: ${err?.message ?? err?.code ?? 'unknown'}\n`)
