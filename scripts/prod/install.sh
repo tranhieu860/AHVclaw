@@ -114,7 +114,15 @@ fi
 # đọc file này để không lệ thuộc git command runtime — bot team chạy CLI
 # trong container/systemd/env-restricted vẫn có version chuẩn.
 if [ -d "$SRC/.git" ]; then
-  git -C "$SRC" fetch origin --tags --force >/dev/null 2>&1 || true
+  # `git clone --depth 1` carries no tags, so `git describe` degrades to a bare
+  # SHA and users see a commit hash where a version belongs. Deepening pulls the
+  # recent tags into reach. Only when the clone is actually shallow: passing
+  # --depth to a full repository would truncate its history instead.
+  if [ "$(git -C "$SRC" rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then
+    git -C "$SRC" fetch origin --tags --force --depth=500 >/dev/null 2>&1 || true
+  else
+    git -C "$SRC" fetch origin --tags --force >/dev/null 2>&1 || true
+  fi
   printf '%s\n%s\n' \
     "$(git -C "$SRC" describe --tags --always --dirty 2>/dev/null || echo unknown)" \
     "$(git -C "$SRC" rev-parse --short HEAD 2>/dev/null || echo unknown)" > "$SRC/AHV_VERSION"

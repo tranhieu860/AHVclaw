@@ -64,7 +64,13 @@ case "${1:-}" in
     echo "${C1}[ahv update]${RESET} pulling latest từ $(git -C "$FORK" remote get-url origin)"
     # fetch --tags để git describe hiển thị đúng AHV tag (v0.2.0-p1 etc)
     # thay vì chỉ short SHA. Bot team pin theo tag.
-    git -C "$FORK" fetch origin --tags --force
+    # A shallow clone (how install.sh creates it) has no tags in reach, so
+    # `git describe` below would report a bare SHA as the version.
+    if [ "$(git -C "$FORK" rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then
+      git -C "$FORK" fetch origin --tags --force --depth=500
+    else
+      git -C "$FORK" fetch origin --tags --force
+    fi
     if ! git -C "$FORK" diff --quiet || ! git -C "$FORK" diff --cached --quiet; then
       echo "ahv update: source dirty tại $FORK, skip pull. Chạy 'git -C $FORK status' để xem." >&2
       exit 1
