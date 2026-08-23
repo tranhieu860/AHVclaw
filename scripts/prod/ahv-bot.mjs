@@ -16,9 +16,9 @@
 //   124 = timeout / cancelled
 
 import { spawn } from 'node:child_process'
-import { readFileSync, existsSync, statSync, readdirSync, writeFileSync, chmodSync, mkdirSync } from 'node:fs'
+import { readFileSync, existsSync, statSync, readdirSync, writeFileSync, chmodSync, mkdirSync, realpathSync } from 'node:fs'
 import { resolve as resolvePath, dirname, join } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import { zstdDecompressSync } from 'node:zlib'
 import { homedir } from 'node:os'
 
@@ -965,8 +965,20 @@ function usage() {
   process.exit(2)
 }
 
-const RUN_AS_CLI = process.argv[1] !== undefined
-  && import.meta.url === pathToFileURL(process.argv[1]).href
+// Deployments symlink ~/.ahv/bin per service user, so argv[1] is the
+// symlinked path while import.meta.url is the real one. Compare resolved
+// real paths: a raw URL comparison silently turns every subcommand into a
+// no-op for any user reaching the CLI through a link.
+const RUN_AS_CLI = (() => {
+  const entry = process.argv[1]
+  if (entry === undefined) return false
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(entry)
+  } catch {
+    // An unresolvable entry path means we were not started as the CLI.
+    return false
+  }
+})()
 
 if (RUN_AS_CLI) {
 if (!subcommand) usage()
