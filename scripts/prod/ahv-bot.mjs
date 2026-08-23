@@ -484,8 +484,48 @@ function spawnListModels() {
     proc.stderr.on('data', b => stderr += b.toString('utf8'))
     proc.on('close', (code) => resolve({ code, stdout, stderr }))
     proc.on('error', (err) => resolve({ code: -1, stdout, stderr: err.message }))
-    setTimeout(() => { try { proc.kill('SIGKILL') } catch {} }, 60000)
+    // Cold dsh + plugin fetch subscription models qua network có thể vượt
+    // 60s (Codex Plus/Claude Pro/Grok Premium mỗi lần fetch model list mất
+    // 5-20s + boot dsh tree ~20s). Bump 120s để tránh timeout kill khi bot
+    // gọi từ user Telegram lần đầu sau restart.
+    setTimeout(() => { try { proc.kill('SIGKILL') } catch {} }, 120000)
   })
+}
+
+// Fallback đọc plugin cache khi spawn dsh fail — plugin đã lưu models
+// list vào ~/.dsh/plugins/subscriptions/models.json (mỗi provider có
+// {at: timestamp, models: [...]}). Bot có sẵn kết quả cached ngay, không
+// phải chờ spawn lần sau.
+const SUBSCRIPTIONS_MODELS_CACHE = join(DSH_HOME, 'plugins/subscriptions/models.json')
+function readSubscriptionsModelsCache() {
+  if (!existsSync(SUBSCRIPTIONS_MODELS_CACHE)) return { providers: [], models: [] }
+  try {
+    const data = JSON.parse(readFileSync(SUBSCRIPTIONS_MODELS_CACHE, 'utf8'))
+    const providers = []
+    const models = []
+    const PROVIDER_NAMES = {
+      grok: 'Grok (Subscription)',
+      codex: 'ChatGPT (Codex)',
+      claude: 'Claude (Subscription)',
+    }
+    for (const [provider, entry] of Object.entries(data)) {
+      if (!entry || typeof entry !== 'object' || !Array.isArray(entry.models)) continue
+      const provName = PROVIDER_NAMES[provider] ?? provider
+      providers.push({ id: provider, name: provName })
+      for (const m of entry.models) {
+        if (typeof m?.id !== 'string') continue
+        models.push({
+          provider,
+          provider_name: provName,
+          model_id: m.id,
+          model_name: m.name,
+          context_window: m.contextWindow,
+          max_tokens: m.maxTokens,
+        })
+      }
+    }
+    return { providers, models }
+  } catch { return { providers: [], models: [] } }
 }
 
 // Static parser giữ để fallback khi spawn dsh fail (thiếu credential,
@@ -611,9 +651,44 @@ async function modelsList() {
       // JSON parse fail — fall through to static fallback
     }
   }
-  // Fallback: dsh không mount được (thiếu credential, tree broken, timeout).
-  // Trả về static-declared AHV models để bot vẫn có options.
+  // Fallback: dsh spawn fail/timeout. Đọc từ plugin cache
+  // ~/.dsh/plugins/subscriptions/models.json để bot vẫn có full subscription
+  // catalog + merge với static AHV. Bot không thấy 'empty' khi cold spawn.
   const staticModels = readStaticAhvModels()
+  const sub = readSubscriptionsModelsCache()
+  if (sub.models.length > 0) {
+    const staticById = new Map(staticModels.map(m => [m.id, m]))
+    const combined = [
+      ...sub.models.map(m => ({
+        id: m.model_id,
+        name: m.model_name ?? m.model_id,
+        provider: m.provider,
+        provider_name: m.provider_name,
+        context_window: m.context_window ?? null,
+        max_tokens: m.max_tokens ?? null,
+        pinned: false,
+      })),
+      ...staticModels.map(m => ({
+        id: m.id,
+        name: m.name ?? m.id,
+        provider: 'ahv-router',
+        provider_name: 'AHV Router',
+        context_window: m.contextWindow ?? null,
+        max_tokens: m.maxTokens ?? null,
+        pinned: true,
+      })),
+    ]
+    return printJson({
+      default: DEFAULT_MODEL,
+      provider_count: sub.providers.length + 1,
+      providers: [...sub.providers, { id: 'ahv-router', name: 'AHV Router' }],
+      count: combined.length,
+      source: 'cache-fallback',
+      fallback_reason: result.stderr.slice(0, 200) || `exit ${result.code}`,
+      models: combined,
+    }, 0)
+  }
+  // Cache cũng trống → static only
   printJson({
     default: DEFAULT_MODEL,
     provider_count: 1,
