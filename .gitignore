@@ -39,3 +39,6 @@ apps/web/dist/
 worktrees/
 .agents/worktrees/
 .typert-*/
+
+# Version stamped into the tree by scripts/prod/install.sh at install time.
+AHV_VERSION

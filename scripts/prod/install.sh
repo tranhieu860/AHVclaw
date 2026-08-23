@@ -80,11 +80,18 @@ mkdir -p "$AHV_HOME"
 if [ -d "$SRC/.git" ]; then
   log "Đã có source tại $SRC — pull latest..."
   cd "$SRC"
+  # `pnpm install` rewrites pnpm-lock.yaml, so a previous install leaves the
+  # tree dirty and every later install would skip its own upgrade. Restore just
+  # that file; anything else dirty is a real local edit.
+  git checkout -- pnpm-lock.yaml 2>/dev/null || true
   if ! git diff --quiet || ! git diff --cached --quiet; then
-    warn "Source có thay đổi chưa commit tại $SRC — skip pull. Chạy 'git stash' rồi 'ahv update' thủ công."
-  else
-    git fetch origin --tags
-    git checkout "$AHV_BRANCH"
+    git status --short >&2
+    fail "Source có thay đổi chưa commit tại $SRC. Chạy 'git -C $SRC stash' rồi cài lại. Dừng ở đây thay vì cài đè bản cũ và báo thành công."
+  fi
+  git fetch origin --tags
+  git checkout "$AHV_BRANCH"
+  # A tag is not a branch: pulling one fails, and there is nothing to pull.
+  if git show-ref --verify --quiet "refs/heads/$AHV_BRANCH"; then
     git pull --ff-only origin "$AHV_BRANCH"
   fi
 else
@@ -150,6 +157,13 @@ sed -i.bak -e "s|__AHV_SRC__|$SRC|g" -e "s|__AHV_BIN_DIR__|$AHV_HOME/bin|g" "$WR
 # path where grep finds nothing.
 if grep -q '__AHV_SRC__\|__AHV_BIN_DIR__' "$WRAPPER"; then
   fail "wrapper còn placeholder chưa thay"
+fi
+# Checking only for leftover placeholders is not enough: a wrapper from an older
+# tree hardcodes an absolute path, so substitution finds nothing to replace and
+# the guard passes while FORK still points at the machine it was authored on.
+WRAPPER_FORK="$(sed -n 's/^FORK="\(.*\)"$/\1/p' "$WRAPPER" | head -1)"
+if [ "$WRAPPER_FORK" != "$SRC" ]; then
+  fail "wrapper trỏ sai source: '$WRAPPER_FORK' (phải là '$SRC')"
 fi
 chmod +x "$WRAPPER"
 

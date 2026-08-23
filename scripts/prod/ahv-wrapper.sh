@@ -71,6 +71,10 @@ case "${1:-}" in
     else
       git -C "$FORK" fetch origin --tags --force
     fi
+    # `pnpm install` rewrites pnpm-lock.yaml on every install, so without this
+    # restore the very first update would find the tree dirty and refuse — for
+    # good.
+    git -C "$FORK" checkout -- pnpm-lock.yaml 2>/dev/null || true
     if ! git -C "$FORK" diff --quiet || ! git -C "$FORK" diff --cached --quiet; then
       echo "ahv update: source dirty tại $FORK, skip pull. Chạy 'git -C $FORK status' để xem." >&2
       exit 1
