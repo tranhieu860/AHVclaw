@@ -471,6 +471,84 @@ export const USAGE_ENDPOINTS = {
   },
 }
 
+/**
+ * Where a provider swaps a refresh token for a new access token.
+ *
+ * The stored access token lives about eight hours. A host whose bot nobody
+ * talks to never refreshes it, and asking for quota with a dead token made
+ * Anthropic answer 429 "Rate limited" on some twenty servers at once — the
+ * console read it as a real limit. The store already holds the refresh token;
+ * this uses it the same way the subscriptions plugin does.
+ */
+export const REFRESH_ENDPOINTS = {
+  claude: {
+    url: 'https://claude.ai/v1/oauth/token',
+    clientId: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
+  },
+}
+
+/** Refresh this long before expiry, so a token never dies mid-request. */
+export const REFRESH_AHEAD_MS = 60_000
+
+/**
+ * Refresh a stored session when its access token is expired or about to be.
+ *
+ * Never throws: a failed refresh is reported beside the stale session so the
+ * quota call still runs and the console shows why it could not.
+ *
+ * @param kind - provider id.
+ * @param session - the stored session for that provider.
+ * @param fetchFn - injected for tests.
+ * @param now - epoch ms, injected for tests.
+ * @returns the session to use, whether it was refreshed, and the error if not.
+ */
+export async function refreshSessionIfStale(kind, session, fetchFn = fetch, now = Date.now()) {
+  const endpoint = REFRESH_ENDPOINTS[kind]
+  if (endpoint === undefined || !session || typeof session.accessToken !== 'string') {
+    return { session, refreshed: false }
+  }
+  if (typeof session.refreshToken !== 'string' || session.refreshToken === '') {
+    return { session, refreshed: false }
+  }
+  const expiresAt = typeof session.expiresAt === 'number' ? session.expiresAt : 0
+  if (expiresAt > now + REFRESH_AHEAD_MS) return { session, refreshed: false }
+  const scope = Array.isArray(session.scopes) ? session.scopes.join(' ') : session.scopes
+  try {
+    const response = await fetchFn(endpoint.url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        grant_type: 'refresh_token',
+        refresh_token: session.refreshToken,
+        client_id: endpoint.clientId,
+        ...(typeof scope === 'string' && scope !== '' ? { scope } : {}),
+      }),
+    })
+    if (!response.ok) {
+      const detail = typeof response.text === 'function' ? String(await response.text()).slice(0, 120) : ''
+      return { session, refreshed: false, error: `refresh HTTP ${response.status}${detail ? `: ${detail}` : ''}` }
+    }
+    const tokens = await response.json()
+    if (typeof tokens?.access_token !== 'string' || tokens.access_token === ''
+      || typeof tokens?.expires_in !== 'number' || !(tokens.expires_in > 0)) {
+      return { session, refreshed: false, error: 'refresh returned no usable token' }
+    }
+    return {
+      refreshed: true,
+      session: {
+        ...session,
+        accessToken: tokens.access_token,
+        refreshToken: typeof tokens.refresh_token === 'string' && tokens.refresh_token !== ''
+          ? tokens.refresh_token : session.refreshToken,
+        expiresAt: now + tokens.expires_in * 1000,
+        ...(typeof tokens.scope === 'string' && tokens.scope !== '' ? { scopes: tokens.scope } : {}),
+      },
+    }
+  } catch (error) {
+    return { session, refreshed: false, error: `refresh failed: ${error instanceof Error ? error.message : String(error)}` }
+  }
+}
+
 /** Keep a reported percentage inside the range a meter can draw. */
 function clampPercent(value) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null
@@ -595,13 +673,33 @@ export async function fetchProviderUsage(kind, session, fetchFn = fetch) {
 async function loginUsage() {
   const auth = readSubscriptionsAuth()
   const providers = {}
+  const refreshed = {}
   await Promise.all(SUPPORTED_LOGIN_PROVIDERS.map(async (kind) => {
-    const entry = auth[kind]
+    const stored = auth[kind]
+    const entry = stored && typeof stored === 'object' ? stored : undefined
+    const fresh = await refreshSessionIfStale(kind, entry)
+    if (fresh.refreshed) refreshed[kind] = fresh.session
     providers[kind] = {
-      logged_in: Boolean(entry && typeof entry === 'object' && entry.accessToken),
-      ...(await fetchProviderUsage(kind, entry)),
+      logged_in: Boolean(entry && entry.accessToken),
+      ...(await fetchProviderUsage(kind, fresh.session)),
+      ...(fresh.refreshed ? { refreshed: true } : {}),
+      ...(fresh.error ? { refresh_error: fresh.error } : {}),
     }
   }))
+  if (Object.keys(refreshed).length > 0) {
+    // Re-read before writing: another process may have refreshed meanwhile,
+    // and a token issued later must never be replaced by an older one.
+    const current = readSubscriptionsAuth()
+    let changed = false
+    for (const [kind, session] of Object.entries(refreshed)) {
+      const existing = current[kind]
+      const existingExpiry = existing && typeof existing.expiresAt === 'number' ? existing.expiresAt : 0
+      if (existingExpiry >= session.expiresAt) continue
+      current[kind] = session
+      changed = true
+    }
+    if (changed) writeSubscriptionsAuth(current)
+  }
   printJson({ checked_at: new Date().toISOString(), providers }, 0)
 }
 

@@ -7,7 +7,7 @@
 // different payload shapes into one.
 import assert from 'node:assert/strict'
 
-const { normaliseUsagePayload, USAGE_ENDPOINTS, fetchProviderUsage } =
+const { normaliseUsagePayload, USAGE_ENDPOINTS, fetchProviderUsage, refreshSessionIfStale, REFRESH_ENDPOINTS, REFRESH_AHEAD_MS } =
   await import('/home/claudeproxy/Claude/AHVclaw-fork/scripts/prod/ahv-bot.mjs')
 
 let passed = 0, failed = 0
@@ -125,6 +125,95 @@ await acheck('a provider with no session is reported as not logged in', async ()
   assert.equal(res.supported, false)
   assert.match(res.error, /login/i)
 })
+
+// ── refresh before asking ─────────────────────────────────────────────────
+const NOW = 1_800_000_000_000
+const staleClaude = { accessToken: 'old', refreshToken: 'r1', expiresAt: NOW - 1, scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' }
+
+await acheck('a live token is used as is, no refresh call', async () => {
+  let calls = 0
+  const out = await refreshSessionIfStale('claude', { ...staleClaude, expiresAt: NOW + 3_600_000 }, async () => { calls++; throw new Error('must not be called') }, NOW)
+  assert.equal(calls, 0)
+  assert.equal(out.refreshed, false)
+  assert.equal(out.session.accessToken, 'old')
+})
+
+await acheck('a token expiring within the lead time is refreshed', async () => {
+  const seen = []
+  const out = await refreshSessionIfStale('claude', { ...staleClaude, expiresAt: NOW + REFRESH_AHEAD_MS - 1 }, async (url, init) => {
+    seen.push({ url, init })
+    return { ok: true, status: 200, json: async () => ({ access_token: 'new', refresh_token: 'r2', expires_in: 28800, scope: 'user:inference user:profile' }) }
+  }, NOW)
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0].url, REFRESH_ENDPOINTS.claude.url)
+  assert.equal(seen[0].init.method, 'POST')
+  const body = JSON.parse(seen[0].init.body)
+  assert.equal(body.grant_type, 'refresh_token')
+  assert.equal(body.refresh_token, 'r1')
+  assert.equal(body.client_id, REFRESH_ENDPOINTS.claude.clientId)
+  assert.equal(body.scope, 'user:inference user:profile')
+  assert.equal(out.refreshed, true)
+  assert.equal(out.session.accessToken, 'new')
+  assert.equal(out.session.refreshToken, 'r2')
+  assert.equal(out.session.expiresAt, NOW + 28800 * 1000)
+  assert.equal(out.session.subscriptionType, 'max', 'profile fields survive')
+})
+
+await acheck('a refresh without a new refresh token keeps the old one', async () => {
+  const out = await refreshSessionIfStale('claude', staleClaude, async () => ({
+    ok: true, status: 200, json: async () => ({ access_token: 'new', expires_in: 100 }),
+  }), NOW)
+  assert.equal(out.refreshed, true)
+  assert.equal(out.session.refreshToken, 'r1')
+})
+
+await acheck('a rejected refresh keeps the stale session and says why', async () => {
+  const out = await refreshSessionIfStale('claude', staleClaude, async () => ({
+    ok: false, status: 400, text: async () => '{"error":"invalid_grant"}',
+  }), NOW)
+  assert.equal(out.refreshed, false)
+  assert.equal(out.session.accessToken, 'old')
+  assert.match(out.error, /refresh HTTP 400: .*invalid_grant/)
+})
+
+await acheck('a refresh that returns no usable token is not applied', async () => {
+  const out = await refreshSessionIfStale('claude', staleClaude, async () => ({
+    ok: true, status: 200, json: async () => ({ access_token: '', expires_in: 0 }),
+  }), NOW)
+  assert.equal(out.refreshed, false)
+  assert.equal(out.session.accessToken, 'old')
+  assert.match(out.error, /no usable token/)
+})
+
+await acheck('a network failure during refresh is reported, not thrown', async () => {
+  const out = await refreshSessionIfStale('claude', staleClaude, async () => { throw new Error('ECONNRESET') }, NOW)
+  assert.equal(out.refreshed, false)
+  assert.match(out.error, /ECONNRESET/)
+})
+
+await acheck('no refresh token, no session, or another provider: left alone', async () => {
+  let calls = 0
+  const fetchFn = async () => { calls++; throw new Error('must not be called') }
+  for (const [kind, session] of [
+    ['claude', { accessToken: 'old', expiresAt: NOW - 1 }],
+    ['claude', undefined],
+    ['codex', { accessToken: 'old', refreshToken: 'r', expiresAt: NOW - 1 }],
+    ['grok', { accessToken: 'old', refreshToken: 'r', expiresAt: NOW - 1 }],
+  ]) {
+    const out = await refreshSessionIfStale(kind, session, fetchFn, NOW)
+    assert.equal(out.refreshed, false, kind)
+    assert.equal(out.session, session)
+  }
+  assert.equal(calls, 0)
+})
+
+await acheck('a session with no expiry at all is treated as stale', async () => {
+  const out = await refreshSessionIfStale('claude', { accessToken: 'old', refreshToken: 'r1' }, async () => ({
+    ok: true, status: 200, json: async () => ({ access_token: 'new', refresh_token: 'r2', expires_in: 10 }),
+  }), NOW)
+  assert.equal(out.refreshed, true)
+})
+
 
 console.log(`\n  ${passed} passed, ${failed} failed`)
 process.exit(failed === 0 ? 0 : 1)
