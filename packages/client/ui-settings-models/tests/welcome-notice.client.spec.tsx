@@ -88,8 +88,8 @@ function mount(
 describe('WelcomeNotice', () => {
   it('uses the exact owner copy in both GUI locales', () => {
     expect(WELCOME_NOTICE_COPY.en).toEqual({
-      title: 'Internal Testing Notice',
-      body: "DeepSeek Harness 0.1 remains in testing for Harness developers. Many areas need further improvement, and we welcome feedback from the developer community. DeepSeek Harness's core plugins and foundational APIs will continue to evolve rapidly over the coming months.\n\nWe look forward to exploring the limits of intelligence with developers around the world, building on open-source, open, reusable, and composable infrastructure. We welcome Harness developers everywhere to join the DSH plugin ecosystem.",
+      title: 'About AHV Harness',
+      body: 'AHV Harness is a working environment built on DeepSeek Harness and maintained by the AHV team.\n\nSessions, credentials and plugins live in the home directory of the user this runs as, so running it as a different user opens a different set. Ask your administrator if something looks missing.',
       continueLabel: 'Continue',
     })
     expect(en.welcomeBody).toBe(WELCOME_NOTICE_COPY.en.body)

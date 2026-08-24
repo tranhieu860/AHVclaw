@@ -8,6 +8,7 @@
 // Longest-first so composite phrases match before their prefix.
 // Sensitive to word order — "DSH Local Build" must match before bare "DSH".
 const LABEL_REPLACEMENTS = new Map([
+  ['Into the Unknown', 'Đây là phiên bản Web của AHV Harness'],
   ['DSH Local Build', 'AHV Harness'],
   ['DSH local build', 'AHV Harness'],
   ['DeepSeek Harness', 'AHV Harness'],
@@ -62,15 +63,51 @@ function installTextRebrand() {
   return () => observer.disconnect()
 }
 
-/** The AHV mark: a rounded tile carrying an A, in the brand gradient. */
-const AHV_MARK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="100%" height="100%" role="img" aria-label="AHV Harness">
-  <defs><linearGradient id="ahvMark" x1="0" y1="0" x2="1" y2="1">
-    <stop offset="0" stop-color="#7dd3fc"/><stop offset="1" stop-color="#a78bfa"/>
-  </linearGradient></defs>
-  <rect width="32" height="32" rx="8" fill="url(#ahvMark)"/>
-  <path d="M9.6 23 15.1 9h2.4l5.5 14h-2.9l-1.25-3.4h-5.1L12.5 23Z" fill="#0a0a0f"/>
-  <path d="M14.6 17.2h3.7L16.45 12Z" fill="url(#ahvMark)"/>
-</svg>`
+/**
+ * The AHV mark: the monogram A drawn as one stroke over a dark tile, with the
+ * crossbar broken into a link and the right foot curling into a claw — the
+ * harness and the AHVclaw name, and what keeps it from reading as a generic
+ * letter tile.
+ *
+ * Built from strokes rather than a text glyph so it stays identical across
+ * platforms and stays legible at favicon size, where the previous emoji-based
+ * icon depended on whatever emoji font the OS happened to ship.
+ */
+function ahvMarkSvg(idSuffix = '') {
+  const g = `ahvG${idSuffix}`
+  const tile = `ahvT${idSuffix}`
+  const glow = `ahvW${idSuffix}`
+  // Same geometry as the console, the landing page and both favicons. It was
+  // drawn here at a smaller viewBox without the tile gradient or the corner
+  // glow, which read as a different logo beside them.
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="100%" height="100%" role="img" aria-label="AHV Harness">
+    <defs>
+      <linearGradient id="${g}" x1="8" y1="56" x2="56" y2="8" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#5eead4"/>
+        <stop offset="0.45" stop-color="#7dd3fc"/>
+        <stop offset="1" stop-color="#a78bfa"/>
+      </linearGradient>
+      <linearGradient id="${tile}" x1="6" y1="4" x2="58" y2="60" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#131c33"/>
+        <stop offset="1" stop-color="#080c17"/>
+      </linearGradient>
+      <radialGradient id="${glow}" cx="0.28" cy="0.2" r="0.85">
+        <stop offset="0" stop-color="#5eead4" stop-opacity="0.30"/>
+        <stop offset="1" stop-color="#5eead4" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <rect width="64" height="64" rx="17" fill="url(#${tile})"/>
+    <rect width="64" height="64" rx="17" fill="url(#${glow})"/>
+    <rect x="1.3" y="1.3" width="61.4" height="61.4" rx="15.9" fill="none"
+          stroke="url(#${g})" stroke-opacity="0.55" stroke-width="1.6"/>
+    <path d="M14.6 50.6 32 12.8l14.6 31.6c1.9 4.1.5 6.9-3.7 6.9" fill="none"
+          stroke="url(#${g})" stroke-width="6.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M23.6 38.4h5.6" stroke="url(#${g})" stroke-width="5.8" stroke-linecap="round"/>
+    <path d="M35.6 38.4h5.6" stroke="url(#${g})" stroke-width="5.8" stroke-linecap="round"/>
+  </svg>`
+}
+
+const AHV_MARK_SVG = ahvMarkSvg()
 
 /**
  * Put our mark in the slots the app publishes for it.
@@ -106,16 +143,15 @@ function installBrandMark() {
   return () => observer.disconnect()
 }
 
-/** Set favicon to AHV bolt emoji. */
+/**
+ * Point the favicon at the same mark as the sidebar.
+ *
+ * The URI is built by encoding the raw SVG: writing `%23` by hand and then
+ * running encodeURIComponent over it yields `%2523`, an invalid IRI, so the
+ * gradient reference silently failed and the tile never painted.
+ */
 function installFavicon() {
-  const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>
-    <defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'>
-      <stop offset='0' stop-color='#7dd3fc'/><stop offset='1' stop-color='#a78bfa'/>
-    </linearGradient></defs>
-    <rect width='32' height='32' rx='7' fill='url(%23g)'/>
-    <text y='24' x='16' font-size='22' text-anchor='middle' font-family='ui-sans-serif,system-ui' font-weight='700' fill='#0a0a0f'>⚡</text>
-  </svg>`
-  const url = 'data:image/svg+xml,' + encodeURIComponent(svg).replace(/'/g, '%27')
+  const url = 'data:image/svg+xml,' + encodeURIComponent(ahvMarkSvg('Fav'))
 
   document.querySelectorAll('link[rel~="icon"]').forEach(l => l.remove())
   const link = document.createElement('link')
