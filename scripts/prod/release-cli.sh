@@ -122,6 +122,23 @@ log "packaging $next → $RELEASE_DIR"
 mkdir -p "$RELEASE_DIR" || { rollback; fail "cannot create $RELEASE_DIR"; }
 bash "$FORK/scripts/prod/build-prebuilt.sh" "$next" "$RELEASE_DIR" "$BUILD_HOME/src" || { rollback; fail "prebuilt packaging failed"; }
 chmod 644 "$RELEASE_DIR"/*
+# A new tag goes to the canary channel; stable moves only through promote.sh
+# (by hand today, after a canary soak once the rollout controller exists).
+python3 - "$RELEASE_DIR/channels.json" "$next" <<'PY' || { rollback; fail "channels.json update failed"; }
+import json, os, sys
+path, tag = sys.argv[1:]
+try:
+    channels = json.load(open(path, encoding="utf-8"))
+except Exception:
+    channels = {}
+channels["canary"] = tag
+channels.setdefault("stable", tag)
+tmp = path + ".tmp"
+json.dump(channels, open(tmp, "w", encoding="utf-8"), indent=2)
+open(tmp, "a").write("\n")
+os.replace(tmp, path)
+print("channels:", json.dumps(channels))
+PY
 log "pushing master and $next to origin"
 git push --no-verify -q origin master "$next" || fail "push failed (build and channel are done; push by hand)"
 log "released $next"

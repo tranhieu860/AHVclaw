@@ -42,33 +42,43 @@ mv -f "$tmp" "$out/$file"
 
 glibc="$(getconf GNU_LIBC_VERSION | awk '{print $2}')"
 node="$(node -v 2>/dev/null || echo unknown)"
-python3 - "$out/manifest.json" "$tag" "$platform" "$file" "$sha" "$size" "$glibc" "$node" <<'PY'
+# Every tag gets its own manifest (<tag>.json). manifest.json describes the
+# stable channel and is only rewritten when this tag is stable — or when no
+# channels.json exists yet.
+python3 - "$out" "$tag" "$platform" "$file" "$sha" "$size" "$glibc" "$node" <<'PY'
 import json
 import os
 import sys
 import time
 
-path, tag, platform, file, sha, size, glibc, node = sys.argv[1:]
-manifest = {}
-if os.path.exists(path):
+out, tag, platform, file, sha, size, glibc, node = sys.argv[1:]
+
+def load(path):
     try:
-        manifest = json.load(open(path, encoding="utf-8"))
+        return json.load(open(path, encoding="utf-8"))
     except Exception:
-        manifest = {}
-if manifest.get("version") != tag:
-    manifest = {"version": tag, "packages": {}}
-manifest["packages"][platform] = {
-    "file": file,
-    "sha256": sha,
-    "size": int(size),
-    "glibc": glibc,
-    "node": node,
+        return {}
+
+def write(path, data):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as stream:
+        json.dump(data, stream, indent=2, ensure_ascii=False)
+        stream.write("\n")
+    os.replace(tmp, path)
+
+entry = {
+    "file": file, "sha256": sha, "size": int(size), "glibc": glibc, "node": node,
     "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
 }
-tmp = path + ".tmp"
-with open(tmp, "w", encoding="utf-8") as stream:
-    json.dump(manifest, stream, indent=2, ensure_ascii=False)
-    stream.write("\n")
-os.replace(tmp, path)
+tag_path = os.path.join(out, tag + ".json")
+manifest = load(tag_path)
+if manifest.get("version") != tag:
+    manifest = {"version": tag, "packages": {}}
+manifest.setdefault("packages", {})[platform] = entry
+write(tag_path, manifest)
+
+channels = load(os.path.join(out, "channels.json"))
+if not channels or channels.get("stable") == tag:
+    write(os.path.join(out, "manifest.json"), manifest)
 print(json.dumps({"version": tag, "platform": platform, "file": file, "sha256": sha, "size": int(size)}))
 PY
