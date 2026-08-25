@@ -1,0 +1,56 @@
+# Build the prebuilt AHV CLI archive for every platform when a release tag is
+# pushed, and attach it to a GitHub Release. The reference machine (x64) builds
+# its own archive during release-cli.sh; this job is what supplies the
+# platforms it cannot build — today linux-arm64 — and a second, independent
+# x64 build. ahvclaw.com mirrors the assets it needs into its release channel.
+name: prebuilt
+on:
+  push:
+    tags: ['v0.*']
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux-x64
+          - runner: ubuntu-24.04-arm
+            platform: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build the tag with the product installer
+        env:
+          AHV_HOME: ${{ github.workspace }}/.ahv-build
+          AHV_BIN: ${{ github.workspace }}/.ahv-build/bin-link
+          AHV_REPO_URL: file://${{ github.workspace }}
+          AHV_BRANCH: ${{ github.ref_name }}
+          AHV_CLI_VERSION: ${{ github.ref_name }}
+          NO_COLOR: '1'
+          PNPM_CONFIG_MINIMUM_RELEASE_AGE: '0'
+        run: |
+          corepack enable
+          sudo apt-get update -qq && sudo apt-get install -y -qq zstd build-essential python3 pkg-config >/dev/null
+          bash scripts/prod/install.sh
+          "$AHV_HOME/bin/ahv" --version | grep -F "${{ github.ref_name }}"
+      - name: Package
+        run: |
+          mkdir -p out
+          bash scripts/prod/build-prebuilt.sh "${{ github.ref_name }}" out "$GITHUB_WORKSPACE/.ahv-build/src"
+          mv out/${{ github.ref_name }}.json out/${{ github.ref_name }}-${{ matrix.platform }}.json
+          rm -f out/manifest.json
+          ls -la out
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/ahv-cli-${{ github.ref_name }}-${{ matrix.platform }}.tar.zst
+            out/${{ github.ref_name }}-${{ matrix.platform }}.json
