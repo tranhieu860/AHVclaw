@@ -68,6 +68,12 @@ rollback() {
 # not pushed yet). The builder has its own AHV_HOME so the live CLI under
 # ~/.ahv/src is untouched until the channel says otherwise.
 log "building $next in $BUILD_HOME as $BUILD_USER"
+# The builder clones from this checkout, which another account owns; git
+# refuses such a repository unless it is declared safe for the builder.
+for safe in "$FORK" "$FORK/.git"; do
+  sudo -u "$BUILD_USER" -H git config --global --get-all safe.directory 2>/dev/null | grep -qxF "$safe" ||
+    sudo -u "$BUILD_USER" -H git config --global --add safe.directory "$safe"
+done
 if ! sudo -u "$BUILD_USER" -H env \
     AHV_HOME="$BUILD_HOME" AHV_BIN="$BUILD_HOME/bin-link" \
     AHV_REPO_URL="file://$FORK" AHV_BRANCH="$next" AHV_CLI_VERSION="$next" NO_COLOR=1 \
