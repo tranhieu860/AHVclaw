@@ -8,14 +8,20 @@
 #
 # Usage: scripts/prod/release-cli.sh [-m "commit message"] [--dry-run]
 # Env:   AHV_RELEASE_DIR  channel dir      (default /srv/ahvclaw.com/releases/ahv-cli)
-#        AHV_BUILD_USER   builder account  (default ahvproxy)
-#        AHV_BUILD_HOME   builder AHV_HOME (default /home/$AHV_BUILD_USER/.ahv/build)
+#        AHV_BUILD_USER   builder account  (default: the user running this script —
+#                         building as another account needs sudo and cross-user
+#                         git access, both of which bit us; the archive does not
+#                         care who built it)
+#        AHV_BUILD_HOME   builder AHV_HOME (default ~/.ahv-build of that user)
 set -euo pipefail
 
 FORK="$(cd "$(dirname "$0")/../.." && pwd)"
 RELEASE_DIR="${AHV_RELEASE_DIR:-/srv/ahvclaw.com/releases/ahv-cli}"
-BUILD_USER="${AHV_BUILD_USER:-ahvproxy}"
-BUILD_HOME="${AHV_BUILD_HOME:-/home/$BUILD_USER/.ahv/build}"
+BUILD_USER="${AHV_BUILD_USER:-$(id -un)}"
+BUILD_HOME="${AHV_BUILD_HOME:-$(getent passwd "$BUILD_USER" | cut -d: -f6)/.ahv-build}"
+run_as() {
+  if [ "$BUILD_USER" = "$(id -un)" ]; then "$@"; else sudo -u "$BUILD_USER" -H "$@"; fi
+}
 MESSAGE="plugins: sync from registry"
 DRY_RUN=0
 while [ $# -gt 0 ]; do
@@ -68,15 +74,17 @@ rollback() {
 # not pushed yet). The builder has its own AHV_HOME so the live CLI under
 # ~/.ahv/src is untouched until the channel says otherwise.
 log "building $next in $BUILD_HOME as $BUILD_USER"
-# The builder clones from this checkout, which another account owns; git
-# refuses such a repository unless it is declared safe for the builder. Run
-# git from / — inside this checkout the builder cannot even read .git/config.
-for safe in "$FORK" "$FORK/.git"; do
-  if ! sudo -u "$BUILD_USER" -H git -C / config --global --get-all safe.directory 2>/dev/null | grep -qxF "$safe"; then
-    sudo -u "$BUILD_USER" -H git -C / config --global --add safe.directory "$safe" || { rollback; fail "could not mark $safe safe for $BUILD_USER"; }
-  fi
-done
-if ! sudo -u "$BUILD_USER" -H env \
+# Building as another account: git refuses a repository owned by someone
+# else unless it is declared safe; run git from / since the builder may not
+# even read .git/config here.
+if [ "$BUILD_USER" != "$(id -un)" ]; then
+  for safe in "$FORK" "$FORK/.git"; do
+    if ! run_as git -C / config --global --get-all safe.directory 2>/dev/null | grep -qxF "$safe"; then
+      run_as git -C / config --global --add safe.directory "$safe" || { rollback; fail "could not mark $safe safe for $BUILD_USER"; }
+    fi
+  done
+fi
+if ! run_as env \
     AHV_HOME="$BUILD_HOME" AHV_BIN="$BUILD_HOME/bin-link" \
     AHV_REPO_URL="file://$FORK" AHV_BRANCH="$next" AHV_CLI_VERSION="$next" NO_COLOR=1 \
     PNPM_CONFIG_MINIMUM_RELEASE_AGE=0 \
@@ -89,18 +97,18 @@ fi
 # Smoke: the built tree must report the tag, pass doctor, and answer the
 # quota lookup with a well-formed document.
 smoke="$BUILD_HOME/bin/ahv"
-version="$(sudo -u "$BUILD_USER" -H env NO_COLOR=1 "$smoke" --version 2>/dev/null | head -1 || true)"
+version="$(run_as env NO_COLOR=1 "$smoke" --version 2>/dev/null | head -1 || true)"
 case "$version" in
   *"ahv $next "*|*"ahv $next") log "smoke version: $version" ;;
   *) rollback; fail "smoke: built CLI reports '$version', not $next" ;;
 esac
-doctor="$(sudo -u "$BUILD_USER" -H env NO_COLOR=1 timeout 120 "$smoke" doctor 2>/dev/null || true)"
+doctor="$(run_as env NO_COLOR=1 timeout 120 "$smoke" doctor 2>/dev/null || true)"
 python3 - "$doctor" <<'PY' || { rollback; fail "smoke: doctor not ok"; }
 import json, sys
 d = json.loads(sys.argv[1])
 assert d.get("ok") is True and int(d.get("error_count", 1)) == 0, d
 PY
-usage="$(sudo -u "$BUILD_USER" -H env NO_COLOR=1 timeout 90 "$smoke" login usage --json 2>/dev/null || true)"
+usage="$(run_as env NO_COLOR=1 timeout 90 "$smoke" login usage --json 2>/dev/null || true)"
 python3 - "$usage" <<'PY' || { rollback; fail "smoke: login usage malformed"; }
 import json, sys
 d = json.loads(sys.argv[1])
@@ -111,9 +119,9 @@ log "smoke passed"
 # Package for the channel, then push. Push last: a tag on GitHub is a promise
 # that a proven build exists.
 log "packaging $next → $RELEASE_DIR"
-sudo mkdir -p "$RELEASE_DIR"
-sudo bash "$FORK/scripts/prod/build-prebuilt.sh" "$next" "$RELEASE_DIR" "$BUILD_HOME/src" || { rollback; fail "prebuilt packaging failed"; }
-sudo chmod 644 "$RELEASE_DIR"/*
+mkdir -p "$RELEASE_DIR" || { rollback; fail "cannot create $RELEASE_DIR"; }
+bash "$FORK/scripts/prod/build-prebuilt.sh" "$next" "$RELEASE_DIR" "$BUILD_HOME/src" || { rollback; fail "prebuilt packaging failed"; }
+chmod 644 "$RELEASE_DIR"/*
 log "pushing master and $next to origin"
 git push --no-verify -q origin master "$next" || fail "push failed (build and channel are done; push by hand)"
 log "released $next"
