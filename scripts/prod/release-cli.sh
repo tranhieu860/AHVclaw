@@ -69,10 +69,12 @@ rollback() {
 # ~/.ahv/src is untouched until the channel says otherwise.
 log "building $next in $BUILD_HOME as $BUILD_USER"
 # The builder clones from this checkout, which another account owns; git
-# refuses such a repository unless it is declared safe for the builder.
+# refuses such a repository unless it is declared safe for the builder. Run
+# git from / — inside this checkout the builder cannot even read .git/config.
 for safe in "$FORK" "$FORK/.git"; do
-  sudo -u "$BUILD_USER" -H git config --global --get-all safe.directory 2>/dev/null | grep -qxF "$safe" ||
-    sudo -u "$BUILD_USER" -H git config --global --add safe.directory "$safe"
+  if ! sudo -u "$BUILD_USER" -H git -C / config --global --get-all safe.directory 2>/dev/null | grep -qxF "$safe"; then
+    sudo -u "$BUILD_USER" -H git -C / config --global --add safe.directory "$safe" || { rollback; fail "could not mark $safe safe for $BUILD_USER"; }
+  fi
 done
 if ! sudo -u "$BUILD_USER" -H env \
     AHV_HOME="$BUILD_HOME" AHV_BIN="$BUILD_HOME/bin-link" \
