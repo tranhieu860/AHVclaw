@@ -84,8 +84,21 @@ if [ "$BUILD_USER" != "$(id -un)" ]; then
     fi
   done
 fi
+# The builder is a world of its own: its own AHV_HOME, its own dsh home (the
+# wrapper links the profile plugin farm from the tree it runs, and a shared
+# ~/.dsh would leave the live CLI loading plugins out of the build tree), and
+# AHV_FORK pointing at the build tree — the admin service exports AHV_FORK for
+# the live fork, and that leaked into the smoke doctor, which then compared the
+# builder's farm with the live install and failed every release
+# ("profile dang nap plugin tu ...ahv-build..., khong phai ban da install tai").
+BUILD_ENV=(
+  AHV_HOME="$BUILD_HOME"
+  AHV_BIN="$BUILD_HOME/bin-link"
+  AHV_FORK="$BUILD_HOME/src"
+  DSH_HOME="$BUILD_HOME/dsh"
+)
 if ! run_as env \
-    AHV_HOME="$BUILD_HOME" AHV_BIN="$BUILD_HOME/bin-link" \
+    "${BUILD_ENV[@]}" \
     AHV_REPO_URL="file://$FORK" AHV_BRANCH="$next" AHV_CLI_VERSION="$next" NO_COLOR=1 \
     PNPM_CONFIG_MINIMUM_RELEASE_AGE=0 \
     bash "$FORK/scripts/prod/install.sh" >"/tmp/ahv-release-build-$next.log" 2>&1; then
@@ -97,18 +110,18 @@ fi
 # Smoke: the built tree must report the tag, pass doctor, and answer the
 # quota lookup with a well-formed document.
 smoke="$BUILD_HOME/bin/ahv"
-version="$(run_as env NO_COLOR=1 "$smoke" --version 2>/dev/null | head -1 || true)"
+version="$(run_as env "${BUILD_ENV[@]}" NO_COLOR=1 "$smoke" --version 2>/dev/null | head -1 || true)"
 case "$version" in
   *"ahv $next "*|*"ahv $next") log "smoke version: $version" ;;
   *) rollback; fail "smoke: built CLI reports '$version', not $next" ;;
 esac
-doctor="$(run_as env NO_COLOR=1 timeout 120 "$smoke" doctor 2>/dev/null || true)"
+doctor="$(run_as env "${BUILD_ENV[@]}" NO_COLOR=1 timeout 120 "$smoke" doctor 2>/dev/null || true)"
 python3 - "$doctor" <<'PY' || { rollback; fail "smoke: doctor not ok"; }
 import json, sys
 d = json.loads(sys.argv[1])
 assert d.get("ok") is True and int(d.get("error_count", 1)) == 0, d
 PY
-usage="$(run_as env NO_COLOR=1 timeout 90 "$smoke" login usage --json 2>/dev/null || true)"
+usage="$(run_as env "${BUILD_ENV[@]}" NO_COLOR=1 timeout 90 "$smoke" login usage --json 2>/dev/null || true)"
 python3 - "$usage" <<'PY' || { rollback; fail "smoke: login usage malformed"; }
 import json, sys
 d = json.loads(sys.argv[1])
