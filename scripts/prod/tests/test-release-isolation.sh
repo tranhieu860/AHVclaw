@@ -41,5 +41,17 @@ else
   printf '  PASS  no non-forced tag fetch remains\n'
 fi
 
+# A failed release must not throw away the pin the console just applied.
+if grep -q 'git reset -q --mixed HEAD~1' "$SCRIPT"; then
+  printf '  PASS  rollback keeps the registry pin in the working tree\n'
+else
+  printf '  FAIL  rollback discards the registry pin\n'; fails=$((fails + 1))
+fi
+if grep -q 'git reset -q --hard HEAD~1' "$SCRIPT"; then
+  printf '  FAIL  rollback still hard-resets\n'; fails=$((fails + 1))
+else
+  printf '  PASS  no hard reset remains\n'
+fi
+
 [ "$fails" -eq 0 ] && { echo "test-release-isolation: OK"; exit 0; }
 echo "test-release-isolation: $fails failed"; exit 1

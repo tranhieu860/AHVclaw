@@ -65,9 +65,14 @@ git add packages/bundle/ahv/package.json packages/bundle/ahv/cordis.patch.yml pn
 git -c user.name="AHV release bot" -c user.email="release@ahvclaw.com" commit -q -m "$MESSAGE" -m "Automated by ahv-admin registry sync." || fail "commit failed"
 git tag -a "$next" -m "$next: $MESSAGE"
 rollback() {
-  log "rolling back local commit and tag $next"
+  # Undo the commit and tag, but keep the registry-managed pin bump in the
+  # working tree: a hard reset threw it away, so a failed release silently
+  # lost the pin — the console then saw "pinned == latest", refused to
+  # re-apply it, and the fork stayed behind until npm published something
+  # newer. Leaving the files dirty lets the next attempt retry the same bump.
+  log "rolling back local commit and tag $next (keeping the pin change)"
   git tag -d "$next" >/dev/null 2>&1 || true
-  git reset -q --hard HEAD~1 || true
+  git reset -q --mixed HEAD~1 || true
 }
 
 # Build the tag as the bot user from THIS checkout (not GitHub: the tag is
