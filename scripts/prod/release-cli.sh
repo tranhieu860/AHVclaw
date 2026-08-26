@@ -47,9 +47,13 @@ if [ -n "$dirty" ] && printf '%s\n' "$dirty" | grep -vE "$allowed" | grep -q .; 
   printf '%s\n' "$dirty" >&2
   fail "checkout has changes outside the registry-managed files; refusing"
 fi
+# A clean checkout still has something to release when hand-written commits
+# sit above the last tag — that is how a fix authored by a person (rather than
+# swept up by the registry sync) reaches the channel. Nothing to commit in
+# that case; the tag alone names the work.
+COMMIT_DIRTY=1
 if [ -z "$dirty" ]; then
-  log "nothing to release: registry-managed files are unchanged"
-  exit 0
+  COMMIT_DIRTY=0
 fi
 
 git fetch -q origin --tags
@@ -57,12 +61,22 @@ last="$(git tag -l 'v0.2.*' --sort=-v:refname | head -1)"
 [ -n "$last" ] || fail "no v0.2.* tag found"
 next="v0.2.$(( ${last##*.} + 1 ))"
 git tag -l "$next" | grep -q . && fail "tag $next already exists"
-log "changes: $(printf '%s' "$dirty" | tr '\n' ';')"
+if [ "$COMMIT_DIRTY" -eq 0 ] && [ -z "$(git rev-list "$last"..HEAD)" ]; then
+  log "nothing to release: no registry changes and HEAD is ahead of $last by nothing"
+  exit 0
+fi
+if [ "$COMMIT_DIRTY" -eq 1 ]; then
+  log "changes: $(printf '%s' "$dirty" | tr '\n' ';')"
+else
+  log "changes: $(git rev-list --count "$last"..HEAD) commit(s) already on master since $last"
+fi
 log "next tag: $next (after $last)"
 if [ "$DRY_RUN" -eq 1 ]; then log "dry run, stopping before commit"; exit 0; fi
 
-git add packages/bundle/ahv/package.json packages/bundle/ahv/cordis.patch.yml pnpm-lock.yaml 2>/dev/null || true
-git -c user.name="AHV release bot" -c user.email="release@ahvclaw.com" commit -q -m "$MESSAGE" -m "Automated by ahv-admin registry sync." || fail "commit failed"
+if [ "$COMMIT_DIRTY" -eq 1 ]; then
+  git add packages/bundle/ahv/package.json packages/bundle/ahv/cordis.patch.yml pnpm-lock.yaml 2>/dev/null || true
+  git -c user.name="AHV release bot" -c user.email="release@ahvclaw.com" commit -q -m "$MESSAGE" -m "Automated by ahv-admin registry sync." || fail "commit failed"
+fi
 git tag -a "$next" -m "$next: $MESSAGE"
 rollback() {
   # Undo the commit and tag, but keep the registry-managed pin bump in the
@@ -70,9 +84,13 @@ rollback() {
   # lost the pin — the console then saw "pinned == latest", refused to
   # re-apply it, and the fork stayed behind until npm published something
   # newer. Leaving the files dirty lets the next attempt retry the same bump.
-  log "rolling back local commit and tag $next (keeping the pin change)"
+  log "rolling back tag $next (keeping any pin change)"
   git tag -d "$next" >/dev/null 2>&1 || true
-  git reset -q --mixed HEAD~1 || true
+  # Only the commit this run created may be undone; hand-written commits that
+  # were already on master before the run must survive a failed release.
+  if [ "$COMMIT_DIRTY" -eq 1 ]; then
+    git reset -q --mixed HEAD~1 || true
+  fi
 }
 
 # Build the tag as the bot user from THIS checkout (not GitHub: the tag is
