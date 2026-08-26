@@ -144,3 +144,36 @@
     # https://github.com/anweat/dsh-browser
     - id: browser
       name: '@anweat/dsh-browser'
+
+    # --- Session listing shared with the web UI -------------------------
+    # `ahv run` (what the Telegram bot invokes) wrote its session log but
+    # never the projection cache, so the web listed those conversations
+    # without a title and with a stale time — 72 sessions on disk against
+    # 3 rows in ~/.dsh/storages/session_projcache.json. The cache service is
+    # what checkpoints title/stats on `turn/end`; it only shipped in the
+    # web-app bundle. Mounting it here (with the storage stack it needs, in
+    # the same layout the web already uses) makes a bot conversation appear
+    # in the web list exactly like one started from the browser.
+    - id: storage
+      name: '@deepseek-ai/dsh-storage'
+
+    - id: storage-json
+      name: '@deepseek-ai/dsh-storage-json'
+      config:
+        root: !!js dshHomePath('storages')
+
+    - id: storage-domain
+      name: '@deepseek-ai/dsh-storage-domain'
+      config:
+        backend: json
+
+    # Turn/step counts for the listing row; the projection registry itself
+    # is a base-layer row.
+    - id: session-stats
+      name: '@deepseek-ai/dsh-session-stats'
+
+    - id: session-projection-cache
+      name: '@deepseek-ai/dsh-session-projection-cache'
+      config:
+        writeEveryEvents: 200
+        writeIntervalMs: 5000

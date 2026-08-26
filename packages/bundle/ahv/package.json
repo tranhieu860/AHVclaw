@@ -69,6 +69,11 @@
     "superpowers-dsh": "^0.1.1",
     "@linxin666/dsh-web-ui-all": "^0.2.7",
     "dsh-plugin-subscriptions": "^0.5.2",
-    "@anweat/dsh-browser": "^0.1.8"
+    "@anweat/dsh-browser": "^0.1.8",
+    "@deepseek-ai/dsh-storage": "workspace:^",
+    "@deepseek-ai/dsh-storage-json": "workspace:^",
+    "@deepseek-ai/dsh-storage-domain": "workspace:^",
+    "@deepseek-ai/dsh-session-stats": "workspace:^",
+    "@deepseek-ai/dsh-session-projection-cache": "workspace:^"
   }
 }
