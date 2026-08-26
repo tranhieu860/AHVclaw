@@ -88,7 +88,11 @@ if [ -d "$SRC/.git" ]; then
     git status --short >&2
     fail "Source có thay đổi chưa commit tại $SRC. Chạy 'git -C $SRC stash' rồi cài lại. Dừng ở đây thay vì cài đè bản cũ và báo thành công."
   fi
-  git fetch origin --tags
+  # --force: a tag that was rolled back and re-cut (the release pipeline does
+  # exactly that when a smoke test fails) would otherwise be refused forever
+  # with "would clobber existing tag", wedging every later install on this
+  # clone. The wrapper's `ahv update` already fetches this way.
+  git fetch origin --tags --force
   git checkout "$AHV_BRANCH"
   # A tag is not a branch: pulling one fails, and there is nothing to pull.
   if git show-ref --verify --quiet "refs/heads/$AHV_BRANCH"; then
