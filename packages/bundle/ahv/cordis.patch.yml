@@ -172,6 +172,13 @@
     - id: session-stats
       name: '@deepseek-ai/dsh-session-stats'
 
+    # The list hints the web reads to summarise a cold session. The proxy
+    # registers this key too, but `ahv run` composes no proxy — without it the
+    # cached row is written yet the listing still falls back to the workspace
+    # name, which is exactly what a bot conversation looked like.
+    - id: session-list-metadata
+      name: '@deepseek-ai/dsh-session-list-metadata'
+
     - id: session-projection-cache
       name: '@deepseek-ai/dsh-session-projection-cache'
       config:
