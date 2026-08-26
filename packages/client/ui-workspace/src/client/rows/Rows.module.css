@@ -237,6 +237,21 @@
   display: none;
 }
 
+/* A touch device never fires :hover, so the trailing actions — rename, fork,
+   archive — were unreachable there and an old session could only be removed
+   from a mouse. Where hover does not exist, keep them on permanently; the
+   timestamp stays too (the row is full width on a phone, so both fit). */
+@media (hover: none) {
+  .projectRow .rowActions,
+  .sessionRow .rowActions {
+    display: inline-flex;
+  }
+
+  .sessionRow .time {
+    display: inline;
+  }
+}
+
 /* An open row menu pins the hover affordances (figma: the row keeps its
    hover fill while its dropdown is up). */
 .projectRow.menuOpen,
