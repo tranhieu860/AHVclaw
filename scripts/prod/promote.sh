@@ -22,7 +22,10 @@ channels["stable"] = tag
 channels.setdefault("canary", tag)
 tmp = path + ".tmp"
 json.dump(channels, open(tmp, "w", encoding="utf-8"), indent=2); open(tmp, "a").write("\n")
+os.chmod(tmp, 0o644)
 os.replace(tmp, path)
-shutil.copyfile(os.path.join(d, tag + ".json"), os.path.join(d, "manifest.json"))
+manifest_path = os.path.join(d, "manifest.json")
+shutil.copyfile(os.path.join(d, tag + ".json"), manifest_path)
+os.chmod(manifest_path, 0o644)
 print("stable →", tag, "| channels:", json.dumps(channels))
 PY

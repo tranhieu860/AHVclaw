@@ -172,6 +172,7 @@ channels.setdefault("stable", tag)
 tmp = path + ".tmp"
 json.dump(channels, open(tmp, "w", encoding="utf-8"), indent=2)
 open(tmp, "a").write("\n")
+os.chmod(tmp, 0o644)
 os.replace(tmp, path)
 print("channels:", json.dumps(channels))
 PY

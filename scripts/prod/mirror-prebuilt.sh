@@ -33,10 +33,12 @@ meta = json.load(sys.stdin)
 path = os.path.join(d, tag + ".json")
 manifest = json.load(open(path)) if os.path.exists(path) else {"version": tag, "packages": {}}
 manifest["packages"][platform] = meta["packages"][platform]
-tmp = path + ".tmp"; json.dump(manifest, open(tmp, "w"), indent=2); open(tmp, "a").write("\n"); os.replace(tmp, path)
+tmp = path + ".tmp"; json.dump(manifest, open(tmp, "w"), indent=2); open(tmp, "a").write("\n")
+os.chmod(tmp, 0o644); os.replace(tmp, path)
 channels = json.load(open(os.path.join(d, "channels.json")))
 if channels.get("stable") == tag:
     json.dump(manifest, open(os.path.join(d, "manifest.json.tmp"), "w"), indent=2)
+    os.chmod(os.path.join(d, "manifest.json.tmp"), 0o644)
     os.replace(os.path.join(d, "manifest.json.tmp"), os.path.join(d, "manifest.json"))
 print("mirror: merged", platform, "into", tag + ".json")
 PY

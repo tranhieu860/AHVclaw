@@ -60,10 +60,15 @@ def load(path):
         return {}
 
 def write(path, data):
+    # os.replace installs a brand-new inode, so it takes the writer's umask
+    # rather than the mode of the file it replaces. Releases run under umask
+    # 077, which left these 600 and made the web server answer 403 — every
+    # host then fell back to its pinned tag. Set the mode explicitly.
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as stream:
         json.dump(data, stream, indent=2, ensure_ascii=False)
         stream.write("\n")
+    os.chmod(tmp, 0o644)
     os.replace(tmp, path)
 
 entry = {
