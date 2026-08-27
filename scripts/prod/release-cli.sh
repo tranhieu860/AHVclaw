@@ -157,7 +157,10 @@ log "smoke passed"
 log "packaging $next → $RELEASE_DIR"
 mkdir -p "$RELEASE_DIR" || { rollback; fail "cannot create $RELEASE_DIR"; }
 bash "$FORK/scripts/prod/build-prebuilt.sh" "$next" "$RELEASE_DIR" "$BUILD_HOME/src" || { rollback; fail "prebuilt packaging failed"; }
-chmod 644 "$RELEASE_DIR"/*
+# Only the files we own: the rollout controller runs as root and may own
+# channels.json, and one EPERM here used to abort a release that had already
+# built and packaged.
+find "$RELEASE_DIR" -maxdepth 1 -type f -user "$(id -un)" -exec chmod 644 {} +
 # A new tag goes to the canary channel; stable moves only through promote.sh
 # (by hand today, after a canary soak once the rollout controller exists).
 python3 - "$RELEASE_DIR/channels.json" "$next" <<'PY' || { rollback; fail "channels.json update failed"; }

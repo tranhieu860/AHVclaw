@@ -23,9 +23,20 @@ channels.setdefault("canary", tag)
 tmp = path + ".tmp"
 json.dump(channels, open(tmp, "w", encoding="utf-8"), indent=2); open(tmp, "a").write("\n")
 os.chmod(tmp, 0o644)
+# promote.sh is also run by the rollout controller as root. Left root-owned,
+# these files break the release script's `chmod 644` sweep, which runs as the
+# unprivileged release user -- one EPERM aborts the whole release.
+def keep_owner(target):
+    try:
+        owner = os.stat(d)
+        os.chown(target, owner.st_uid, owner.st_gid)
+    except OSError:
+        pass
+keep_owner(tmp)
 os.replace(tmp, path)
 manifest_path = os.path.join(d, "manifest.json")
 shutil.copyfile(os.path.join(d, tag + ".json"), manifest_path)
 os.chmod(manifest_path, 0o644)
+keep_owner(manifest_path)
 print("stable →", tag, "| channels:", json.dumps(channels))
 PY
