@@ -110,6 +110,48 @@ log "Cài dependencies (mất 3-8 phút, tốn ~2GB disk)..."
 # non-zero exit ở đây; bước sau (wrapper, skin) sẽ fail rõ ràng nếu thật sự hỏng.
 PNPM_CONFIG_MINIMUM_RELEASE_AGE=0 pnpm install --prefer-offline || warn "pnpm install returned non-zero (thường do build scripts optional bị skip, an toàn bỏ qua)"
 
+# Node picks its old-space heap from total RAM, and on a small host the share it
+# picks is under what `pnpm run build` (tsc -b + tsdown across the monorepo)
+# needs: a 3.6 GB box aborted with "JavaScript heap out of memory" three nights
+# running while 7.7 GB and 128 GB boxes built fine — and it aborted *after*
+# tsc emitted the .d.ts files, so apps/cli/lib held types but no bin.js and the
+# CLI looked installed while being unrunnable. Raise the ceiling explicitly on
+# small hosts; they have swap to absorb the peak, and a heap that swaps beats a
+# build that dies with SIGABRT. Big hosts keep Node's own default, and an
+# operator-set NODE_OPTIONS always wins.
+AHV_BUILD_HEAP_FLOOR_MB="${AHV_BUILD_HEAP_FLOOR_MB:-6144}"
+AHV_BUILD_HEAP_MIN_MB="${AHV_BUILD_HEAP_MIN_MB:-2048}"
+AHV_MEMINFO="${AHV_MEMINFO:-/proc/meminfo}"
+
+total_ram_mb() {
+  if [ -r "$AHV_MEMINFO" ]; then
+    awk '/^MemTotal:/ { printf "%d", $2 / 1024; exit }' "$AHV_MEMINFO"
+  elif command -v sysctl >/dev/null 2>&1; then
+    sysctl -n hw.memsize 2>/dev/null | awk 'NF { printf "%d", $1 / 1048576 }'
+  fi
+}
+
+apply_build_heap_limit() {
+  case "${NODE_OPTIONS:-}" in
+    *--max-old-space-size*)
+      log "NODE_OPTIONS đã đặt sẵn heap — giữ nguyên: $NODE_OPTIONS"
+      return 0
+      ;;
+  esac
+  ram_mb="$(total_ram_mb 2>/dev/null || true)"
+  case "$ram_mb" in
+    ''|*[!0-9]*) return 0 ;;
+  esac
+  [ "$ram_mb" -gt 0 ] || return 0
+  [ "$ram_mb" -lt "$AHV_BUILD_HEAP_FLOOR_MB" ] || return 0
+  heap_mb=$(( ram_mb * 70 / 100 ))
+  [ "$heap_mb" -ge "$AHV_BUILD_HEAP_MIN_MB" ] || heap_mb="$AHV_BUILD_HEAP_MIN_MB"
+  export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--max-old-space-size=$heap_mb"
+  log "RAM ${ram_mb}MB (< ${AHV_BUILD_HEAP_FLOOR_MB}MB) → --max-old-space-size=${heap_mb} để build không hết heap"
+}
+
+apply_build_heap_limit
+
 log "Build workspace (tsc -b + tsdown, mất 5-10 phút)..."
 # pnpm 11 chạy runDepsStatusCheck trước mỗi `pnpm run` → gọi lại pnpm install
 # → exit 1 nếu build scripts optional bị skip → block build. Tắt check qua
