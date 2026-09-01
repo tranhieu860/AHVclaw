@@ -68,7 +68,7 @@
     "dshmarket": "^1.38.1",
     "superpowers-dsh": "^0.1.1",
     "@linxin666/dsh-web-ui-all": "^0.2.7",
-    "dsh-plugin-subscriptions": "^0.5.3",
+    "dsh-plugin-subscriptions": "^0.6.0",
     "@anweat/dsh-browser": "^0.1.10",
     "@deepseek-ai/dsh-storage": "workspace:^",
     "@deepseek-ai/dsh-storage-json": "workspace:^",
