@@ -1082,8 +1082,8 @@ importers:
         specifier: ^0.6.0
         version: 0.6.0(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-attachment@packages+attachment+attachment)(@deepseek-ai/dsh-home-paths@packages+util+home-paths)(@deepseek-ai/dsh-llm@packages+llm+llm)(@deepseek-ai/dsh-tools@packages+core+tools)(@deepseek-ai/schemastery@vendor+schemastery)
       dshmarket:
-        specifier: ^1.38.1
-        version: 1.38.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-settings@packages+settings+settings)(@deepseek-ai/schemastery@vendor+schemastery)
+        specifier: ^1.39.0
+        version: 1.40.0(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-settings@packages+settings+settings)(@deepseek-ai/schemastery@vendor+schemastery)
       superpowers-dsh:
         specifier: ^0.1.1
         version: 0.1.1
@@ -12909,11 +12909,11 @@ packages:
       '@deepseek-ai/dsh-tools': ^0.1.1-rc.2 || ^0.1.2-alpha.1
       '@deepseek-ai/schemastery': ^3.18.1
 
-  dshmarket@1.38.1:
-    resolution: {integrity: sha512-Z9VleLtCXwk5OlbSJKayWtbMaKACL8JUMyb/JHpErS4N3q//GJS+cgOhhxNkZYmXxB8/lv9IbhX1CBzlMhJeJg==}
+  dshmarket@1.40.0:
+    resolution: {integrity: sha512-VqfDCu6zB+MXkeQB865v2Tajt48rNNjDjEaHxWf5UK7mO2VYX9FHwVt8i/lSlNc89opcNjW+h70YsMHjbXkaFA==}
     peerDependencies:
       '@deepseek-ai/cordis': ^4.0.1
-      '@deepseek-ai/dsh-settings': ^0.1.0-rc.7 || ^0.1.1-rc.2
+      '@deepseek-ai/dsh-settings': ^0.1.0-rc.7 || ^0.1.1-rc.2 || ^0.1.2-alpha.2
       '@deepseek-ai/schemastery': ^3.18.1
     peerDependenciesMeta:
       '@deepseek-ai/dsh-settings':
@@ -18550,7 +18550,7 @@ snapshots:
       '@deepseek-ai/schemastery': link:vendor/schemastery
       undici: 7.29.0
 
-  dshmarket@1.38.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-settings@packages+settings+settings)(@deepseek-ai/schemastery@vendor+schemastery):
+  dshmarket@1.40.0(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-settings@packages+settings+settings)(@deepseek-ai/schemastery@vendor+schemastery):
     dependencies:
       '@deepseek-ai/cordis': link:vendor/cordis
       js-yaml: 4.3.1
