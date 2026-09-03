@@ -1082,7 +1082,7 @@ importers:
         specifier: ^0.6.0
         version: 0.6.0(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-attachment@packages+attachment+attachment)(@deepseek-ai/dsh-home-paths@packages+util+home-paths)(@deepseek-ai/dsh-llm@packages+llm+llm)(@deepseek-ai/dsh-tools@packages+core+tools)(@deepseek-ai/schemastery@vendor+schemastery)
       dshmarket:
-        specifier: ^1.39.0
+        specifier: ^1.40.0
         version: 1.40.0(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-settings@packages+settings+settings)(@deepseek-ai/schemastery@vendor+schemastery)
       superpowers-dsh:
         specifier: ^0.1.1
