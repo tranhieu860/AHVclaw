@@ -427,6 +427,56 @@ function readSubscriptionsAuth() {
   }
 }
 
+/**
+ * One provider's entry as {defaultKey, accounts}, whichever shape it is on disk.
+ *
+ * dsh-plugin-subscriptions 0.6 keeps several accounts per provider under
+ * `{default, accounts}` and still accepts the older bare session. Reading only
+ * the bare fields — as this file used to — meant that after the plugin wrote
+ * the new shape every panel reported "chua login provider nay", and an entry
+ * carrying both read as the stale one.
+ *
+ * @param entry - the provider's entry from the store.
+ * @returns the default account key and every account, possibly empty.
+ */
+function storeAccounts(entry) {
+  if (entry === null || typeof entry !== 'object') return { defaultKey: '', accounts: {} }
+  const accounts = entry.accounts !== null && typeof entry.accounts === 'object' && !Array.isArray(entry.accounts)
+    ? { ...entry.accounts }
+    : {}
+  let defaultKey = typeof entry.default === 'string' ? entry.default : ''
+  if (typeof entry.accessToken === 'string' && entry.accessToken !== '') {
+    const bare = { ...entry }
+    delete bare.accounts
+    delete bare.default
+    const key = accountKeyOf(bare)
+    if (key !== '' && !(key in accounts)) accounts[key] = bare
+    if (defaultKey === '') defaultKey = key
+  }
+  if (!(defaultKey in accounts)) defaultKey = Object.keys(accounts)[0] ?? ''
+  return { defaultKey, accounts }
+}
+
+/** The identity an account is filed under, matching the plugin's own keying. */
+function accountKeyOf(session) {
+  if (session === null || typeof session !== 'object') return ''
+  return String(session.accountId ?? session.emailAddress ?? session.account ?? '')
+}
+
+/** The session a provider is currently logged in as, or undefined. */
+function activeSession(entry) {
+  const { defaultKey, accounts } = storeAccounts(entry)
+  return defaultKey === '' ? undefined : accounts[defaultKey]
+}
+
+/** Put a refreshed session back where it came from, leaving other accounts alone. */
+function withSession(entry, session) {
+  const { defaultKey, accounts } = storeAccounts(entry)
+  const key = defaultKey !== '' ? defaultKey : accountKeyOf(session)
+  if (key === '') return entry
+  return { default: key, accounts: { ...accounts, [key]: session } }
+}
+
 function writeSubscriptionsAuth(obj) {
   const dir = dirname(SUBSCRIPTIONS_AUTH_FILE)
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 })
@@ -676,7 +726,7 @@ async function loginUsage() {
   const refreshed = {}
   await Promise.all(SUPPORTED_LOGIN_PROVIDERS.map(async (kind) => {
     const stored = auth[kind]
-    const entry = stored && typeof stored === 'object' ? stored : undefined
+    const entry = activeSession(stored && typeof stored === 'object' ? stored : undefined)
     const fresh = await refreshSessionIfStale(kind, entry)
     if (fresh.refreshed) refreshed[kind] = fresh.session
     providers[kind] = {
@@ -692,10 +742,12 @@ async function loginUsage() {
     const current = readSubscriptionsAuth()
     let changed = false
     for (const [kind, session] of Object.entries(refreshed)) {
-      const existing = current[kind]
+      const existing = activeSession(current[kind])
       const existingExpiry = existing && typeof existing.expiresAt === 'number' ? existing.expiresAt : 0
       if (existingExpiry >= session.expiresAt) continue
-      current[kind] = session
+      // Back into the account it came from: writing the bare session at the
+      // top of the entry is what shadowed a live login with a stale one.
+      current[kind] = withSession(current[kind], session)
       changed = true
     }
     if (changed) writeSubscriptionsAuth(current)
@@ -707,14 +759,19 @@ function loginStatus() {
   const auth = readSubscriptionsAuth()
   const providers = {}
   for (const p of SUPPORTED_LOGIN_PROVIDERS) {
-    const entry = auth[p]
+    const { defaultKey, accounts } = storeAccounts(auth[p])
+    const entry = defaultKey === '' ? undefined : accounts[defaultKey]
     if (entry && typeof entry === 'object') {
       providers[p] = {
         logged_in: true,
         // KHÔNG expose token/refreshToken/PKCE state — chỉ metadata safe
-        account: entry.account ?? null,
+        account: entry.emailAddress ?? entry.account ?? null,
         expires_at: entry.expiresAt ?? null,
         scopes: Array.isArray(entry.scopes) ? entry.scopes : null,
+        // Plugin 0.6+ giữ nhiều tài khoản mỗi provider; CMS cần biết đang
+        // dùng cái nào và còn cái nào để chọn.
+        account_key: defaultKey,
+        account_count: Object.keys(accounts).length,
       }
     } else {
       providers[p] = { logged_in: false, account: null, expires_at: null, scopes: null }
@@ -752,6 +809,90 @@ function loginUrl(provider) {
       ? 'Default local URL. Set AHV_WEB_PUBLIC_URL env nếu web UI expose ra domain public.'
       : `Public URL từ env AHV_WEB_PUBLIC_URL=${SUBSCRIPTIONS_LOGIN_URL_BASE}.`,
   }, 0)
+}
+
+/**
+ * List one provider's stored accounts, default first, without any token.
+ *
+ * The CMS shows these so an operator can see which ChatGPT account a machine
+ * is actually running on when several are logged in.
+ *
+ * @param provider - provider id.
+ */
+function loginAccounts(provider) {
+  if (!provider) errJson('internal_error', 'accounts: cần truyền provider', true, 0, 2)
+  if (!SUPPORTED_LOGIN_PROVIDERS.includes(provider)) {
+    errJson('internal_error', `provider "${provider}" không hỗ trợ`, true, 0, 2)
+  }
+  const { defaultKey, accounts } = storeAccounts(readSubscriptionsAuth()[provider])
+  const rows = Object.entries(accounts).map(([key, session]) => ({
+    key,
+    is_default: key === defaultKey,
+    account: session.emailAddress ?? session.account ?? null,
+    plan: session.planType ?? session.subscriptionType ?? null,
+    expires_at: typeof session.expiresAt === 'number' ? session.expiresAt : null,
+  }))
+  rows.sort((a, b) => Number(b.is_default) - Number(a.is_default))
+  printJson({ provider, default: defaultKey === '' ? null : defaultKey, accounts: rows }, 0)
+}
+
+/**
+ * Point a provider at one of its stored accounts.
+ *
+ * The login sync then pushes that account down to the CLI, so the bot and the
+ * usage panel follow the same choice.
+ *
+ * @param provider - provider id.
+ * @param key - the account key from `login accounts`.
+ */
+function loginUse(provider, key) {
+  if (!provider || !key) errJson('internal_error', 'use: cần truyền provider và account key', true, 0, 2)
+  if (!SUPPORTED_LOGIN_PROVIDERS.includes(provider)) {
+    errJson('internal_error', `provider "${provider}" không hỗ trợ`, true, 0, 2)
+  }
+  const auth = readSubscriptionsAuth()
+  const { defaultKey, accounts } = storeAccounts(auth[provider])
+  if (!(key in accounts)) {
+    errJson('internal_error', `account "${key}" chưa có trong kho của ${provider}`, true, 0, 2)
+  }
+  if (defaultKey !== key) {
+    auth[provider] = { default: key, accounts }
+    try {
+      writeSubscriptionsAuth(auth)
+    } catch (e) {
+      errJson('permission_denied', `không ghi được ${SUBSCRIPTIONS_AUTH_FILE}: ${e.message}`, true, 0, 1)
+    }
+  }
+  printJson({ provider, default: key, changed: defaultKey !== key }, 0)
+}
+
+/**
+ * Forget one stored account, keeping the provider's other logins.
+ *
+ * @param provider - provider id.
+ * @param key - the account key from `login accounts`.
+ */
+function loginForget(provider, key) {
+  if (!provider || !key) errJson('internal_error', 'forget: cần truyền provider và account key', true, 0, 2)
+  if (!SUPPORTED_LOGIN_PROVIDERS.includes(provider)) {
+    errJson('internal_error', `provider "${provider}" không hỗ trợ`, true, 0, 2)
+  }
+  const auth = readSubscriptionsAuth()
+  const { defaultKey, accounts } = storeAccounts(auth[provider])
+  const existed = key in accounts
+  if (existed) {
+    delete accounts[key]
+    const nextDefault = defaultKey === key ? (Object.keys(accounts)[0] ?? '') : defaultKey
+    if (Object.keys(accounts).length === 0) delete auth[provider]
+    else auth[provider] = { default: nextDefault, accounts }
+    try {
+      writeSubscriptionsAuth(auth)
+    } catch (e) {
+      errJson('permission_denied', `không ghi được ${SUBSCRIPTIONS_AUTH_FILE}: ${e.message}`, true, 0, 1)
+    }
+  }
+  const { defaultKey: after } = storeAccounts(auth[provider])
+  printJson({ provider, forgot: key, was_present: existed, default: after === '' ? null : after }, 0)
 }
 
 function loginLogout(provider) {
@@ -1398,6 +1539,9 @@ function usage() {
   ahv doctor --json
   ahv login status --json                      (subscription plugin: Grok/Codex/Claude)
   ahv login url PROVIDER --json                (return browser OAuth URL)
+  ahv login accounts PROVIDER --json           (liet ke cac tai khoan da luu)
+  ahv login use PROVIDER ACCOUNT_KEY --json    (chon tai khoan mac dinh)
+  ahv login forget PROVIDER ACCOUNT_KEY --json (xoa mot tai khoan, giu cac cai khac)
   ahv login logout PROVIDER --json             (remove stored token)
   ahv login import --json                      (import codex/grok CLI login vao AHV)
   ahv login usage --json                       (han muc con lai that tu grok/codex/claude)
@@ -1447,6 +1591,9 @@ if (subcommand === 'version') {
   const action = rest[0]
   if (action === 'status') loginStatus()
   else if (action === 'url') loginUrl(rest[1])
+  else if (action === 'accounts') loginAccounts(rest[1])
+  else if (action === 'use') loginUse(rest[1], rest[2])
+  else if (action === 'forget') loginForget(rest[1], rest[2])
   else if (action === 'logout') loginLogout(rest[1])
   else if (action === 'import') loginImport()
   else if (action === 'usage') void loginUsage()
