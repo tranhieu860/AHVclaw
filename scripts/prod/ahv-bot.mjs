@@ -469,6 +469,26 @@ function activeSession(entry) {
   return defaultKey === '' ? undefined : accounts[defaultKey]
 }
 
+/**
+ * Put a refreshed session back under one named account, leaving the rest alone.
+ *
+ * `withSession` writes to whichever account is default, which is right when the
+ * default is the only one being refreshed. Once every account is refreshed —
+ * so the panel can show what each has left — that same call would file each new
+ * token under the default and overwrite the others with a session that is not
+ * theirs. The key has to be carried through.
+ *
+ * @param entry - the provider's entry from the store.
+ * @param key - the account the session belongs to.
+ * @param session - the refreshed session.
+ * @returns the entry with that one account replaced.
+ */
+export function withAccountSession(entry, key, session) {
+  const { defaultKey, accounts } = storeAccounts(entry)
+  if (key === '') return entry
+  return { default: defaultKey !== '' ? defaultKey : key, accounts: { ...accounts, [key]: session } }
+}
+
 /** Put a refreshed session back where it came from, leaving other accounts alone. */
 function withSession(entry, session) {
   const { defaultKey, accounts } = storeAccounts(entry)
@@ -719,35 +739,77 @@ export async function fetchProviderUsage(kind, session, fetchFn = fetch) {
   }
 }
 
-/** Report the quota left on every logged-in subscription. */
-async function loginUsage() {
-  const auth = readSubscriptionsAuth()
+/**
+ * The quota left on every account of every provider, and any token refreshed.
+ *
+ * Separated from the command so it can be driven with a stub fetch: the shape
+ * this returns is what the console draws, and it has to be right for a machine
+ * holding two accounts where one is out of quota — the case that cannot be
+ * reproduced by logging in twice on the build machine.
+ *
+ * @param auth - the subscriptions store, as read from disk.
+ * @param fetchFn - injected for tests.
+ * @returns providers keyed by id, and the sessions whose tokens were renewed.
+ */
+export async function collectSubscriptionUsage(auth, fetchFn = fetch) {
   const providers = {}
-  const refreshed = {}
+  const refreshed = []
   await Promise.all(SUPPORTED_LOGIN_PROVIDERS.map(async (kind) => {
-    const stored = auth[kind]
-    const entry = activeSession(stored && typeof stored === 'object' ? stored : undefined)
-    const fresh = await refreshSessionIfStale(kind, entry)
-    if (fresh.refreshed) refreshed[kind] = fresh.session
+    const stored = auth?.[kind]
+    const { defaultKey, accounts } = storeAccounts(stored && typeof stored === 'object' ? stored : undefined)
+    const rows = await Promise.all(Object.entries(accounts).map(async ([key, session]) => {
+      const fresh = await refreshSessionIfStale(kind, session, fetchFn)
+      if (fresh.refreshed) refreshed.push({ kind, key, session: fresh.session })
+      return {
+        key,
+        account: String(session?.emailAddress ?? session?.account ?? key),
+        is_default: key === defaultKey,
+        logged_in: Boolean(session && session.accessToken),
+        ...(await fetchProviderUsage(kind, fresh.session, fetchFn)),
+        ...(fresh.refreshed ? { refreshed: true } : {}),
+        ...(fresh.error ? { refresh_error: fresh.error } : {}),
+      }
+    }))
+    // The default's figures stay at the top level, unchanged, so a console or
+    // an agent that predates this reads exactly what it read before.
+    const primary = rows.find(row => row.is_default)
     providers[kind] = {
-      logged_in: Boolean(entry && entry.accessToken),
-      ...(await fetchProviderUsage(kind, fresh.session)),
-      ...(fresh.refreshed ? { refreshed: true } : {}),
-      ...(fresh.error ? { refresh_error: fresh.error } : {}),
+      logged_in: Boolean(primary && primary.logged_in),
+      ...(primary
+        ? { supported: primary.supported, windows: primary.windows, ...(primary.error ? { error: primary.error } : {}) }
+        : await fetchProviderUsage(kind, undefined, fetchFn)),
+      accounts: rows,
     }
   }))
-  if (Object.keys(refreshed).length > 0) {
+  return { providers, refreshed }
+}
+
+/**
+ * Report the quota left on every account, not only the one in use.
+ *
+ * A machine can hold several logins per provider, and only the default was ever
+ * asked — so the console showed one number and no way to see what the others
+ * had left. Choosing which account to run as meant switching to it first and
+ * looking afterwards, which is exactly the wrong order when the one in use has
+ * just run out.
+ *
+ * Every account is refreshed on the way past, so the accounts kept in reserve
+ * stay usable instead of quietly expiring while they wait.
+ */
+async function loginUsage() {
+  const { providers, refreshed } = await collectSubscriptionUsage(readSubscriptionsAuth())
+  if (refreshed.length > 0) {
     // Re-read before writing: another process may have refreshed meanwhile,
     // and a token issued later must never be replaced by an older one.
     const current = readSubscriptionsAuth()
     let changed = false
-    for (const [kind, session] of Object.entries(refreshed)) {
-      const existing = activeSession(current[kind])
+    for (const { kind, key, session } of refreshed) {
+      const existing = storeAccounts(current[kind]).accounts[key]
       const existingExpiry = existing && typeof existing.expiresAt === 'number' ? existing.expiresAt : 0
       if (existingExpiry >= session.expiresAt) continue
       // Back into the account it came from: writing the bare session at the
       // top of the entry is what shadowed a live login with a stale one.
-      current[kind] = withSession(current[kind], session)
+      current[kind] = withAccountSession(current[kind], key, session)
       changed = true
     }
     if (changed) writeSubscriptionsAuth(current)
