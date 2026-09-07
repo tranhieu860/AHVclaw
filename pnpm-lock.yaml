@@ -1079,8 +1079,8 @@ importers:
         specifier: ^15.0.0
         version: 15.0.0
       dsh-plugin-subscriptions:
-        specifier: ^0.7.1
-        version: 0.7.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-attachment@packages+attachment+attachment)(@deepseek-ai/dsh-home-paths@packages+util+home-paths)(@deepseek-ai/dsh-llm@packages+llm+llm)(@deepseek-ai/dsh-tools@packages+core+tools)(@deepseek-ai/schemastery@vendor+schemastery)
+        specifier: ^0.8.0
+        version: 0.8.0(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-attachment@packages+attachment+attachment)(@deepseek-ai/dsh-home-paths@packages+util+home-paths)(@deepseek-ai/dsh-llm@packages+llm+llm)(@deepseek-ai/dsh-tools@packages+core+tools)(@deepseek-ai/schemastery@vendor+schemastery)
       dshmarket:
         specifier: ^1.44.0
         version: 1.44.0(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-settings@packages+settings+settings)(@deepseek-ai/schemastery@vendor+schemastery)
@@ -12899,8 +12899,8 @@ packages:
       cordis:
         optional: true
 
-  dsh-plugin-subscriptions@0.7.1:
-    resolution: {integrity: sha512-DmvkhfaZvO9mNwmaXeSRMHtL+cwNNTB/dzaKipLpBIHRcFsBd83WUOEpKFXaqtHSrz4T2x/XWDaZZEVSLRZliw==}
+  dsh-plugin-subscriptions@0.8.0:
+    resolution: {integrity: sha512-gG8xbDQmUgizKmcNkPzdNsKG3JPmnAVrTsFKQqa6/bvpvYucCHKpzVHAf+nKwOFeUvaxoiUB8tvlP4uVamoQ3Q==}
     peerDependencies:
       '@deepseek-ai/cordis': ^4.0.1
       '@deepseek-ai/dsh-attachment': ^0.1.1-rc.2 || ^0.1.2-alpha.1
@@ -18540,7 +18540,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  dsh-plugin-subscriptions@0.7.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-attachment@packages+attachment+attachment)(@deepseek-ai/dsh-home-paths@packages+util+home-paths)(@deepseek-ai/dsh-llm@packages+llm+llm)(@deepseek-ai/dsh-tools@packages+core+tools)(@deepseek-ai/schemastery@vendor+schemastery):
+  dsh-plugin-subscriptions@0.8.0(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-attachment@packages+attachment+attachment)(@deepseek-ai/dsh-home-paths@packages+util+home-paths)(@deepseek-ai/dsh-llm@packages+llm+llm)(@deepseek-ai/dsh-tools@packages+core+tools)(@deepseek-ai/schemastery@vendor+schemastery):
     dependencies:
       '@deepseek-ai/cordis': link:vendor/cordis
       '@deepseek-ai/dsh-attachment': link:packages/attachment/attachment
