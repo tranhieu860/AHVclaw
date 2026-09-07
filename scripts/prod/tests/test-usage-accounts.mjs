@@ -137,5 +137,49 @@ await acheck('writing to an unnamed account changes nothing', async () => {
   assert.deepEqual(withAccountSession(entry, '', { accessToken: 'y' }), entry)
 })
 
+// ── a Codex account has a name, not a UUID ───────────────────────────────
+//
+// Sessions mirrored from the Codex CLI carry only the raw token set, so a
+// machine with two Codex logins listed two UUIDs — the same "which one is
+// this?" problem that naming the account was meant to end. The address is
+// already inside the id token.
+
+function idTokenFor(email) {
+  const claims = Buffer.from(JSON.stringify({ email })).toString('base64url')
+  return `head.${claims}.sig`
+}
+
+await acheck('a codex account is named by the address in its id token', async () => {
+  const store = {
+    codex: {
+      default: 'acct-uuid-1',
+      accounts: {
+        'acct-uuid-1': { accessToken: 'tok-1', refreshToken: 'r', expiresAt: LIVE, idToken: idTokenFor('one@x.com') },
+        'acct-uuid-2': { accessToken: 'tok-2', refreshToken: 'r', expiresAt: LIVE, idToken: idTokenFor('two@x.com') },
+      },
+    },
+  }
+  const { providers } = await collectSubscriptionUsage(store, async () => ({
+    ok: true, status: 200, json: async () => ({ rate_limit: { primary_window: { used_percent: 20 } } }),
+  }))
+  assert.deepEqual(providers.codex.accounts.map(r => r.account).sort(), ['one@x.com', 'two@x.com'])
+})
+
+await acheck('an account with no readable name falls back to its key, not to nothing', async () => {
+  const store = { codex: { default: 'k1', accounts: { k1: { accessToken: 't', expiresAt: LIVE } } } }
+  const { providers } = await collectSubscriptionUsage(store, async () => ({
+    ok: true, status: 200, json: async () => ({ rate_limit: { primary_window: { used_percent: 1 } } }),
+  }))
+  assert.equal(providers.codex.accounts[0].account, 'k1')
+})
+
+await acheck('a malformed id token is nameless, not a crash', async () => {
+  const store = { codex: { default: 'k1', accounts: { k1: { accessToken: 't', expiresAt: LIVE, idToken: 'not.a.jwt' } } } }
+  const { providers } = await collectSubscriptionUsage(store, async () => ({
+    ok: true, status: 200, json: async () => ({ rate_limit: { primary_window: { used_percent: 1 } } }),
+  }))
+  assert.equal(providers.codex.accounts[0].account, 'k1')
+})
+
 console.log(`\n  ${passed} passed, ${failed} failed`)
 process.exit(failed === 0 ? 0 : 1)

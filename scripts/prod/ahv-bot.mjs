@@ -457,6 +457,37 @@ function storeAccounts(entry) {
   return { defaultKey, accounts }
 }
 
+/**
+ * The address to show beside an account's figures.
+ *
+ * Codex sessions mirrored from the CLI carry only the raw token set — no
+ * address — so a machine with two Codex logins listed two UUIDs, which is the
+ * same "which one is this?" problem that naming the account was meant to end.
+ * The id token already carries the address, so read it there rather than
+ * asking the network.
+ *
+ * @param session - a stored session.
+ * @param key - the account key, used when nothing better is known.
+ * @returns an address, or the key.
+ */
+function accountLabel(session, key) {
+  if (session !== null && typeof session === 'object') {
+    const named = session.emailAddress ?? session.account
+    if (typeof named === 'string' && named !== '') return named
+    const token = session.idToken ?? session.id_token
+    if (typeof token === 'string') {
+      const parts = token.split('.')
+      if (parts.length >= 2) {
+        try {
+          const claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'))
+          if (typeof claims.email === 'string' && claims.email !== '') return claims.email
+        } catch { /* a malformed token is simply nameless */ }
+      }
+    }
+  }
+  return String(key ?? '')
+}
+
 /** The identity an account is filed under, matching the plugin's own keying. */
 function accountKeyOf(session) {
   if (session === null || typeof session !== 'object') return ''
@@ -762,7 +793,7 @@ export async function collectSubscriptionUsage(auth, fetchFn = fetch) {
       if (fresh.refreshed) refreshed.push({ kind, key, session: fresh.session })
       return {
         key,
-        account: String(session?.emailAddress ?? session?.account ?? key),
+        account: accountLabel(session, key),
         is_default: key === defaultKey,
         logged_in: Boolean(session && session.accessToken),
         ...(await fetchProviderUsage(kind, fresh.session, fetchFn)),
