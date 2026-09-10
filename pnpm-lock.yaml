@@ -1001,7 +1001,7 @@ importers:
   packages/bundle/ahv:
     dependencies:
       '@anweat/dsh-browser':
-        specifier: ^0.1.11
+        specifier: ^0.1.12
         version: 0.1.12(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-client-locale@packages+client+locale)(@deepseek-ai/dsh-client-runtime@packages+client+runtime)(@deepseek-ai/dsh-client-ui-settings@packages+client+ui-settings)(@deepseek-ai/dsh-client-ui-slots@packages+client+ui-slots)(@deepseek-ai/dsh-settings@packages+settings+settings)(@deepseek-ai/dsh-tools@packages+core+tools)(@deepseek-ai/schemastery@vendor+schemastery)
       '@deepseek-ai/cordis':
         specifier: workspace:^
