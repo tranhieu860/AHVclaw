@@ -75,6 +75,37 @@ check('grok reports a billing period percentage', () => {
   assert.match(out.windows[0].resets_at, /2026-08-27/)
 })
 
+check('grok period without a percentage is a window whose percentage is unknown', () => {
+  // The shape #20's account answers with on 15/09: the weekly period is named,
+  // creditUsagePercent is absent. It must neither vanish nor read as 0%.
+  const out = normaliseUsagePayload('grok', {
+    config: {
+      billingPeriodEnd: '2026-09-17T18:37:19.863194+00:00',
+      billingPeriodStart: '2026-08-17T18:37:19.863194+00:00',
+      currentPeriod: {
+        type: 'USAGE_PERIOD_TYPE_WEEKLY',
+        start: '2026-09-10T18:37:19.863194+00:00',
+        end: '2026-09-17T18:37:19.863194+00:00',
+      },
+      isUnifiedBillingUser: true,
+      onDemandCap: { val: 0 },
+      onDemandUsed: { val: 0 },
+      prepaidBalance: { val: 0 },
+    },
+  })
+  assert.equal(out.supported, true)
+  assert.equal(out.windows.length, 1)
+  assert.equal(out.windows[0].kind, 'weekly')
+  assert.equal(out.windows[0].used_percent, null)
+  assert.equal(out.windows[0].resets_at, '2026-09-17T18:37:19.863194+00:00')
+})
+
+check('grok with neither a percentage nor a period stays unsupported', () => {
+  const out = normaliseUsagePayload('grok', { config: { onDemandUsed: { val: 0 } } })
+  assert.equal(out.supported, false)
+  assert.deepEqual(out.windows, [])
+})
+
 check('grok credits balance also works', () => {
   const out = normaliseUsagePayload('grok', { credits: { remaining: 250, total: 1000 } })
   assert.equal(out.windows[0].used_percent, 75)

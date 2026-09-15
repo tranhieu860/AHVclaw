@@ -717,13 +717,16 @@ export function normaliseUsagePayload(kind, payload) {
     // The live account reports a percentage over a billing period. A credits
     // balance is the older shape and is still accepted.
     const period = body.config?.currentPeriod ?? {}
+    const periodKind = String(period.type ?? '').includes('WEEKLY') ? 'weekly' : 'session'
     const pct = clampPercent(body.config?.creditUsagePercent)
     if (pct !== null) {
-      windows.push({
-        kind: String(period.type ?? '').includes('WEEKLY') ? 'weekly' : 'session',
-        used_percent: pct,
-        resets_at: isoOrNull(period.end),
-      })
+      windows.push({ kind: periodKind, used_percent: pct, resets_at: isoOrNull(period.end) })
+    } else if (isoOrNull(period.end) !== null) {
+      // Some accounts get the weekly period with no creditUsagePercent at all
+      // (#20, 15/09). Dropping the window left the console blank with no error,
+      // as if Grok were not logged in; 0% would claim a figure Grok never gave.
+      // The period is real, the percentage is unknown, and both are said so.
+      windows.push({ kind: periodKind, used_percent: null, resets_at: isoOrNull(period.end) })
     }
     const total = Number(body.credits?.total)
     const remaining = Number(body.credits?.remaining)
