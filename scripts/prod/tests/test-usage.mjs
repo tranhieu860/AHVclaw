@@ -60,6 +60,39 @@ check('codex rate-limit windows are read', () => {
   assert.equal(out.windows[1].kind, 'weekly')
 })
 
+check('codex weekly lane in primary_window is weekly, with its reset (live #20 shape)', () => {
+  // wham/usage for a pro account, 16/09: one 7-day lane, reported in the
+  // primary slot, with reset_at in epoch seconds.
+  const out = normaliseUsagePayload('codex', {
+    plan_type: 'pro',
+    rate_limit: {
+      allowed: true,
+      primary_window: { used_percent: 90, limit_window_seconds: 604800, reset_after_seconds: 267178, reset_at: 1789815705 },
+      secondary_window: null,
+    },
+  })
+  assert.deepEqual(out.windows, [
+    { kind: 'weekly', used_percent: 90, resets_at: new Date(1789815705 * 1000).toISOString() },
+  ])
+})
+
+check('codex windows are classified by length, not slot', () => {
+  const out = normaliseUsagePayload('codex', {
+    rate_limit: {
+      primary_window: { used_percent: 12, limit_window_seconds: 18000, reset_at: 1789566527 },
+      secondary_window: { used_percent: 40, limit_window_seconds: 604800, reset_after_seconds: 3600 },
+    },
+  })
+  assert.deepEqual(out.windows.map(w => w.kind), ['session', 'weekly'])
+  const inAnHour = Date.parse(out.windows[1].resets_at) - Date.now()
+  assert.ok(inAnHour > 3500_000 && inAnHour <= 3600_000, String(inAnHour))
+  const odd = normaliseUsagePayload('codex', {
+    rate_limit: { primary_window: { used_percent: 5, limit_window_seconds: 86400 } },
+  })
+  assert.equal(odd.windows[0].kind, 'other')
+  assert.equal(odd.windows[0].resets_at, null)
+})
+
 check('grok reports a billing period percentage', () => {
   // The live payload carries config.creditUsagePercent over a weekly period,
   // not a credits balance.

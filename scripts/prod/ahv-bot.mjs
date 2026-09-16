@@ -664,6 +664,30 @@ function isoOrNull(value) {
   return null
 }
 
+const CODEX_SESSION_SECONDS = 5 * 60 * 60
+const CODEX_WEEKLY_SECONDS = 7 * 24 * 60 * 60
+
+/** Kind of a wham/usage window from its length (±5%), as the plugin does. */
+function codexWindowKind(seconds, fallback) {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) return fallback
+  const near = expected => seconds >= expected * 0.95 && seconds <= expected * 1.05
+  if (near(CODEX_SESSION_SECONDS)) return 'session'
+  if (near(CODEX_WEEKLY_SECONDS)) return 'weekly'
+  return 'other'
+}
+
+/** Reset time of a wham/usage window: absolute `reset_at` first, then the countdown. */
+function codexResetsAt(entry) {
+  if (typeof entry.reset_at === 'number' && entry.reset_at > 0) return isoOrNull(entry.reset_at)
+  for (const field of ['reset_after_seconds', 'resets_in_seconds']) {
+    const seconds = entry[field]
+    if (typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0) {
+      return new Date(Date.now() + seconds * 1000).toISOString()
+    }
+  }
+  return isoOrNull(entry.resets_at)
+}
+
 /**
  * Turn one provider's payload into the same window list for all three.
  *
@@ -704,14 +728,18 @@ export function normaliseUsagePayload(kind, payload) {
       }
     }
   } else if (kind === 'codex') {
-    for (const [field, windowKind] of [['primary_window', 'session'], ['secondary_window', 'weekly']]) {
+    // wham/usage puts a pro account's only (weekly) lane in primary_window
+    // (#20, 16/09), so the slot said "5-hour session" and the reset was lost.
+    // The window's own length decides its kind; slot order is only a fallback.
+    for (const [field, fallbackKind] of [['primary_window', 'session'], ['secondary_window', 'weekly']]) {
       const entry = body.rate_limit?.[field]
       const pct = clampPercent(entry?.used_percent)
       if (pct === null) continue
-      const resets = typeof entry?.resets_in_seconds === 'number'
-        ? new Date(Date.now() + entry.resets_in_seconds * 1000).toISOString()
-        : isoOrNull(entry?.resets_at)
-      windows.push({ kind: windowKind, used_percent: pct, resets_at: resets })
+      windows.push({
+        kind: codexWindowKind(entry.limit_window_seconds, fallbackKind),
+        used_percent: pct,
+        resets_at: codexResetsAt(entry),
+      })
     }
   } else if (kind === 'grok') {
     // The live account reports a percentage over a billing period. A credits
