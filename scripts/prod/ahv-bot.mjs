@@ -18,7 +18,7 @@
 import { spawn } from 'node:child_process'
 import { readFileSync, existsSync, statSync, readdirSync, writeFileSync, chmodSync, mkdirSync, realpathSync } from 'node:fs'
 import { resolve as resolvePath, dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { zstdDecompressSync } from 'node:zlib'
 import { homedir } from 'node:os'
 
@@ -416,7 +416,7 @@ const SUBSCRIPTIONS_AUTH_FILE = join(DSH_HOME, 'plugins/subscriptions/auth.json'
 // win, hoặc auto-detect systemd env file khi wrapper source ~/.ahv/env.
 const SUBSCRIPTIONS_LOGIN_URL_BASE = process.env.AHV_WEB_PUBLIC_URL
   ?? 'http://127.0.0.1:3080'
-const SUPPORTED_LOGIN_PROVIDERS = ['grok', 'codex', 'claude']
+const SUPPORTED_LOGIN_PROVIDERS = ['grok', 'codex', 'claude', 'antigravity']
 
 function readSubscriptionsAuth() {
   if (!existsSync(SUBSCRIPTIONS_AUTH_FILE)) return {}
@@ -562,6 +562,19 @@ export const USAGE_ENDPOINTS = {
       accept: 'application/json',
     }),
   },
+  // Antigravity answers a POST, not a GET: the same v1internal method agy's own
+  // /usage calls, which reports each model family's weekly and 5-hour buckets.
+  antigravity: {
+    url: 'https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary',
+    method: 'POST',
+    body: (s) => JSON.stringify(s.projectId ? { project: s.projectId } : {}),
+    headers: (s) => ({
+      authorization: `Bearer ${s.accessToken}`,
+      'content-type': 'application/json',
+      'user-agent': 'antigravity/1.104.0 dsh-plugin-subscriptions',
+      accept: 'application/json',
+    }),
+  },
   grok: {
     url: 'https://cli-chat-proxy.grok.com/v1/billing?format=credits',
     headers: (s) => ({
@@ -586,6 +599,24 @@ export const REFRESH_ENDPOINTS = {
     url: 'https://claude.ai/v1/oauth/token',
     clientId: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
   },
+  // Google's token endpoint wants a form body and the client secret. A session
+  // issued to the Antigravity desktop client can only be refreshed with that
+  // client, so the pair is the plugin's own (or the same env override it takes)
+  // rather than a copy kept here.
+  antigravity: {
+    url: 'https://oauth2.googleapis.com/token',
+    form: true,
+    client: antigravityOAuthClient,
+  },
+}
+
+/** The OAuth client the subscriptions plugin signs Antigravity in with. */
+export async function antigravityOAuthClient() {
+  const envId = process.env.ANTIGRAVITY_CLIENT_ID?.trim()
+  if (envId) return { clientId: envId, clientSecret: process.env.ANTIGRAVITY_CLIENT_SECRET?.trim() ?? '' }
+  const file = join(FORK, 'packages/bundle/ahv/node_modules/dsh-plugin-subscriptions/lib/providers/antigravity-oauth-client.js')
+  const mod = await import(pathToFileURL(realpathSync(file)).href)
+  return { clientId: mod.ANTIGRAVITY_DEFAULT_CLIENT_ID, clientSecret: mod.ANTIGRAVITY_DEFAULT_CLIENT_SECRET }
 }
 
 /** Refresh this long before expiry, so a token never dies mid-request. */
@@ -615,16 +646,28 @@ export async function refreshSessionIfStale(kind, session, fetchFn = fetch, now 
   if (expiresAt > now + REFRESH_AHEAD_MS) return { session, refreshed: false }
   const scope = Array.isArray(session.scopes) ? session.scopes.join(' ') : session.scopes
   try {
-    const response = await fetchFn(endpoint.url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        grant_type: 'refresh_token',
-        refresh_token: session.refreshToken,
-        client_id: endpoint.clientId,
-        ...(typeof scope === 'string' && scope !== '' ? { scope } : {}),
-      }),
-    })
+    const client = endpoint.client ? await endpoint.client() : endpoint
+    const response = await fetchFn(endpoint.url, endpoint.form
+      ? {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            grant_type: 'refresh_token',
+            refresh_token: session.refreshToken,
+            client_id: client.clientId,
+            client_secret: client.clientSecret,
+          }).toString(),
+        }
+      : {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            grant_type: 'refresh_token',
+            refresh_token: session.refreshToken,
+            client_id: endpoint.clientId,
+            ...(typeof scope === 'string' && scope !== '' ? { scope } : {}),
+          }),
+        })
     if (!response.ok) {
       const detail = typeof response.text === 'function' ? String(await response.text()).slice(0, 120) : ''
       return { session, refreshed: false, error: `refresh HTTP ${response.status}${detail ? `: ${detail}` : ''}` }
@@ -688,6 +731,14 @@ function codexResetsAt(entry) {
   return isoOrNull(entry.resets_at)
 }
 
+/** A short family label for an Antigravity quota group. */
+function antigravityGroupScope(name) {
+  const text = typeof name === 'string' ? name.trim() : ''
+  if (/^gemini/i.test(text)) return 'Gemini'
+  if (/claude/i.test(text)) return 'Claude + GPT'
+  return text.replace(/\s+models?$/i, '')
+}
+
 /**
  * Turn one provider's payload into the same window list for all three.
  *
@@ -741,6 +792,23 @@ export function normaliseUsagePayload(kind, payload) {
         resets_at: codexResetsAt(entry),
       })
     }
+  } else if (kind === 'antigravity') {
+    // Models share quota by family (Gemini; Claude and GPT), each with a weekly
+    // and a 5-hour bucket. The family name is the scope, so the console can tell
+    // a spent Claude lane from a Gemini lane that still has room.
+    for (const group of Array.isArray(body.groups) ? body.groups : []) {
+      const scope = antigravityGroupScope(group?.displayName)
+      for (const bucket of Array.isArray(group?.buckets) ? group.buckets : []) {
+        const remaining = bucket?.remainingFraction
+        if (typeof remaining !== 'number' || !Number.isFinite(remaining)) continue
+        windows.push({
+          kind: bucket.window === 'weekly' ? 'weekly' : bucket.window === '5h' ? 'session' : 'other',
+          ...(scope ? { scope } : {}),
+          used_percent: clampPercent((1 - remaining) * 100),
+          resets_at: isoOrNull(bucket.resetTime),
+        })
+      }
+    }
   } else if (kind === 'grok') {
     // The live account reports a percentage over a billing period. A credits
     // balance is the older shape and is still accepted.
@@ -790,7 +858,11 @@ export async function fetchProviderUsage(kind, session, fetchFn = fetch) {
     return { supported: false, windows: [], error: 'chua login provider nay' }
   }
   try {
-    const response = await fetchFn(endpoint.url, { headers: endpoint.headers(session) })
+    const response = await fetchFn(endpoint.url, {
+      ...(endpoint.method ? { method: endpoint.method } : {}),
+      headers: endpoint.headers(session),
+      ...(endpoint.body ? { body: endpoint.body(session) } : {}),
+    })
     if (!response.ok) {
       const detail = typeof response.text === 'function' ? String(await response.text()).slice(0, 120) : ''
       return { supported: false, windows: [], error: `HTTP ${response.status}${detail ? `: ${detail}` : ''}` }
@@ -908,7 +980,7 @@ function loginStatus() {
 }
 
 function loginUrl(provider) {
-  if (!provider) errJson('internal_error', 'login url: cần truyền provider (grok|codex|claude)', true, 0, 2)
+  if (!provider) errJson('internal_error', 'login url: cần truyền provider (grok|codex|claude|antigravity)', true, 0, 2)
   if (!SUPPORTED_LOGIN_PROVIDERS.includes(provider)) {
     errJson('internal_error', `provider "${provider}" không hỗ trợ. Chỉ: ${SUPPORTED_LOGIN_PROVIDERS.join(', ')}`, true, 0, 2)
   }
@@ -953,7 +1025,7 @@ function loginAccounts(provider) {
     key,
     is_default: key === defaultKey,
     account: session.emailAddress ?? session.account ?? null,
-    plan: session.planType ?? session.subscriptionType ?? null,
+    plan: session.planType ?? session.subscriptionType ?? session.plan ?? null,
     expires_at: typeof session.expiresAt === 'number' ? session.expiresAt : null,
   }))
   rows.sort((a, b) => Number(b.is_default) - Number(a.is_default))

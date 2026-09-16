@@ -10,6 +10,9 @@
 // here. It is driven with a stub fetch instead.
 import assert from 'node:assert/strict'
 
+// The Antigravity OAuth client is read from the plugin inside the checkout.
+process.env.AHV_FORK ??= '/home/claudeproxy/Claude/AHVclaw-fork'
+
 const { collectSubscriptionUsage, withAccountSession } =
   await import('/home/claudeproxy/Claude/AHVclaw-fork/scripts/prod/ahv-bot.mjs')
 
@@ -179,6 +182,29 @@ await acheck('a malformed id token is nameless, not a crash', async () => {
     ok: true, status: 200, json: async () => ({ rate_limit: { primary_window: { used_percent: 1 } } }),
   }))
   assert.equal(providers.codex.accounts[0].account, 'k1')
+})
+
+await acheck('two antigravity accounts: each refreshed and read on its own', async () => {
+  const store = { antigravity: { default: 'a@gmail.com', accounts: {
+    'a@gmail.com': { accessToken: 'ya-a', refreshToken: '1//a', expiresAt: 0, projectId: 'p-a', account: 'a@gmail.com' },
+    'b@gmail.com': { accessToken: 'ya-b', refreshToken: '1//b', expiresAt: LIVE, projectId: 'p-b', account: 'b@gmail.com' },
+  } } }
+  const asked = []
+  const fetchFn = async (url, init) => {
+    if (url.includes('oauth2.googleapis.com')) {
+      assert.equal(new URLSearchParams(init.body).get('refresh_token'), '1//a', 'only the stale account is refreshed')
+      return { ok: true, json: async () => ({ access_token: 'ya-a2', expires_in: 3599 }) }
+    }
+    asked.push([init.headers.authorization, JSON.parse(init.body).project])
+    const used = init.headers.authorization.endsWith('ya-a2') ? 0.2 : 0.9
+    return { ok: true, json: async () => ({ groups: [{ displayName: 'Gemini Models', buckets: [{ window: 'weekly', remainingFraction: 1 - used }] }] }) }
+  }
+  const { providers, refreshed } = await collectSubscriptionUsage(store, fetchFn)
+  assert.deepEqual(asked.sort(), [['Bearer ya-a2', 'p-a'], ['Bearer ya-b', 'p-b']])
+  assert.deepEqual(refreshed.map(r => [r.kind, r.key, r.session.accessToken, r.session.projectId]), [['antigravity', 'a@gmail.com', 'ya-a2', 'p-a']])
+  const by = Object.fromEntries(providers.antigravity.accounts.map(r => [r.account, [r.is_default, r.windows[0].used_percent]]))
+  assert.deepEqual(by, { 'a@gmail.com': [true, 20], 'b@gmail.com': [false, 90] })
+  assert.equal(providers.antigravity.windows[0].scope, 'Gemini')
 })
 
 console.log(`\n  ${passed} passed, ${failed} failed`)

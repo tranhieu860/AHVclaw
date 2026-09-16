@@ -7,7 +7,10 @@
 // different payload shapes into one.
 import assert from 'node:assert/strict'
 
-const { normaliseUsagePayload, USAGE_ENDPOINTS, fetchProviderUsage, refreshSessionIfStale, REFRESH_ENDPOINTS, REFRESH_AHEAD_MS } =
+// The Antigravity OAuth client is read from the plugin inside the checkout.
+process.env.AHV_FORK ??= '/home/claudeproxy/Claude/AHVclaw-fork'
+
+const { normaliseUsagePayload, USAGE_ENDPOINTS, fetchProviderUsage, refreshSessionIfStale, REFRESH_ENDPOINTS, REFRESH_AHEAD_MS, antigravityOAuthClient } =
   await import('/home/claudeproxy/Claude/AHVclaw-fork/scripts/prod/ahv-bot.mjs')
 
 let passed = 0, failed = 0
@@ -36,6 +39,85 @@ check('claude modern limits become windows', () => {
   assert.equal(out.windows[0].kind, 'session')
   assert.equal(out.windows[0].used_percent, 42)
   assert.equal(out.windows[1].kind, 'weekly')
+})
+
+check('antigravity quota summary becomes family windows', () => {
+  // Shape copied from a live retrieveUserQuotaSummary answer on #20 (16/09).
+  const out = normaliseUsagePayload('antigravity', {
+    groups: [
+      { displayName: 'Gemini Models', buckets: [
+        { bucketId: 'gemini-weekly', window: 'weekly', resetTime: '2026-09-23T09:25:47Z', remainingFraction: 0.99685085 },
+        { bucketId: 'gemini-5h', window: '5h', resetTime: '2026-09-16T14:25:47Z', remainingFraction: 0.9811051 },
+      ] },
+      { displayName: 'Claude and GPT models', buckets: [
+        { bucketId: '3p-weekly', window: 'weekly', resetTime: '2026-09-23T09:27:25Z', remainingFraction: 0 },
+        { bucketId: '3p-5h', window: '5h', remainingFraction: 1 },
+        { bucketId: 'broken', window: '5h' },
+      ] },
+    ],
+  })
+  assert.equal(out.supported, true)
+  assert.deepEqual(out.windows.map(w => [w.kind, w.scope, w.used_percent, w.resets_at]), [
+    ['weekly', 'Gemini', 0.3, '2026-09-23T09:25:47Z'],
+    ['session', 'Gemini', 1.9, '2026-09-16T14:25:47Z'],
+    ['weekly', 'Claude + GPT', 100, '2026-09-23T09:27:25Z'],
+    ['session', 'Claude + GPT', 0, null],
+  ])
+})
+
+check('antigravity with no groups is unsupported, not zero', () => {
+  assert.equal(normaliseUsagePayload('antigravity', {}).supported, false)
+})
+
+await acheck('antigravity usage is a POST carrying the project', async () => {
+  let seen
+  const out = await fetchProviderUsage('antigravity', { accessToken: 'ya29.x', projectId: 'proj-1' }, async (url, init) => {
+    seen = { url, init }
+    return { ok: true, json: async () => ({ groups: [{ displayName: 'Gemini Models', buckets: [{ window: '5h', remainingFraction: 0.5 }] }] }) }
+  })
+  assert.match(seen.url, /v1internal:retrieveUserQuotaSummary$/)
+  assert.equal(seen.init.method, 'POST')
+  assert.deepEqual(JSON.parse(seen.init.body), { project: 'proj-1' })
+  assert.equal(seen.init.headers.authorization, 'Bearer ya29.x')
+  assert.equal(out.windows[0].used_percent, 50)
+})
+
+await acheck('antigravity client can be overridden like the plugin', async () => {
+  process.env.ANTIGRAVITY_CLIENT_ID = 'x.apps.googleusercontent.com'
+  process.env.ANTIGRAVITY_CLIENT_SECRET = 's'
+  try {
+    assert.deepEqual(await antigravityOAuthClient(), { clientId: 'x.apps.googleusercontent.com', clientSecret: 's' })
+  } finally {
+    delete process.env.ANTIGRAVITY_CLIENT_ID
+    delete process.env.ANTIGRAVITY_CLIENT_SECRET
+  }
+})
+
+await acheck('antigravity refresh is a Google form post that keeps the refresh token', async () => {
+  let seen
+  const now = 1_000_000
+  const out = await refreshSessionIfStale('antigravity', {
+    accessToken: 'old', refreshToken: '1//keep', expiresAt: now, projectId: 'proj-1', account: 'a@gmail.com',
+  }, async (url, init) => {
+    seen = { url, init }
+    return { ok: true, json: async () => ({ access_token: 'new', expires_in: 3599, scope: 'openid' }) }
+  }, now)
+  assert.equal(seen.url, REFRESH_ENDPOINTS.antigravity.url)
+  assert.equal(seen.init.headers['content-type'], 'application/x-www-form-urlencoded')
+  const form = new URLSearchParams(seen.init.body)
+  assert.equal(form.get('grant_type'), 'refresh_token')
+  assert.equal(form.get('refresh_token'), '1//keep')
+  const client = await antigravityOAuthClient()
+  assert.match(client.clientId, /\.apps\.googleusercontent\.com$/)
+  assert.equal(form.get('client_id'), client.clientId)
+  assert.equal(form.get('client_secret'), client.clientSecret)
+  assert.ok(client.clientSecret, 'the plugin supplies the secret')
+  assert.equal(out.refreshed, true)
+  assert.equal(out.session.accessToken, 'new')
+  assert.equal(out.session.refreshToken, '1//keep')
+  assert.equal(out.session.projectId, 'proj-1')
+  assert.equal(out.session.account, 'a@gmail.com')
+  assert.equal(out.session.expiresAt, now + 3599 * 1000)
 })
 
 check('claude legacy shape still works', () => {
