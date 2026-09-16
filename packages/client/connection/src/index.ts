@@ -12,10 +12,14 @@ import { HostConnectionService } from './rpc-host.ts'
 import { rejectWebSocketUpgrade, WebSocketDownlinks } from './websocket-downlink.ts'
 
 export type {
+  ConnectionFetchMethod,
+  ConnectionFetchRoute,
+  ConnectionRequestBodyMode,
   ConnectionRpcAuthority,
   ConnectionRpcEndpointMatcher,
   ConnectionRpcHandler,
   ConnectionRpcHandlerOptions,
+  HostConnectionFetch,
   HostConnectionHandle,
   HostConnectionRpc,
 } from './rpc.ts'

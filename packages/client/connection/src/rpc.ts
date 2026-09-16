@@ -21,6 +21,38 @@ export type ConnectionRpcHandler = (
 /** Synchronous ownership test for one endpoint on a shared RPC channel. */
 export type ConnectionRpcEndpointMatcher = (endpoint: string) => boolean
 
+/** HTTP methods supported by exact Fetch routes on the shared API channel. */
+export type ConnectionFetchMethod = 'GET' | 'HEAD' | 'POST'
+
+/**
+ * How one request body reaches its Fetch route. The node:http bridge buffers
+ * every body under the configured cap, so both modes currently arrive buffered;
+ * the field is kept for upstream route compatibility.
+ */
+export type ConnectionRequestBodyMode = 'buffered' | 'streaming'
+
+/** One exact, transport-independent Fetch route owned by a Host feature. */
+export interface ConnectionFetchRoute {
+  /** Absolute path below `/api`; query parameters remain available on the request URL. */
+  readonly path: string
+  /** Methods this route owns. Other methods continue through normal shared-channel dispatch. */
+  readonly methods: readonly ConnectionFetchMethod[]
+  /** Request body presentation requested by the route. */
+  readonly requestBody?: ConnectionRequestBodyMode
+  /** Handle one request after the `/api` trust fence has accepted it. */
+  readonly fetch: (request: Request) => Promise<Response>
+}
+
+/** Host registry for exact Fetch routes that cannot use JSON Remote invocation. */
+export interface HostConnectionFetch {
+  /**
+   * Register one exact route on the shared API channel.
+   * @param route - path, methods, and Fetch-shaped implementation.
+   * @returns asynchronous disposer removing this exact contribution.
+   */
+  register(route: ConnectionFetchRoute): () => Promise<void>
+}
+
 /** Host registry for logical RPC channels carried by the current transport. */
 export interface HostConnectionRpc {
   /**
@@ -56,6 +88,8 @@ export interface HostConnectionRpc {
 export interface HostConnectionHandle {
   /** Generic RPC channel registry. */
   readonly rpc: HostConnectionRpc
+  /** Exact Fetch routes on the shared `/api` channel. */
+  readonly fetch: HostConnectionFetch
 }
 
 /** Client caller for logical RPC channels carried by the current transport. */
