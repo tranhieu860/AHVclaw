@@ -1082,8 +1082,8 @@ importers:
         specifier: ^0.9.3
         version: 0.9.3(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-attachment@packages+attachment+attachment)(@deepseek-ai/dsh-home-paths@packages+util+home-paths)(@deepseek-ai/dsh-llm@packages+llm+llm)(@deepseek-ai/dsh-tools@packages+core+tools)(@deepseek-ai/dsh-web@packages+web+web)(@deepseek-ai/schemastery@vendor+schemastery)
       dshmarket:
-        specifier: ^1.54.0
-        version: 1.54.0(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-settings@packages+settings+settings)(@deepseek-ai/schemastery@vendor+schemastery)
+        specifier: ^1.57.0
+        version: 1.57.0(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-settings@packages+settings+settings)(@deepseek-ai/schemastery@vendor+schemastery)
       superpowers-dsh:
         specifier: ^0.1.1
         version: 0.1.1
@@ -12910,8 +12910,8 @@ packages:
       '@deepseek-ai/dsh-web': ^0.1.1-rc.2 || ^0.1.2-alpha.1
       '@deepseek-ai/schemastery': ^3.18.1
 
-  dshmarket@1.54.0:
-    resolution: {integrity: sha512-nNSvcOL0HF7R1x1nIUjcyWn5blLf85x3Cm5cuHkuZCs/y5zRR8E/Hf5ljFFqS+xhp/qSYZn7fORxdvJ6eEuGEA==}
+  dshmarket@1.57.0:
+    resolution: {integrity: sha512-MhMhH28oR1XLcDkLFJHkKfLanQT1keCG9VXI2T1YShBAzoplXMClM5h6er0MLsiprXQdApDT3emFmRi0wBElGA==}
     peerDependencies:
       '@deepseek-ai/cordis': ^4.0.1
       '@deepseek-ai/dsh-settings': ^0.1.0-rc.7 || ^0.1.1-rc.2 || ^0.1.2-alpha.2
@@ -18552,7 +18552,7 @@ snapshots:
       '@deepseek-ai/schemastery': link:vendor/schemastery
       undici: 7.29.0
 
-  dshmarket@1.54.0(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-settings@packages+settings+settings)(@deepseek-ai/schemastery@vendor+schemastery):
+  dshmarket@1.57.0(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-settings@packages+settings+settings)(@deepseek-ai/schemastery@vendor+schemastery):
     dependencies:
       '@deepseek-ai/cordis': link:vendor/cordis
       js-yaml: 4.3.1
