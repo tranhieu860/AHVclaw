@@ -44,7 +44,7 @@ Commit gộp chạy lefthook (lint, third-party notices, ghép bản dịch) —
 | `packages/session/session-format-v0-to-v1/src/ahv-fork-legacy.ts` | chuẩn hoá phiên do lõi 0.1.1-rc.1 ghi | giữ; thiếu là mọi hội thoại bot cũ bị từ chối |
 | `packages/client/connection` (`browserAuth: external`) | ahv-web bind loopback sau cổng ahv-web-ui-auth | giữ |
 | `packages/client/**/locales.ts`, `apps/web/index.html`, `vite.config.ts`, `Rows.module.css` | thương hiệu AHV, tiêu đề, lời chào, thao tác hàng trên màn cảm ứng | lấy upstream, thay chữ |
-| `pnpm-workspace.yaml` | allowBuilds + miễn tuổi phát hành cho plugin AHV | upstream + khối AHV |
+| `pnpm-workspace.yaml` | allowBuilds + miễn tuổi phát hành cho plugin AHV; override `playwright: 1.62.1` (dsh-browser dùng bản hoist, máy AHV có Chromium 1234) | upstream + khối AHV; `scripts/prod/tests/test-browser-playwright.sh` phải xanh |
 | `README.md`, `README.i18n.yaml`, `.gitlab-ci.yml` (xoá) | trang AHV | giữ phía fork |
 | `scripts/prod/**`, `scripts/install-ahv-skin.sh`, `.github/workflows/prebuilt.yml` | công cụ phát hành AHV | của AHV |
 
@@ -53,6 +53,7 @@ Commit gộp chạy lefthook (lint, third-party notices, ghép bản dịch) —
 1. `pnpm run build` xanh.
 2. Test liên quan: `npx vitest run packages/client/connection/tests packages/session/session-format-v0-to-v1/tests packages/bundle packages/boot/app-boot/tests apps/cli/tests packages/client/ui-sidebar/tests`
    và `for t in scripts/prod/tests/*.mjs; do node $t; done` (+ `bash scripts/prod/tests/test-*.sh`).
+   `release-cli.sh` tự chạy `smoke-run.sh` (một `ahv run` thật) và `test-browser-playwright.sh` trên bản dựng.
 3. Chạy thật từ cây vừa dựng trong một HOME tạm (không đụng `~/.ahv` thật):
    `ahv --version`, `ahv doctor`, `ahv run --prompt-file … --output jsonl`
    (ra `assistant_final` + `turn_end completed`), `ahv models list --json`,
