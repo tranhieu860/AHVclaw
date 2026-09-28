@@ -8,6 +8,7 @@ overrides:
   extract-zip>yauzl: 3.4.0
   '@deepseek-ai/cosmokit': link:vendor/cosmokit
   '@deepseek-ai/schemastery': link:vendor/schemastery
+  playwright: 1.62.1
 
 patchedDependencies:
   '@earendil-works/pi-ai@0.85.1': b9bcce474fb2ac44633dff0fa722816a5bff5451b4575d5874035ea14ba70a4f
@@ -832,8 +833,8 @@ importers:
         specifier: ^14.1.1
         version: 14.1.1(supports-color@9.4.0)
       playwright:
-        specifier: ^1.49.0
-        version: 1.61.1
+        specifier: 1.62.1
+        version: 1.62.1
       react:
         specifier: ^18.2.0
         version: 18.3.1
@@ -943,8 +944,8 @@ importers:
         specifier: ^6.0.0
         version: 6.0.0
       playwright:
-        specifier: ^1.49.0
-        version: 1.61.1
+        specifier: 1.62.1
+        version: 1.62.1
 
   native/system:
     devDependencies:
@@ -7973,8 +7974,8 @@ importers:
         specifier: ^8.18.1
         version: 8.18.1
       playwright:
-        specifier: ^1.49.0
-        version: 1.61.1
+        specifier: 1.62.1
+        version: 1.62.1
       tsx:
         specifier: ^4.19.2
         version: 4.22.4
@@ -22113,9 +22114,9 @@ packages:
     resolution: {integrity: sha512-emEcLuomt2j03vxD54giVB4SxTjnsqkU692xZOZXHDVoYyypEm+b3jpiTcc+Cf+myooc+/Ly0z01jqeNHVgJGw==}
     engines: {node: '>=16.0.0'}
 
-  playwright-core@1.61.1:
-    resolution: {integrity: sha512-h7Qlt6m4REp25qvIdvbDtVmD4LqVXfpRxhORv9L0jzETM05p4fuPJ3dKyuSXQxDSbXnmS79HAgi9589lGSpLkg==}
-    engines: {node: '>=18'}
+  playwright-core@1.62.1:
+    resolution: {integrity: sha512-wPYSwEBJY9GHraISXqyqtx0na0LpO3XEX7jNDhntbex7tzUS7kLnZsOlFruFJB4Hi/rhDMjXGqHewDZ68nYZVw==}
+    engines: {node: '>=20'}
     hasBin: true
 
   playwright-core@1.63.0-alpha-2026-08-31:
@@ -22123,13 +22124,8 @@ packages:
     engines: {node: '>=20'}
     hasBin: true
 
-  playwright@1.61.1:
-    resolution: {integrity: sha512-DWnY5o3YbLWK4GovuAVwpqL+1VwGNdUGrRr++8j8PtQQzvAVZUIMjKQ90fY689sEJZJBbZVw1rXaOKSTitkzPQ==}
-    engines: {node: '>=18'}
-    hasBin: true
-
-  playwright@1.63.0-alpha-2026-08-31:
-    resolution: {integrity: sha512-3XAsuznfu8jBVJ4QxdGvBkt0+b8ZFwuwJYyOfiIw5ZjUOrNLNRhKxzLzLuydou3gJ9c6eMwVqgzdiOwhy54Kzw==}
+  playwright@1.62.1:
+    resolution: {integrity: sha512-0M+L3LAD8/nm554LOla9Ayx0j0tmFZ0FBcoQ7F1VuVHpM/XpiC8RcDzBQB8W5+hA8L22THxELzeF+2WcUzvcLg==}
     engines: {node: '>=20'}
     hasBin: true
 
@@ -23741,7 +23737,7 @@ snapshots:
     dependencies:
       '@jackwener/opencli': 1.8.7
       patchright: 1.62.3
-      playwright: 1.61.1
+      playwright: 1.62.1
     optionalDependencies:
       '@deepseek-ai/cordis': link:vendor/cordis
       '@deepseek-ai/dsh-client-connection': 0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-scope@0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-invariants@0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis)))
@@ -26905,7 +26901,7 @@ snapshots:
 
   '@playwright/mcp@0.0.80':
     dependencies:
-      playwright: 1.63.0-alpha-2026-08-31
+      playwright: 1.62.1
       playwright-core: 1.63.0-alpha-2026-08-31
 
   '@preact/signals-core@1.14.4': {}
@@ -31349,19 +31345,15 @@ snapshots:
       pvutils: 1.2.0
       tslib: 2.8.1
 
-  playwright-core@1.61.1: {}
+  playwright-core@1.62.1: {}
 
   playwright-core@1.63.0-alpha-2026-08-31: {}
 
-  playwright@1.61.1:
+  playwright@1.62.1:
     dependencies:
-      playwright-core: 1.61.1
+      playwright-core: 1.62.1
     optionalDependencies:
       fsevents: 2.3.2
-
-  playwright@1.63.0-alpha-2026-08-31:
-    dependencies:
-      playwright-core: 1.63.0-alpha-2026-08-31
 
   plist@3.1.0:
     dependencies:

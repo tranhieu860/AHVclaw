@@ -150,6 +150,9 @@ if ! runverdict="$(run_as env "${BUILD_ENV[@]}" NO_COLOR=1 bash "$FORK/scripts/p
   rollback; fail "smoke: ahv run failed: $runverdict"
 fi
 log "smoke run: $runverdict"
+# The browser plugin loads the hoisted playwright; a lockfile shift once moved it
+# off the Chromium every host already has and broke browser_open everywhere.
+bash "$FORK/scripts/prod/tests/test-browser-playwright.sh" "$BUILD_HOME/src" || { rollback; fail "smoke: browser playwright mismatch"; }
 usage="$(run_as env "${BUILD_ENV[@]}" NO_COLOR=1 timeout 90 "$smoke" login usage --json 2>/dev/null || true)"
 python3 - "$usage" <<'PY' || { rollback; fail "smoke: login usage malformed"; }
 import json, sys

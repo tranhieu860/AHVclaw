@@ -18,6 +18,13 @@ overrides:
   'extract-zip>yauzl': '3.4.0'
   '@deepseek-ai/cosmokit': 'link:vendor/cosmokit'
   '@deepseek-ai/schemastery': 'link:vendor/schemastery'
+  # AHV: @anweat/dsh-browser loads the playwright pnpm hoists into
+  # node_modules/.pnpm/node_modules, not its own dependency. With dsh 0.2 that
+  # hoisted copy became 1.61 (Chromium 1228) while every AHV host holds Chromium
+  # 1234 from playwright 1.62, so browser_open failed with "chromium is not
+  # installed" and the agent could not install it without approval. One
+  # playwright for the whole workspace keeps the hoisted copy on 1.62.
+  'playwright': '1.62.1'
 
 peerDependencyRules:
   allowedVersions:
