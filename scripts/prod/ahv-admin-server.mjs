@@ -10,6 +10,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { randomUUID, createHmac, randomBytes } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
+import { readCoreLag, refreshCoreLag } from './core-lag.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const PORT = 3200
@@ -24,7 +25,7 @@ const TG_ENV_FILE = '/opt/bot/tg-claude-bot/.env'
 const ADMIN_TG_CHAT_ID = '638048624' // Hiếu's chat, from telegram-delivery.sqlite3
 const APPLY_RATE_LIMIT_MS = 60 * 60 * 1000 // 1 apply request / IP / hour
 
-// Single hard-coded user. Password bcrypt hash for "Anhyeuem@123".
+// Single hard-coded user. Password bcrypt hash (the live value is in /opt/ahv-admin/server.mjs; never write the password here).
 // Rotate: `node -e "console.log(require('bcryptjs').hashSync('<new>', 12))"`
 // then paste over the string below and restart ahv-admin.
 const USERS = {
@@ -485,6 +486,22 @@ async function refreshVersions() {
   save(data)
   return results
 }
+
+// ── lõi dsh so với upstream: đọc GitHub mỗi ngày, không bao giờ tự gộp ──────
+const CORE_LAG_CACHE = '/srv/ahv-admin/core-lag.json'
+const CLI_CHANNELS_FILE = '/srv/ahvclaw.com/releases/ahv-cli/channels.json'
+async function refreshCoreLagQuietly() {
+  try {
+    await refreshCoreLag({ fork: AHV_FORK, channelsPath: CLI_CHANNELS_FILE, cachePath: CORE_LAG_CACHE })
+  } catch (err) {
+    console.error('core-lag refresh failed:', err.message)
+  }
+}
+app.get('/admin/api/core-lag', (req, res) => {
+  res.json(readCoreLag({ fork: AHV_FORK, channelsPath: CLI_CHANNELS_FILE, cachePath: CORE_LAG_CACHE }))
+})
+setTimeout(() => { void refreshCoreLagQuietly() }, 45_000)
+setInterval(() => { void refreshCoreLagQuietly() }, 24 * 60 * 60 * 1000)
 
 app.post('/admin/api/plugins/refresh-versions', async (req, res) => {
   if (!verify(req.cookies?.[COOKIE_NAME])) return res.status(401).json({ error: 'not logged in' })

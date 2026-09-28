@@ -1,34 +1,47 @@
 <!doctype html>
-<html lang="vi">
+<html lang="vi" data-ui-rev="20260823c">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<meta name="theme-color" content="#0a0a0f" />
+<meta name="theme-color" content="#07070c" />
 <meta name="robots" content="noindex,nofollow" />
 <title>Plugin Registry — AHV CLI Admin</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='28'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E" />
+<link rel="icon" href="/assets/favicon.ico" sizes="any" />
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
+<link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
 <style>
+@font-face {
+  font-family: Inter;
+  src: url("/assets/fonts/inter-latin.woff2") format("woff2");
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/assets/fonts/jetbrains-mono-regular.woff2") format("woff2");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
 :root {
-  --bg:#050510; --bg-elev:#12121e; --bg-elev-2:#181828; --bg-code:#08080f;
-  --panel:rgba(18,18,32,0.7);
+  --bg:#07070c; --bg-elev:rgba(16,16,26,.88); --bg-elev-2:#14141e; --bg-code:#050509;
+  --panel:rgba(16,16,26,0.72);
   --border:rgba(255,255,255,0.08); --border-strong:rgba(255,255,255,0.14);
-  --text:#e8e8f0; --text-strong:#fff; --muted:#8a8aa8; --dim:#5a5a70;
-  --accent:#7dd3fc; --accent-2:#a78bfa;
+  --text:#f4f4f8; --text-strong:#fff; --muted:#9a9ab0; --dim:#6b6b80;
+  --accent:#67e8f9; --accent-2:#c4b5fd;
   --success:#4ade80; --warning:#fbbf24; --danger:#f87171;
   --shadow-lg: 0 20px 60px rgba(0,0,0,0.4);
   --shadow-md: 0 8px 24px rgba(0,0,0,0.3);
-  --font: ui-sans-serif, system-ui, -apple-system, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
-  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
-  --nav-h: 60px;
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --nav-h: 68px;
 }
 *, *::before, *::after { box-sizing: border-box }
 html, body { margin:0; padding:0; background:var(--bg); color:var(--text); font-family:var(--font); -webkit-font-smoothing:antialiased; line-height:1.5 }
 body {
   min-height: 100dvh;
   background:
-    radial-gradient(1000px 500px at 0% -10%, rgba(125,211,252,0.06), transparent 55%),
-    radial-gradient(800px 500px at 100% 100%, rgba(167,139,250,0.06), transparent 55%),
-    var(--bg);
+    radial-gradient(900px 480px at 12% -10%, rgba(103,232,249,.14), transparent 55%),
+    radial-gradient(800px 420px at 92% 0%, rgba(167,139,250,.12), transparent 50%),
+    linear-gradient(180deg, #07070c 0%, #090912 40%, #07070c 100%);
 }
 a { color:var(--accent); text-decoration:none }
 a:hover { text-decoration:underline }
@@ -36,20 +49,24 @@ a:hover { text-decoration:underline }
 /* ── Nav ─────────────────────────────────────────────────────────── */
 .nav {
   position: sticky; top: 0; z-index: 40;
-  height: var(--nav-h);
+  min-height: var(--nav-h);
   padding: 0 20px;
   display: flex; align-items: center; gap: 16px;
-  background: rgba(10,10,20,0.72);
+  background: rgba(7,7,12,0.72);
   backdrop-filter: blur(14px) saturate(140%);
   -webkit-backdrop-filter: blur(14px) saturate(140%);
   border-bottom: 1px solid var(--border);
 }
-.brand { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-weight: 700; color: var(--text-strong); font-size: 15px }
-.brand .bolt {
-  width: 30px; height: 30px;
-  display: grid; place-items: center; font-size: 17px; border-radius: 8px;
-  background: linear-gradient(135deg, #7dd3fc, #a78bfa); color: #0a0a0f;
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; color: var(--text-strong); font-size: 16px; letter-spacing: -.02em }
+.brand:hover { text-decoration: none }
+.brand .mark {
+  width: 28px; height: 28px; flex: 0 0 28px;
+  display: grid; place-items: center; border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent), #818cf8 55%, var(--accent-2));
+  box-shadow: 0 0 0 1px rgba(255,255,255,.12), 0 10px 28px rgba(103,232,249,.18);
 }
+.brand .mark svg { width: 16px; height: 16px; display: block }
+
 .brand small { color: var(--muted); font-weight: 500; font-size: 12px; margin-left: 4px }
 
 .nav-links { margin-left: auto; display: flex; align-items: center; gap: 6px }
@@ -59,9 +76,17 @@ a:hover { text-decoration:underline }
 }
 .nav-links a:hover, .nav-links button:hover { color: var(--text-strong); background: var(--bg-elev); text-decoration: none }
 .user-chip { display: flex; align-items: center; gap: 8px; padding: 5px 10px 5px 5px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 999px; font-size: 13px }
-.user-chip .avatar { width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, #7dd3fc, #a78bfa); display: grid; place-items: center; color: #0a0a0f; font-weight: 700; font-size: 12px }
+.user-chip .avatar { width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent-2)); display: grid; place-items: center; color: #061018; font-weight: 700; font-size: 12px }
 
-.hamburger { display: none; background: transparent; border: 0; color: var(--text); padding: 8px; margin-left: auto; cursor: pointer; border-radius: 8px }
+.hamburger { display: none; width: 40px; height: 40px; padding: 0; margin-left: auto; position: relative;
+  background: transparent; border: 1px solid var(--border-strong); color: var(--text); cursor: pointer; border-radius: 10px }
+.hamburger span { position: absolute; left: 11px; right: 11px; height: 1.5px; background: currentColor; transition: transform .2s, opacity .2s, top .2s }
+.hamburger span:nth-child(1) { top: 14px }
+.hamburger span:nth-child(2) { top: 19px }
+.hamburger span:nth-child(3) { top: 24px }
+.nav.is-open .hamburger span:nth-child(1) { top: 19px; transform: rotate(45deg) }
+.nav.is-open .hamburger span:nth-child(2) { opacity: 0 }
+.nav.is-open .hamburger span:nth-child(3) { top: 19px; transform: rotate(-45deg) }
 .hamburger:hover { background: var(--bg-elev) }
 .mobile-menu {
   display: none;
@@ -87,6 +112,13 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px 20px 120px }
 h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.02em; color: var(--text-strong); font-weight: 700 }
 .sub { color: var(--muted); margin: 0; font-size: 14px; max-width: 640px }
 
+.core-lag { display:flex; flex-wrap:wrap; align-items:center; gap:10px 18px; padding:12px 16px; margin-bottom:16px;
+  background: var(--bg-elev); border:1px solid var(--border); border-radius:12px; font-size:13px; color:var(--text) }
+.core-lag b { color: var(--text-strong) }
+.core-lag .muted { color: var(--muted) }
+.core-lag.warn { border-color: rgba(251,191,36,0.55); background: rgba(251,191,36,0.08) }
+.core-lag .badge-warn { color:#1a1200; background: var(--warning); border-radius:999px; padding:2px 8px; font-weight:700; font-size:12px }
+.core-lag .badge-ok { color:#04210f; background: var(--success); border-radius:999px; padding:2px 8px; font-weight:700; font-size:12px }
 .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px }
 .stat {
   background: var(--panel);
@@ -111,7 +143,7 @@ h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.02em; color: var(--tex
   background: var(--bg-elev); border: 1px solid var(--border); color: var(--text);
   border-radius: 10px; font-size: 14px; font-family: inherit;
 }
-.search-wrap input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(125,211,252,0.14) }
+.search-wrap input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(103,232,249,0.14) }
 .search-wrap svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--dim); pointer-events: none }
 
 .btn {
@@ -123,10 +155,10 @@ h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.02em; color: var(--tex
 }
 .btn:hover { border-color: var(--border-strong); background: var(--bg-elev-2) }
 .btn.primary {
-  background: linear-gradient(135deg, #7dd3fc, #a5e3fd); color: #0a0a0f; border-color: transparent; font-weight: 700;
-  box-shadow: 0 4px 16px -4px rgba(125,211,252,0.4);
+  background: var(--accent); color: #061018; border-color: transparent; font-weight: 650;
+  box-shadow: 0 4px 16px -4px rgba(103,232,249,0.35);
 }
-.btn.primary:hover { box-shadow: 0 8px 24px -6px rgba(125,211,252,0.5) }
+.btn.primary:hover { box-shadow: 0 8px 24px -6px rgba(103,232,249,0.45) }
 .btn.ghost { background: transparent }
 .btn.danger { color: var(--danger) }
 .btn.danger:hover { border-color: var(--danger); background: rgba(248,113,113,0.08) }
@@ -136,17 +168,20 @@ h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.02em; color: var(--tex
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 14px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   backdrop-filter: blur(10px);
 }
-table { width: 100%; border-collapse: collapse; font-size: 13.5px }
+table { width: 100%; min-width: 860px; border-collapse: collapse; font-size: 13.5px; table-layout: fixed }
 th, td { padding: 14px 16px; text-align: left; vertical-align: middle; border-bottom: 1px solid var(--border) }
+td:nth-child(2) { overflow-wrap: anywhere }
+td:nth-child(5) { white-space: nowrap; min-width: 180px; }
 th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); background: var(--bg-elev-2); font-weight: 600 }
 tr:last-child td { border-bottom: 0 }
 tr:hover td { background: rgba(255,255,255,0.02) }
 tr.off td:not(.actions):not(.toggle-col) { opacity: 0.4 }
 td.toggle-col { width: 48px; padding-right: 4px }
-td.actions { text-align: right; white-space: nowrap; width: 1% }
+td.actions { text-align: right; white-space: nowrap }
 td.actions .btn { height: 32px; padding: 0 10px; font-size: 12px; margin-left: 4px }
 
 code, .code {
@@ -155,8 +190,13 @@ code, .code {
   background: var(--bg-code);
   padding: 2px 7px; border-radius: 5px;
   word-break: break-all;
+  max-width: 100%;
 }
-.desc { color: var(--muted); font-size: 12.5px; margin-top: 4px; line-height: 1.45 }
+.desc {
+  color: var(--muted); font-size: 12.5px; margin-top: 4px; line-height: 1.45;
+  overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
 .gh-link { display: inline-flex; align-items: center; gap: 4px; color: var(--dim); font-size: 11px; margin-top: 6px }
 .gh-link:hover { color: var(--text) }
 
@@ -173,12 +213,12 @@ code, .code {
   box-shadow: 0 2px 4px rgba(0,0,0,0.3);
 }
 .switch input:checked + .slider { background: var(--accent) }
-.switch input:checked + .slider::before { transform: translateX(16px); background: #0a0a0f }
+.switch input:checked + .slider::before { transform: translateX(16px); background: #061018 }
 
 .pill { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--bg-elev-2); border: 1px solid var(--border); color: var(--muted) }
 .pill.terminal { color: var(--warning); border-color: rgba(251,191,36,0.35); background: rgba(251,191,36,0.08) }
 .pill.self-modify { color: var(--accent-2); border-color: rgba(167,139,250,0.35); background: rgba(167,139,250,0.08) }
-.pill.market { color: var(--accent); border-color: rgba(125,211,252,0.35); background: rgba(125,211,252,0.08) }
+.pill.market { color: var(--accent); border-color: rgba(103,232,249,0.28); background: rgba(103,232,249,0.08) }
 .pill.workspace { color: #6ee7b7; border-color: rgba(110,231,183,0.35); background: rgba(110,231,183,0.08) }
 
 /* ── Mobile cards ────────────────────────────────────────────────── */
@@ -246,7 +286,7 @@ form input, form select, form textarea {
 }
 form textarea { height: auto; resize: vertical; min-height: 76px }
 form input:focus, form select:focus, form textarea:focus {
-  outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(125,211,252,0.14);
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(103,232,249,0.14);
 }
 form input:disabled { opacity: 0.55 }
 .field-hint { color: var(--dim); font-size: 12px; margin-top: 4px }
@@ -286,12 +326,12 @@ pre {
   width: 56px; height: 56px;
   border-radius: 50%;
   border: 0;
-  background: linear-gradient(135deg, #7dd3fc, #a5e3fd);
-  color: #0a0a0f;
+  background: var(--accent);
+  color: #061018;
   font-size: 26px;
   cursor: pointer;
   z-index: 30;
-  box-shadow: 0 10px 30px -6px rgba(125,211,252,0.5), 0 4px 12px rgba(0,0,0,0.3);
+  box-shadow: 0 10px 30px -6px rgba(103,232,249,0.45), 0 4px 12px rgba(0,0,0,0.3);
   transition: transform 100ms;
 }
 .fab:active { transform: scale(0.95) }
@@ -349,10 +389,13 @@ pre {
 </head>
 <body>
 
-<nav class="nav">
-  <a href="/" class="brand"><span class="bolt">⚡</span><span>AHV CLI<small>admin</small></span></a>
+<nav class="nav" id="topNav">
+  <a href="/" class="brand">
+    <span class="mark" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none"><path d="M9.2 1.2 3.1 9.1h4.1L6.6 14.8l6.4-8.4H8.8L9.2 1.2Z" fill="#061018"/></svg></span>
+    AHV CLI
+  </a>
   <div class="nav-links">
-    <a href="/">Landing</a>
+    <a href="/">Home</a>
     <a href="/docs/">Docs</a>
     <a href="https://github.com/tranhieu860/AHVclaw" target="_blank" rel="noopener">GitHub</a>
     <div class="user-chip">
@@ -363,8 +406,8 @@ pre {
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
     </button>
   </div>
-  <button class="hamburger" id="hamburger" aria-label="Menu">
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+  <button class="hamburger" id="hamburger" aria-label="Mở menu" aria-expanded="false">
+    <span></span><span></span><span></span>
   </button>
 </nav>
 
@@ -382,6 +425,8 @@ pre {
       <p class="sub">Quản lý plugin bundle sẵn cho AHV CLI. Sửa ở đây → export snippet → paste vào <code>packages/bundle/ahv/cordis.patch.yml</code> → commit + push.</p>
     </div>
   </div>
+
+  <div class="core-lag" id="coreLag" aria-live="polite"><span class="muted">Lõi dsh: đang đọc…</span></div>
 
   <div class="stats" id="stats">
     <div class="stat"><div class="k">Tổng</div><div class="v" id="s-total">—</div></div>
@@ -410,6 +455,10 @@ pre {
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
       Check phiên bản
     </button>
+    <button class="btn hide-mobile" id="updateAllBtn" hidden title="Cập nhật mọi plugin đang có bản mới">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v6"/><path d="m9 5 3-3 3 3"/><path d="M3 12a9 9 0 0 0 15.5 6.2"/><path d="M21 12a9 9 0 0 0-15.5-6.2"/></svg>
+      <span id="updateAllLabel">Cập nhật tất cả</span>
+    </button>
   </div>
 
   <div id="loading" class="loading-page"><div class="spinner-inline"></div><div>Đang tải…</div></div>
@@ -423,7 +472,7 @@ pre {
           <th style="width:130px">Nhóm</th>
           <th style="width:130px">Nguồn</th>
           <th style="width:200px">Phiên bản</th>
-          <th style="width:1%"></th>
+          <th style="width:112px"></th>
         </tr>
       </thead>
       <tbody id="tbody"></tbody>
@@ -505,6 +554,21 @@ pre {
   </div>
 </div>
 
+<!-- Confirm dialog (thay confirm() của trình duyệt) -->
+<div class="modal" id="confirmModal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+  <div class="sheet" style="max-width:460px">
+    <div class="head">
+      <h2 id="confirmTitle">Xác nhận</h2>
+      <button class="close" id="confirmClose" aria-label="Đóng">✕</button>
+    </div>
+    <div id="confirmBody" style="color:var(--muted);font-size:14px;line-height:1.6"></div>
+    <div class="form-actions">
+      <button type="button" class="btn ghost" id="confirmCancel">Huỷ</button>
+      <button type="button" class="btn primary" id="confirmOk">Đồng ý</button>
+    </div>
+  </div>
+</div>
+
 <!-- Export modal -->
 <div class="modal" id="exportModal" role="dialog" aria-modal="true">
   <div class="sheet" style="max-width:720px">
@@ -572,7 +636,8 @@ function renderVersion(p) {
   }
   const stale = p.version_stale === true
   const marker = stale
-    ? `<span class="pill" style="background:#fef3c7;color:#92400e" title="Có bản mới, cần bump package.json">⚠ ${escape(pinned)} → ${escape(latest)}</span>`
+    ? `<span class="pill" style="background:#fef3c7;color:#92400e" title="Có bản mới, cần bump package.json">⚠ ${escape(pinned)} → ${escape(latest)}</span>
+       <button type="button" class="btn js-update" data-id="${escape(p.id)}" style="height:28px;padding:0 8px;margin-left:6px;font-size:11px">Cập nhật</button>`
     : `<span class="pill" style="background:#d1fae5;color:#065f46" title="Đã cài bản mới nhất">✓ ${escape(pinned || latest)}</span>`
   const checked = p.version_checked_at
     ? `<div class="desc" style="font-size:11px;opacity:.6">check: ${new Date(p.version_checked_at).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}</div>`
@@ -603,6 +668,7 @@ function getFiltered() {
 function render() {
   const items = getFiltered()
   $('#loading').style.display = 'none'
+  syncUpdateAllBtn()
   if (state.plugins.length === 0) {
     $('#tableWrap').style.display = 'none'
     $('#cards').innerHTML = ''
@@ -623,7 +689,7 @@ function render() {
       </td>
       <td>
         <span class="code">${escape(p.name)}</span>
-        ${p.description ? `<div class="desc">${escape(p.description)}</div>` : ''}
+        ${p.description ? `<div class="desc" title="${escape(p.description)}">${escape(p.description)}</div>` : ''}
         ${p.github ? `<a class="gh-link" href="${escape(p.github)}" target="_blank" rel="noopener">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.9 1.3 1.9 1.3 1.1 1.9 2.9 1.3 3.6 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.3.5-2.4 1.3-3.2-.1-.4-.6-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.7 1.6.2 2.8.1 3.2.8.8 1.3 1.9 1.3 3.2 0 4.7-2.8 5.6-5.5 6 .4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3"/></svg>
           GitHub ↗
@@ -672,6 +738,9 @@ function render() {
     </div>
   `).join('')
 
+  $$('.js-update').forEach(btn => {
+    btn.onclick = () => updatePlugin(btn.getAttribute('data-id'), btn)
+  })
   if (items.length === 0 && state.filter) {
     $('#tableWrap').style.display = 'none'
     $('#cards').innerHTML = ''
@@ -720,7 +789,13 @@ function closeModal(id = 'modal') {
 window.edit = id => openModal(state.plugins.find(p => p.id === id))
 
 window.del = async (id, name) => {
-  if (!confirm(`Xoá plugin "${name}"?`)) return
+  const okGo = await ask({
+    title: 'Xoá plugin',
+    body: `Xoá <b>${escape(name)}</b> khỏi registry? Thao tác này không hoàn tác được.`,
+    ok: 'Xoá',
+    danger: true,
+  })
+  if (!okGo) return
   try {
     await api('/plugins/' + id, { method: 'DELETE' })
     toast('Đã xoá "' + name + '"', 'ok')
@@ -801,11 +876,107 @@ async function logout() {
   window.location.href = '/admin/login'
 }
 
+// confirm() của trình duyệt không theo được giao diện tối của trang, nên dùng
+// lại đúng khung modal có sẵn. Trả Promise để chỗ gọi vẫn viết tuyến tính.
+function ask({ title = 'Xác nhận', body = '', ok = 'Đồng ý', danger = false }) {
+  return new Promise(resolve => {
+    const m = $('#confirmModal')
+    $('#confirmTitle').textContent = title
+    $('#confirmBody').innerHTML = body
+    const okBtn = $('#confirmOk')
+    okBtn.textContent = ok
+    okBtn.className = danger ? 'btn ghost danger' : 'btn primary'
+    const close = val => {
+      m.classList.remove('open')
+      okBtn.onclick = $('#confirmCancel').onclick = $('#confirmClose').onclick = null
+      document.removeEventListener('keydown', onKey)
+      resolve(val)
+    }
+    const onKey = e => { if (e.key === 'Escape') close(false) }
+    okBtn.onclick = () => close(true)
+    $('#confirmCancel').onclick = () => close(false)
+    $('#confirmClose').onclick = () => close(false)
+    document.addEventListener('keydown', onKey)
+    m.classList.add('open')
+    okBtn.focus()
+  })
+}
+
+const stalePlugins = () => state.plugins.filter(p => p.version_stale === true)
+
+// Hiện nút "Cập nhật tất cả" kèm số lượng; không có gì stale thì giấu đi.
+function syncUpdateAllBtn() {
+  const btn = $('#updateAllBtn')
+  if (!btn) return
+  const n = stalePlugins().length
+  btn.hidden = n === 0
+  $('#updateAllLabel').textContent = `Cập nhật tất cả (${n})`
+}
+
 // ── wire events ──────────────────────────────────────────────────
 $('#addBtn').onclick = () => openModal()
 $('#fab').onclick = () => openModal()
 $('#refreshBtn').onclick = refresh
 $('#exportBtn').onclick = doExport
+window.updatePlugin = async (id, btn) => {
+  const p = state.plugins.find(x => x.id === id)
+  const okGo = await ask({
+    title: 'Cập nhật plugin',
+    body: `Nâng <b>${escape(p ? p.name : id)}</b>${p && p.version_latest ? ` lên <b>${escape(p.version_latest)}</b>` : ''}.<br>Thao tác này sửa <code>package.json</code> rồi chạy <code>pnpm install</code>.`,
+    ok: 'Cập nhật',
+  })
+  if (!okGo) return
+  const orig = btn.textContent
+  btn.disabled = true
+  btn.textContent = 'Đang cập nhật…'
+  try {
+    const r = await api('/plugins/' + id + '/update', { method: 'POST' })
+    await refresh()
+    toast(r.ok ? `Đã cập nhật ${r.from} → ${r.to}` : (r.error || 'xong'), r.ok ? 'ok' : 'err', 4000)
+  } catch (e) {
+    toast(e.message, 'err', 5000)
+  } finally {
+    btn.disabled = false
+    btn.textContent = orig
+  }
+}
+
+$('#updateAllBtn').onclick = async () => {
+  const list = stalePlugins()
+  if (!list.length) return toast('Không có plugin nào cần cập nhật', 'ok')
+  const okGo = await ask({
+    title: `Cập nhật ${list.length} plugin`,
+    body: `Sẽ nâng lần lượt:<ul style="margin:8px 0 0;padding-left:18px">`
+      + list.map(p => `<li><b>${escape(p.name)}</b> ${escape(p.version_pinned || '')} → ${escape(p.version_latest || '')}</li>`).join('')
+      + `</ul><div style="margin-top:10px">Mỗi lượt sửa <code>package.json</code> rồi chạy <code>pnpm install</code>, nên chạy tuần tự và có thể mất vài phút.</div>`,
+    ok: 'Cập nhật tất cả',
+  })
+  if (!okGo) return
+  const btn = $('#updateAllBtn')
+  const label = $('#updateAllLabel')
+  btn.disabled = true
+  // Tuần tự, không song song: mỗi lượt đụng cùng package.json + pnpm store.
+  let done = 0, failed = []
+  for (const p of list) {
+    label.textContent = `Đang cập nhật ${done + 1}/${list.length}…`
+    try {
+      const r = await api('/plugins/' + p.id + '/update', { method: 'POST' })
+      if (r.ok) done++
+      else failed.push(`${p.name}: ${r.error || 'không rõ'}`)
+    } catch (e) {
+      failed.push(`${p.name}: ${e.message}`)
+    }
+  }
+  await refresh()
+  btn.disabled = false
+  syncUpdateAllBtn()
+  if (failed.length) {
+    toast(`${done}/${list.length} xong — ${failed.length} lỗi: ${failed[0]}`, 'err', 7000)
+  } else {
+    toast(`Đã cập nhật ${done}/${list.length} plugin`, 'ok', 4000)
+  }
+}
+
 $('#refreshVersionsBtn').onclick = async () => {
   const btn = $('#refreshVersionsBtn')
   const orig = btn.innerHTML
@@ -826,7 +997,7 @@ $('#modalCancel').onclick = () => closeModal('modal')
 $('#exportClose').onclick = () => closeModal('exportModal')
 $('#logoutBtn').onclick = logout
 $('#logoutBtnMobile').onclick = logout
-$('#hamburger').onclick = () => $('#mobileMenu').classList.toggle('open')
+$('#hamburger').onclick = () => { const open = $('#mobileMenu').classList.toggle('open'); $('#topNav').classList.toggle('is-open', open); $('#hamburger').setAttribute('aria-expanded', open ? 'true' : 'false') }
 
 $('#search').oninput = ev => { state.filter = ev.target.value; render() }
 
@@ -841,7 +1012,33 @@ document.addEventListener('keydown', ev => {
 })
 
 // Kick off
+// ── lõi dsh so với upstream (chỉ đọc; nâng lõi là việc tay, xem PULLING_UPSTREAM.md) ──
+function escText(v) { const d = document.createElement('div'); d.textContent = v == null ? '' : String(v); return d.innerHTML }
+async function loadCoreLag() {
+  const box = $('#coreLag')
+  let r
+  try { r = await api('/core-lag') } catch { box.innerHTML = '<span class="muted">Lõi dsh: không đọc được.</span>'; return }
+  if (!r || !r.checked_at) { box.innerHTML = '<span class="muted">Lõi dsh: chưa kiểm upstream lần nào (kiểm mỗi ngày).</span>'; return }
+  const parts = []
+  let warn = false
+  for (const name of ['stable', 'canary']) {
+    const c = (r.channels || {})[name] || {}
+    if (!c.core) { parts.push(`<span>${name} <b>${escText(c.tag || '—')}</b>: <span class="muted">không rõ lõi</span></span>`); continue }
+    const gap = c.behind > 0 ? `tụt ${escText(c.days)} ngày (${escText(c.behind)} bản)` : 'mới nhất'
+    if (c.warn) warn = true
+    parts.push(`<span>${name} <b>${escText(c.tag)}</b>: lõi dsh <b>${escText(c.core)}</b> · ${gap}</span>`)
+  }
+  const latest = r.latest ? `upstream mới nhất <b>${escText(r.latest.version)}</b> <span class="muted">(${escText(new Date(r.latest.publishedAt).toLocaleDateString('vi-VN'))})</span>` : 'upstream: —'
+  const badge = warn
+    ? `<span class="badge-warn">⚠ tụt quá ${escText(r.warn_days)} ngày — cần nâng lõi</span>`
+    : '<span class="badge-ok">✓ trong hạn</span>'
+  box.className = 'core-lag' + (warn ? ' warn' : '')
+  box.innerHTML = parts.join('') + `<span>${latest}</span>` + badge +
+    `<span class="muted">kiểm ${escText(new Date(r.checked_at).toLocaleString('vi-VN'))}</span>`
+}
+
 loadMe()
+loadCoreLag()
 refresh()
 </script>
 </body>
