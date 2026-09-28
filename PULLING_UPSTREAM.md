@@ -1,76 +1,83 @@
-# Pulling upstream (dsh → AHV CLI)
+# Nâng lõi dsh (upstream → AHV CLI)
 
-Quy trình chuẩn để sync updates từ `deepseek-ai/deepseek-harness` về repo
-này. Chạy khi upstream có release mới hoặc feature em muốn lấy về.
+AHV CLI là fork mềm của [`deepseek-ai/deepseek-harness`](https://github.com/deepseek-ai/deepseek-harness).
+Lõi được nâng **bằng tay, theo tag phát hành của upstream**, không tự động:
+CMS `ahvclaw.com/admin` → *AHV CLI* chỉ báo "lõi dsh X — upstream mới nhất Y
+(tụt N ngày)" và cảnh báo khi tụt quá 14 ngày; không có gì tự merge.
 
-## Prerequisites
+Lần gần nhất: `dsh-v0.1.1-rc.1` → `dsh-v0.2.0-rc.1` (29/09/2026, nhánh
+`upgrade-dsh-0.2`, 7.171 commit, 24 xung đột).
 
-Remotes đã set (một lần khi clone):
+## Vì sao phải nâng lõi đúng hạn
+
+Plugin trong bundle AHV (`packages/bundle/ahv/package.json`) được ahv-admin tự
+nâng pin mỗi ngày. Tác giả plugin viết cho lõi dsh mới; lõi cũ thiếu API là
+`ahv run` sập. Sự cố thật: v0.2.50 (28/09) — `@anweat/dsh-browser` 0.1.15 gọi
+`z.boolean().default().volatile()` của schemastery, có từ upstream #4579
+(21/09, dsh 0.1.7-rc.2); lõi 0.1.1-rc.1 không có → mọi `ahv run` lỗi
+`...volatile is not a function`.
+
+## Quy trình
 
 ```bash
-git remote add upstream https://github.com/deepseek-ai/deepseek-harness.git
-git remote -v   # phải thấy origin=tranhieu860/AHVclaw + upstream=deepseek-ai/...
-```
-
-## Fetch + merge
-
-```bash
-# 1. Fetch tất cả branches + tags từ upstream
 git fetch upstream --tags
-
-# 2. Xem diff với current
-git log --oneline HEAD..upstream/master | head -20   # commits mới
-git diff --stat HEAD upstream/master                 # files changed
-
-# 3. Merge (fast-forward khi có thể)
-git checkout master
-git merge upstream/master
-
-#   Nếu có conflict:
-#   - Thường ở README-AHV.md, PULLING_UPSTREAM.md, apps/cli/package.json
-#     (chỗ ta thêm bin "ahv"). Giữ phía "ours" cho các file này.
-#     git checkout --ours README-AHV.md PULLING_UPSTREAM.md
-#     git checkout --ours apps/cli/package.json  # rồi merge tay bin block
-#   - Xong: git add . && git commit
+git tag -l 'dsh-v*' --sort=-creatordate | head      # chọn tag đích (rc/phát hành, không lấy master)
+git worktree add -b upgrade-dsh-<x.y> ../AHVclaw-upg master
+cd ../AHVclaw-upg
+git -c merge.renameLimit=20000 merge --no-ff --no-commit dsh-v<x.y.z>   # KHÔNG rebase lịch sử
 ```
 
-## Validate
+Giải xung đột theo bảng dưới, rồi `pnpm install --no-frozen-lockfile`
+(`PNPM_CONFIG_MINIMUM_RELEASE_AGE=0`) để dựng lại `pnpm-lock.yaml`.
+Commit gộp chạy lefthook (lint, third-party notices, ghép bản dịch) — đừng
+`--no-verify`.
 
-```bash
-pnpm install                          # sync workspace deps
-pnpm run typecheck
-pnpm run test
-pnpm run build
-pnpm ahv --profile headless "hello"   # smoke E2E (cần DEEPSEEK_API_KEY)
-```
+### Các điểm vá AHV phải còn sau mỗi lần gộp
 
-## Push
+| Tệp | Bản vá AHV | Khi xung đột |
+|---|---|---|
+| `apps/cli/package.json` | bin `ahv`; phụ thuộc `@ahvclaw/dsh-bundle-ahv` | giữ cả hai (0.2 chỉ phân giải plugin trong bao đóng phụ thuộc của bản cài — thiếu dòng này là bot-runner không nạp, `ahv run` treo) |
+| `apps/cli/src/bin.ts` | `withAhvDefaultProfile()` | lấy bản upstream, cấy lại hàm |
+| `packages/boot/app-boot/src/profile.ts` | profile `ahv`, `ahv-web` | thêm vào `PROFILE_TEMPLATES` theo định dạng mới |
+| `packages/bundle/ahv/**` | bundle AHV (router, persona, plugin, bot-runner) | của AHV; soát id dòng base/headless còn tồn tại, khoá cấu hình đổi tên (0.2: `persona` → `personaPrefix`), dòng upstream đã đưa vào base (0.2: storage, projection-cache) |
+| `packages/session/session-list-metadata` | projection cho `ahv run` | đồng bộ với `sessionListMetadata` của session-controller |
+| `packages/session/session-format-v0-to-v1/src/ahv-fork-legacy.ts` | chuẩn hoá phiên do lõi 0.1.1-rc.1 ghi | giữ; thiếu là mọi hội thoại bot cũ bị từ chối |
+| `packages/client/connection` (`browserAuth: external`) | ahv-web bind loopback sau cổng ahv-web-ui-auth | giữ |
+| `packages/client/**/locales.ts`, `apps/web/index.html`, `vite.config.ts`, `Rows.module.css` | thương hiệu AHV, tiêu đề, lời chào, thao tác hàng trên màn cảm ứng | lấy upstream, thay chữ |
+| `pnpm-workspace.yaml` | allowBuilds + miễn tuổi phát hành cho plugin AHV | upstream + khối AHV |
+| `README.md`, `README.i18n.yaml`, `.gitlab-ci.yml` (xoá) | trang AHV | giữ phía fork |
+| `scripts/prod/**`, `scripts/install-ahv-skin.sh`, `.github/workflows/prebuilt.yml` | công cụ phát hành AHV | của AHV |
 
-```bash
-git push origin master
-```
+## Kiểm bắt buộc trước khi phát hành
 
-## Nếu upstream force-pushed / rewrote history
+1. `pnpm run build` xanh.
+2. Test liên quan: `npx vitest run packages/client/connection/tests packages/session/session-format-v0-to-v1/tests packages/bundle packages/boot/app-boot/tests apps/cli/tests packages/client/ui-sidebar/tests`
+   và `for t in scripts/prod/tests/*.mjs; do node $t; done` (+ `bash scripts/prod/tests/test-*.sh`).
+3. Chạy thật từ cây vừa dựng trong một HOME tạm (không đụng `~/.ahv` thật):
+   `ahv --version`, `ahv doctor`, `ahv run --prompt-file … --output jsonl`
+   (ra `assistant_final` + `turn_end completed`), `ahv models list --json`,
+   `ahv login usage --json`, `ahv sessions list --json`, `ahv web` (Playwright).
+4. **Phiên cũ phải tiếp tục được**: chép kho phiên thật (`~ahvproxy/.dsh/sessions`)
+   vào thư mục tạm và cho khôi phục thử qua catalog của lõi mới — 0 phiên chính
+   bị từ chối. Lõi mới để nguyên tệp phiên cũ (tạo `session.vN.jsonl.zstd`
+   bên cạnh), nên lùi bản vẫn đọc được — nhưng các lượt chạy trên lõi mới
+   không hiện ra khi đã lùi.
+5. Plugin bị lõi mới tắt vì `peerDependencies`: wrapper gọi
+   `scripts/prod/ahv-plugin-grants.mjs` cấp miễn trừ đúng `tên@bản` mà bản
+   phát hành đóng gói, cho đúng phiên bản dsh — nên chỉ phát hành sau khi
+   bước 3 chạy thật các plugin đó.
 
-Hiếm nhưng có thể xảy ra ở pre-release. Ta chọn 1 trong 2:
+## Phát hành + lùi
 
-- **Rebase**: `git rebase upstream/master` — giữ AHV commits trên top,
-  bắt buộc `--force-with-lease` push.
-- **Reset + cherry-pick**: `git reset --hard upstream/master` rồi
-  `git cherry-pick <ahv-commits>` lấy lại rebranding + docs.
+- Gộp nhánh vào `master` (merge, không squash), rồi `scripts/prod/release-cli.sh`
+  (tag `v0.2.N`, dựng, **smoke có `ahv run` thật**, prebuilt, kênh canary, push).
+- CMS chỉ đưa canary → stable khi máy canary báo `ahv run` thật đạt trên đúng
+  tag đó (cổng `run_ok`), sau thời gian ngấm.
+- Lùi: `promote.sh <tag cũ>` hoặc nút *Lùi* trên CMS; trên máy, updater lật
+  `~/.ahv/src` về `versions/<tag cũ>`. Phiên đã nâng vẫn đọc được ở bản cũ
+  (xem bước 4).
 
-## Tags
+## Hotfix
 
-Upstream tag `dsh-v0.1.1-rc.1`, ta tag mirror `ahv-v0.1.1-rc.1` nếu
-publish release AHV riêng:
-
-```bash
-git tag ahv-v0.1.1-rc.1 <sha>
-git push origin ahv-v0.1.1-rc.1
-```
-
-## Frequency
-
-- Sync mỗi khi upstream release tag mới (theo dõi
-  <https://github.com/deepseek-ai/deepseek-harness/releases>).
-- Hotfix nhanh: chỉ cherry-pick commit cụ thể thay vì merge full master.
+Chỉ cần một sửa lẻ của upstream: `git cherry-pick <sha>` lên `master` thay vì
+gộp cả tag, ghi rõ sha upstream trong commit.

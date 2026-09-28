@@ -130,8 +130,8 @@ if ! run_as env \
   fail "build failed (log: /tmp/ahv-release-build-$next.log)"
 fi
 
-# Smoke: the built tree must report the tag, pass doctor, and answer the
-# quota lookup with a well-formed document.
+# Smoke: the built tree must report the tag, pass doctor, answer a real
+# `ahv run`, and answer the quota lookup with a well-formed document.
 smoke="$BUILD_HOME/bin/ahv"
 version="$(run_as env "${BUILD_ENV[@]}" NO_COLOR=1 "$smoke" --version 2>/dev/null | head -1 || true)"
 case "$version" in
@@ -144,6 +144,12 @@ import json, sys
 d = json.loads(sys.argv[1])
 assert d.get("ok") is True and int(d.get("error_count", 1)) == 0, d
 PY
+# A real run, the way the bot calls it: v0.2.50 passed --version and doctor and
+# still failed every `ahv run` at plugin load.
+if ! runverdict="$(run_as env "${BUILD_ENV[@]}" NO_COLOR=1 bash "$FORK/scripts/prod/smoke-run.sh" "$smoke" 240)"; then
+  rollback; fail "smoke: ahv run failed: $runverdict"
+fi
+log "smoke run: $runverdict"
 usage="$(run_as env "${BUILD_ENV[@]}" NO_COLOR=1 timeout 90 "$smoke" login usage --json 2>/dev/null || true)"
 python3 - "$usage" <<'PY' || { rollback; fail "smoke: login usage malformed"; }
 import json, sys

@@ -17,7 +17,7 @@ check() { # name, pattern
 check 'build env pins AHV_FORK to the build tree' 'AHV_FORK="$BUILD_HOME/src"'
 check 'build env pins DSH_HOME to the build tree' 'DSH_HOME="$BUILD_HOME/dsh"'
 check 'build uses the pinned env' 'run_as env \\'
-for step in '"$smoke" --version' '"$smoke" doctor' '"$smoke" login usage'; do
+for step in '"$smoke" --version' '"$smoke" doctor' 'smoke-run.sh" "$smoke"' '"$smoke" login usage'; do
   line="$(grep -F "$step" "$SCRIPT" | head -1)"
   if printf '%s' "$line" | grep -q 'BUILD_ENV\[@\]'; then
     printf '  PASS  smoke step uses the pinned env: %s\n' "$step"
@@ -26,6 +26,12 @@ for step in '"$smoke" --version' '"$smoke" doctor' '"$smoke" login usage'; do
     fails=$((fails + 1))
   fi
 done
+# doctor alone let v0.2.50 through; a failed real run must stop the release.
+if grep -q 'rollback; fail "smoke: ahv run failed' "$SCRIPT"; then
+  printf '  PASS  a failed ahv run rolls the release back\n'
+else
+  printf '  FAIL  a failed ahv run does not stop the release\n'; fails=$((fails + 1))
+fi
 # A rolled-back tag gets re-cut with the same name; a clone that fetched the
 # first one refuses the second ("would clobber existing tag") and every later
 # build on that clone fails — which is exactly what happened to the builder.
