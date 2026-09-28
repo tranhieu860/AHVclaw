@@ -3,10 +3,10 @@
  * needs to summarise a cold session without reading its log — whether the
  * checkpoint prefix contains no turn, and when the latest human prompt landed.
  *
- * The fold is a copy of the one in `dsh-host-apiproxy` (same key, same
+ * The fold is a copy of the one in `dsh-api-session-controller` (`src/list.ts`) (same key, same
  * `stateVersion`), deliberately duplicated rather than imported: this package
  * exists so a headless `ahv run` can produce the unit without pulling in the
- * whole web proxy, and the projection registry refcounts identical
+ * whole web session controller, and the projection registry refcounts identical
  * registrations, so both may be composed at once.
  *
  * @module @deepseek-ai/dsh-session-list-metadata/projection
@@ -14,9 +14,30 @@
 
 import { z } from 'zod'
 import type { SessionEvent } from '@deepseek-ai/dsh-session/types'
-// Type-only: keeps the key's `SessionProjectionStateMap` augmentation (declared
-// by the proxy) in the type graph without a runtime dependency on it.
-import type { SessionListMetadata } from '@deepseek-ai/dsh-host-apiproxy/api/sessions'
+
+/**
+ * Persisted hints used to summarise a cold session. Mirrors
+ * `SessionListMetadata` in `dsh-api-session-controller/src/types.ts`; that
+ * package is a client+host package outside the host project graph, so the
+ * shape is restated here instead of imported.
+ */
+export interface SessionListMetadata {
+  /** Whether the folded prefix contains no turn. */
+  readonly blank: boolean
+  /** Latest human-authored prompt time in the folded prefix. */
+  readonly lastPromptAt: number | null
+}
+
+// Same key and value shape the session controller declares, so the two
+// augmentations merge when both packages share one program.
+declare module '@deepseek-ai/dsh-session-projection/types' {
+  interface SessionProjectionStateMap {
+    sessionListMetadata: SessionListMetadata
+  }
+  interface SessionProjectionMap {
+    sessionListMetadata: SessionListMetadata
+  }
+}
 
 const schema: z.ZodType<SessionListMetadata> = z.object({
   blank: z.boolean(),

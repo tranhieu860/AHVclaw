@@ -7,7 +7,7 @@
 // never logged in, so only providers with a live session may be restored.
 import assert from 'node:assert/strict'
 
-const mod = await import('/home/claudeproxy/Claude/AHVclaw-fork/scripts/prod/ahv-bot.mjs')
+const mod = await import(new URL('../ahv-bot.mjs', import.meta.url).href)
 const { topUpMissingProviders } = mod
 
 let passed = 0, failed = 0

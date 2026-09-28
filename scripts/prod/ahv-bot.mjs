@@ -152,6 +152,38 @@ export function checkProfileBundleLink(fork, dshHome) {
   return check
 }
 
+/**
+ * Check that dsh can resolve the AHV bundle from its own installation.
+ *
+ * Since dsh 0.2 a profile resolves plugins through the installation's
+ * dependency closure first (apps/cli), so the bundle and every plugin it pins
+ * must be reachable from there. Without it the bot runner never mounts and a
+ * run has nothing to drive it.
+ *
+ * @param fork - the install's source tree.
+ * @returns a doctor check.
+ */
+export function checkInstallBundleLink(fork) {
+  const link = join(fork, 'apps', 'cli', 'node_modules', '@ahvclaw', 'dsh-bundle-ahv')
+  const check = { name: 'install_bundle', value: link }
+  let actual
+  let want
+  try {
+    actual = realpathSync(link)
+    want = realpathSync(join(fork, 'packages', 'bundle', 'ahv'))
+  } catch {
+    check.ok = false
+    check.severity = 'error'
+    check.note = 'apps/cli không phụ thuộc @ahvclaw/dsh-bundle-ahv — bot runner sẽ không nạp được'
+    return check
+  }
+  check.value = actual
+  check.ok = actual === want
+  check.severity = check.ok ? 'ok' : 'error'
+  if (!check.ok) check.note = `bundle trỏ tới ${actual}, không phải ${want}`
+  return check
+}
+
 async function doctor() {
   // Severity contract cho bot: 'ok' | 'warn' | 'error'.
   // - error = blocking (node/fork/cli_bin/credential thiếu → ahv run không
@@ -246,6 +278,7 @@ async function doctor() {
   checks.push(modelCheck)
 
   checks.push(checkProfileBundleLink(FORK, DSH_HOME))
+  checks.push(checkInstallBundleLink(FORK))
 
   // Aggregate ok = TRUE trừ khi có ít nhất 1 check severity='error'.
   // Warn không làm ok=false. Bot dùng ok để phân loại "CLI ready" vs
@@ -305,6 +338,35 @@ function decodeSessionJsonl(filePath) {
   return lines.map(l => JSON.parse(l))
 }
 
+/**
+ * The log a session's newest format generation lives in.
+ *
+ * dsh 0.2 writes `session.v<N>.jsonl.zstd` and migrates an older log into a
+ * new generation on first open, leaving the source file in place (that is
+ * what keeps a rollback to the old CLI working). Reading the version-0
+ * `session.jsonl.zstd` after that would report a conversation frozen at the
+ * upgrade, so the highest generation wins.
+ *
+ * @param sessionPath - one session directory.
+ * @returns the log path, or null when the directory holds none.
+ */
+export function currentSessionLog(sessionPath) {
+  let best = null
+  let bestVersion = -1
+  for (const name of readdirSync(sessionPath)) {
+    const match = /^session(?:\.v(\d+))?\.jsonl(\.zstd)?$/.exec(name)
+    if (!match) continue
+    const version = match[1] === undefined ? 0 : Number(match[1])
+    // Same generation in both encodings: prefer the compressed file, which is
+    // what the harness writes.
+    if (version > bestVersion || (version === bestVersion && match[2] !== undefined)) {
+      best = join(sessionPath, name)
+      bestVersion = version
+    }
+  }
+  return best
+}
+
 function findSessionFiles() {
   if (!existsSync(SESSIONS_ROOT)) return []
   const result = []
@@ -314,9 +376,7 @@ function findSessionFiles() {
     for (const sessionDir of readdirSync(projectPath)) {
       const sessionPath = join(projectPath, sessionDir)
       if (!statSync(sessionPath).isDirectory()) continue
-      const jsonl = join(sessionPath, 'session.jsonl')
-      const zstd = join(sessionPath, 'session.jsonl.zstd')
-      let filePath = existsSync(zstd) ? zstd : existsSync(jsonl) ? jsonl : null
+      const filePath = currentSessionLog(sessionPath)
       if (!filePath) continue
       result.push({
         path: filePath,
@@ -1475,6 +1535,35 @@ async function modelsShow(modelId) {
   }, 0)
 }
 
+/**
+ * Watch dsh's stderr for the bot runner failing to mount.
+ *
+ * dsh 0.2 reports a plugin row that did not activate as a warning block
+ * ("dsh: warning: N entries did not activate", then one "<id> (<name>): <why>"
+ * line per row) and keeps running. Without the runner nothing ever exits, so
+ * this turns that into the bot's terminal error instead of a hang.
+ *
+ * @param onFailure - called once with the offending line.
+ * @returns a sink for stderr chunks.
+ */
+export function runnerLoadWatcher(onFailure) {
+  let pending = ''
+  let fired = false
+  return (chunk) => {
+    if (fired) return
+    pending += chunk.toString('utf8')
+    const lines = pending.split('\n')
+    pending = lines.pop() ?? ''
+    for (const line of lines) {
+      if (/^bot-(runner|startup) \([^)]*\): /.test(line.trim())) {
+        fired = true
+        onFailure(line.trim())
+        return
+      }
+    }
+  }
+}
+
 // ── run (spawn dsh headless + ahv patch + bot patch) ───────────────────
 // Reuse the working ahv-profile module-resolution: cwd=FORK so pnpm's hoisted
 // @deepseek-ai/* deps resolve, and --patch layers apply on top of headless.
@@ -1514,10 +1603,21 @@ function runBot(argv) {
   ]
   const env = { ...process.env, NO_COLOR: '1' }
   const proc = spawn(process.execPath, dshArgs, {
-    stdio: ['inherit', 'inherit', 'inherit'],
+    // stderr is relayed, not inherited: dsh 0.2 only warns when a plugin row
+    // fails to load, so a bot-runner that cannot mount leaves the process
+    // alive with nothing to drive it and the caller waits out its timeout.
+    stdio: ['inherit', 'inherit', 'pipe'],
     env,
     cwd: FORK,
     detached: true,   // đặt child vào process group riêng để kill -TERM -pgid diệt cả subtree
+  })
+  const watchRunner = runnerLoadWatcher((detail) => {
+    try { process.kill(-proc.pid, 'SIGKILL') } catch { try { proc.kill('SIGKILL') } catch {} }
+    errJson('internal_error', `AHV bot runner không nạp được: ${detail}`, true, 0, 1)
+  })
+  proc.stderr.on('data', (chunk) => {
+    process.stderr.write(chunk)
+    watchRunner(chunk)
   })
   let cancelled = false
   const forward = (sig) => {

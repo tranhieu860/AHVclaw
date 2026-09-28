@@ -8,10 +8,10 @@
 import assert from 'node:assert/strict'
 
 // The Antigravity OAuth client is read from the plugin inside the checkout.
-process.env.AHV_FORK ??= '/home/claudeproxy/Claude/AHVclaw-fork'
+process.env.AHV_FORK ??= new URL('../../..', import.meta.url).pathname.replace(/\/$/, '')
 
 const { normaliseUsagePayload, USAGE_ENDPOINTS, fetchProviderUsage, refreshSessionIfStale, REFRESH_ENDPOINTS, REFRESH_AHEAD_MS, antigravityOAuthClient } =
-  await import('/home/claudeproxy/Claude/AHVclaw-fork/scripts/prod/ahv-bot.mjs')
+  await import(new URL('../ahv-bot.mjs', import.meta.url).href)
 
 let passed = 0, failed = 0
 function check(name, fn) {

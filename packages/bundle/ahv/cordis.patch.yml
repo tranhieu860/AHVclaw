@@ -58,6 +58,15 @@
 - id: web-search-deepseek
   disabled: true
 
+# dsh 0.2 base also mounts the native DeepSeek model routes (API key and
+# DeepSeek account). AHV users hold neither, so those models would only show
+# up in the model menu and fail when picked.
+- id: llm-deepseek
+  disabled: true
+
+- id: llm-deepseek-account
+  disabled: true
+
 # The web-search tool now has no provider mounted. Disable the tool so the
 # model doesn't see a broken option; add a real search provider (Brave,
 # Tavily, or AHV's own once available) in a future patch.
@@ -70,7 +79,9 @@
 # per-command feedback bring the rest of the operational rules.
 - id: system-prompt
   config:
-    persona: >-
+    # dsh 0.2 renamed `persona` to `personaPrefix`; the old key is dropped
+    # silently by the schema, so the AHV persona would vanish without error.
+    personaPrefix: >-
       Bạn là AHV CLI, agentic dev assistant chạy trong terminal của user Việt
       Nam. Model hiện tại: {{model}}. Working directory: {{cwd}}. Nói tiếng
       Việt trừ khi user gõ bằng ngôn ngữ khác. Ngắn gọn, chính xác, dùng tool
@@ -148,39 +159,19 @@
     # --- Session listing shared with the web UI -------------------------
     # `ahv run` (what the Telegram bot invokes) wrote its session log but
     # never the projection cache, so the web listed those conversations
-    # without a title and with a stale time — 72 sessions on disk against
-    # 3 rows in ~/.dsh/storages/session_projcache.json. The cache service is
-    # what checkpoints title/stats on `turn/end`; it only shipped in the
-    # web-app bundle. Mounting it here (with the storage stack it needs, in
-    # the same layout the web already uses) makes a bot conversation appear
-    # in the web list exactly like one started from the browser.
-    - id: storage
-      name: '@deepseek-ai/dsh-storage'
-
-    - id: storage-json
-      name: '@deepseek-ai/dsh-storage-json'
-      config:
-        root: !!js dshHomePath('storages')
-
-    - id: storage-domain
-      name: '@deepseek-ai/dsh-storage-domain'
-      config:
-        backend: json
-
+    # without a title and with a stale time. Since dsh 0.2 the storage stack
+    # (storage, storage-json, storage-domain) and session-projection-cache
+    # are base rows with the same layout the web uses, so only the two units
+    # the base still lacks are mounted here.
     # Turn/step counts for the listing row; the projection registry itself
     # is a base-layer row.
     - id: session-stats
       name: '@deepseek-ai/dsh-session-stats'
 
-    # The list hints the web reads to summarise a cold session. The proxy
-    # registers this key too, but `ahv run` composes no proxy — without it the
+    # The list hints the web reads to summarise a cold session. The web's
+    # session controller registers this key too, but `ahv run` composes no
+    # session controller — without it the
     # cached row is written yet the listing still falls back to the workspace
     # name, which is exactly what a bot conversation looked like.
     - id: session-list-metadata
       name: '@deepseek-ai/dsh-session-list-metadata'
-
-    - id: session-projection-cache
-      name: '@deepseek-ai/dsh-session-projection-cache'
-      config:
-        writeEveryEvents: 200
-        writeIntervalMs: 5000

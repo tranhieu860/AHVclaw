@@ -135,46 +135,54 @@ function classifyError(error: unknown): { code: BotErrorCode; terminal: boolean;
   return { code: 'internal_error', terminal: true, retryAfterSec: 0, message: `Internal: ${detail}` }
 }
 
-/** Convert a core SessionEvent → optional bot JSONL event (returns null for events with no external analog). */
-function translate(event: SessionEvent): BotEvent | null {
+/** Per-run facts the translation needs across events. */
+interface TranslateState {
+  /** Tool name per call id: `tool/result` carries only the call id since dsh 0.2. */
+  readonly toolNames: Map<string, string>
+  /** Token usage summed over this run's committed assistant messages. */
+  inputTokens: number
+  outputTokens: number
+}
+
+/**
+ * Convert a core SessionEvent → optional bot JSONL event (returns null for events with no external analog).
+ * Streaming text deltas are not session events in dsh 0.2; they come from the
+ * `agent/assistant-stream` feed (see {@link run}).
+ */
+function translate(event: SessionEvent, state: TranslateState): BotEvent | null {
   if (event.type === 'assistant/message') {
-    const text = event.data.message.content
-      .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
-      .map(block => block.text)
-      .join('')
+    state.inputTokens += event.data.usage?.inputTokens ?? 0
+    state.outputTokens += event.data.usage?.outputTokens ?? 0
+    const text = assistantText(event)
     if (text === '') return null
     return { type: 'assistant_final', text }
   }
-  if (event.type === 'assistant/chunk') {
-    const data = event.data as { block?: { type?: string; text?: string } }
-    if (data.block?.type === 'text' && typeof data.block.text === 'string' && data.block.text !== '') {
-      return { type: 'assistant_delta', text: data.block.text }
-    }
-    return null
-  }
   if (event.type === 'tool/call') {
-    const data = event.data as { tool?: { name?: string }; name?: string }
-    const toolName = data.tool?.name ?? data.name ?? 'unknown'
-    return { type: 'tool_status', name: toolName, status: 'running', summary: '' }
+    state.toolNames.set(event.data.callId, event.data.name)
+    return { type: 'tool_status', name: event.data.name, status: 'running', summary: '' }
   }
   if (event.type === 'tool/result') {
-    const data = event.data as { tool?: { name?: string }; name?: string; error?: unknown }
-    const toolName = data.tool?.name ?? data.name ?? 'unknown'
-    return { type: 'tool_status', name: toolName, status: data.error === undefined ? 'ok' : 'error', summary: '' }
+    const name = state.toolNames.get(event.data.message.toolCallId) ?? 'unknown'
+    const failed = event.data.message.isError === true || event.data.error !== undefined
+    return { type: 'tool_status', name, status: failed ? 'error' : 'ok', summary: '' }
   }
   if (event.type === 'turn/end') {
-    const data = event.data as { reason?: { kind?: string }; usage?: { inputTokens?: number; outputTokens?: number } }
-    const kind = data.reason?.kind ?? 'completed'
+    const kind = event.data.reason.kind
     return {
       type: 'turn_end',
       reason: kind === 'completed' ? 'completed' : (kind === 'error' ? 'error' : 'stopped'),
-      usage: {
-        input_tokens: data.usage?.inputTokens ?? 0,
-        output_tokens: data.usage?.outputTokens ?? 0,
-      },
+      usage: { input_tokens: state.inputTokens, output_tokens: state.outputTokens },
     }
   }
   return null
+}
+
+/** The text blocks of one committed assistant message, joined. */
+function assistantText(event: SessionEvent<'assistant/message'>): string {
+  return event.data.message.content
+    .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+    .map(block => block.text)
+    .join('')
 }
 
 /** Report a runner failure through the bot JSONL taxonomy and pick the exit code. */
@@ -310,21 +318,28 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
   const turnState = {
     lastTurnEndReason: null as { kind: string; error?: { code?: string; message?: string } } | null,
     sawAssistantFinal: false,
+    lastAssistantText: '',
   }
+  const translateState: TranslateState = { toolNames: new Map(), inputTokens: 0, outputTokens: 0 }
   const dispose = ctx.on('session/event', (session: Session, event: SessionEvent) => {
-    if (emitLock.session !== undefined && session.header.id !== emitLock.session.header.id) return
+    if (emitLock.session === undefined || session.header.id !== emitLock.session.header.id) return
     if (event.type === 'turn/end') {
-      const data = event.data as { reason?: { kind: string; error?: { code?: string; message?: string } } }
-      turnState.lastTurnEndReason = data.reason ?? null
+      turnState.lastTurnEndReason = event.data.reason as { kind: string; error?: { code?: string; message?: string } }
     }
     if (event.type === 'assistant/message') {
-      const hasText = event.data.message.content.some((b): b is { type: 'text'; text: string } => b.type === 'text' && b.text !== '')
-      if (hasText) turnState.sawAssistantFinal = true
+      const text = assistantText(event)
+      if (text !== '') {
+        turnState.sawAssistantFinal = true
+        turnState.lastAssistantText = text
+      }
     }
-    const translated = translate(event)
+    const translated = translate(event, translateState)
     if (translated === null) return
     if (config.output === 'jsonl') emit(io, translated)
   })
+  // Streaming text arrives on the live Assistant frame feed, not the durable
+  // log. The bot only uses these rows as a "writing the answer" signal.
+  let disposeStream: (() => void) | undefined
 
   try {
     const setup = (agentCtx: Context) => {
@@ -345,6 +360,12 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
       })
 
     emitLock.session = agent.session
+    disposeStream = ctx.on('agent/assistant-stream', ({ agent: subject, frame }) => {
+      if (subject !== agent || frame.type !== 'chunk' || config.output !== 'jsonl') return
+      if (frame.chunk.type === 'text-delta' && frame.chunk.text !== '') {
+        emit(io, { type: 'assistant_delta', text: frame.chunk.text })
+      }
+    })
     if (config.output === 'jsonl') {
       emit(io, {
         type: 'session_meta',
@@ -363,18 +384,7 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
     await sessions.flush(agent.session)
 
     // Text mode: also print the last assistant text for backwards compat.
-    if (config.output === 'text') {
-      const lastAssistantText = [...agent.session.events]
-        .reverse()
-        .find(e => e.type === 'assistant/message')
-      if (lastAssistantText?.type === 'assistant/message') {
-        const text = lastAssistantText.data.message.content
-          .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
-          .map(b => b.text)
-          .join('')
-        io.stdout.write(text + '\n')
-      }
-    }
+    if (config.output === 'text') io.stdout.write(turnState.lastAssistantText + '\n')
 
     // Exit code contract: turn_end reason=completed + có assistant_final →
     // exit 0. Bất kỳ trạng thái nào khác (turn/end reason=error, agent-loop
@@ -412,6 +422,7 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
     }
     io.exit(0)
   } finally {
+    disposeStream?.()
     dispose()
   }
 }

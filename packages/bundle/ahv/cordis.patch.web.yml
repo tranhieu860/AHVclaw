@@ -44,16 +44,36 @@
 - id: web-search-deepseek
   disabled: true
 
+# dsh 0.2 base also mounts the native DeepSeek model routes (API key and
+# DeepSeek account). AHV users hold neither, so those models would only show
+# up in the model menu and fail when picked.
+- id: llm-deepseek
+  disabled: true
+
+- id: llm-deepseek-account
+  disabled: true
+
 - id: tool-web
   disabled: true
 
 - id: system-prompt
   config:
-    persona: >-
+    personaPrefix: >-
       Bạn là AHV CLI, agentic dev assistant chạy trong terminal của user Việt
       Nam. Model hiện tại: {{model}}. Working directory: {{cwd}}. Nói tiếng
       Việt trừ khi user gõ bằng ngôn ngữ khác. Ngắn gọn, chính xác, dùng tool
       khi cần thay vì đoán. Xác nhận với user trước mọi thay đổi phá hủy.
+
+# dsh 0.2 authenticates browsers itself (per-process launch token → signed
+# cookie). The fleet's ahv-web binds loopback behind the ahv-web-ui-auth login
+# gate, which a launch token printed to the journal cannot pass. The wrapper
+# sets AHV_WEB_AUTH=external only for a loopback bind; any other bind keeps the
+# upstream token. The row's config is replaced whole, so the trust fence
+# expression from web-app is repeated here.
+- id: connection
+  config:
+    trustedHosts: !!js ctx.webRuntime.trustedHosts
+    browserAuth: !!js "process.env.AHV_WEB_AUTH === 'external' ? 'external' : 'token'"
 
 # --- Extras web-app doesn't ship ---------------------------------------
 

@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import assert from 'node:assert/strict'
 
-const mod = await import('/home/claudeproxy/Claude/AHVclaw-fork/scripts/prod/ahv-bot.mjs')
+const mod = await import(new URL('../ahv-bot.mjs', import.meta.url).href)
 const { importCliCredentials } = mod
 
 let passed = 0, failed = 0

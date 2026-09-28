@@ -1,8 +1,8 @@
 /**
  * Function plugin registering the `sessionListMetadata` projection unit.
  *
- * The web proxy registers this key too, but the Telegram bot drives the CLI
- * through `ahv run`, which composes no proxy — so its sessions reached the
+ * The web session controller registers this key too, but the Telegram bot drives the CLI
+ * through `ahv run`, which composes no session controller — so its sessions reached the
  * projection cache without the hints the session list reads, and the web
  * listed those conversations untitled with a stale time. Mounting this plugin
  * in a headless bundle closes that gap; when both are composed the registry

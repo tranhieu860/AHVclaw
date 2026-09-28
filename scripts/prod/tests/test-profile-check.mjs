@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import assert from 'node:assert/strict'
 
-const { checkProfileBundleLink } = await import('/home/claudeproxy/Claude/AHVclaw-fork/scripts/prod/ahv-bot.mjs')
+const { checkProfileBundleLink, checkInstallBundleLink } = await import(new URL('../ahv-bot.mjs', import.meta.url).href)
 
 let passed = 0, failed = 0
 function check(name, fn) {
@@ -62,6 +62,28 @@ check('the check reports where the link actually goes', () => {
   symlinkSync(join(other, 'packages/bundle/ahv'), join(farm, '@ahvclaw/dsh-bundle-ahv'))
   const result = checkProfileBundleLink(fork, join(root, 'dsh'))
   assert.ok(String(result.value).includes(other), JSON.stringify(result))
+})
+
+check('install: the bundle linked into apps/cli from this tree passes', () => {
+  const { fork } = scaffold()
+  mkdirSync(join(fork, 'apps/cli/node_modules/@ahvclaw'), { recursive: true })
+  symlinkSync(join(fork, 'packages/bundle/ahv'), join(fork, 'apps/cli/node_modules/@ahvclaw/dsh-bundle-ahv'))
+  assert.equal(checkInstallBundleLink(fork).severity, 'ok')
+})
+
+check('install: apps/cli without the bundle is an error (the runner cannot mount)', () => {
+  const { fork } = scaffold()
+  assert.equal(checkInstallBundleLink(fork).severity, 'error')
+})
+
+check('install: a bundle resolved from another tree is an error', () => {
+  const { fork } = scaffold()
+  const other = mkdtempSync(join(tmpdir(), 'other3-'))
+  mkdirSync(join(other, 'packages/bundle/ahv'), { recursive: true })
+  mkdirSync(join(fork, 'apps/cli/node_modules/@ahvclaw'), { recursive: true })
+  symlinkSync(join(other, 'packages/bundle/ahv'), join(fork, 'apps/cli/node_modules/@ahvclaw/dsh-bundle-ahv'))
+  const result = checkInstallBundleLink(fork)
+  assert.equal(result.severity, 'error', JSON.stringify(result))
 })
 
 console.log(`\n  ${passed} passed, ${failed} failed`)

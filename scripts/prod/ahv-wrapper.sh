@@ -85,18 +85,51 @@ ensure_profile_plugins() {
   done
 }
 
+# dsh 0.2 disables a plugin whose dsh peer range misses the running version
+# unless the profile grants that exact version. The bundle's pinned plugins
+# (subscriptions, browser, …) still declare 0.1.x peers, so without this every
+# run loses them quietly. Grants name only what this install ships.
+grant_shipped_plugins() {
+  local fork="$1"; shift
+  [ -f "$fork/scripts/prod/ahv-plugin-grants.mjs" ] || return 0
+  node "$fork/scripts/prod/ahv-plugin-grants.mjs" "$fork" "${DSH_HOME:-$HOME/.dsh}" "$@" || true
+}
+
+# Browser authentication for `ahv web`. A loopback bind is only reachable
+# through the machine's own proxy, where ahv-web-ui-auth is the login, and dsh
+# 0.2's per-process launch token would lock that out ("external"). Any other
+# bind keeps the upstream token ("token"). No --host means dsh's loopback default.
+web_auth_mode() {
+  local mode=external prev="" arg host
+  for arg in "$@"; do
+    host=""
+    [ "$prev" = "--host" ] && host="$arg"
+    case "$arg" in --host=*) host="${arg#--host=}" ;; esac
+    if [ -n "$host" ]; then
+      case "$host" in 127.0.0.1|localhost|::1|'[::1]') ;; *) mode=token ;; esac
+    fi
+    prev="$arg"
+  done
+  printf '%s\n' "$mode"
+}
+
 AHV_BOT="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)/ahv-bot.mjs"
 
 case "${1:-}" in
   auth|login|doctor|sessions|models|version|run)
     ensure_profile_plugins "$FORK"
+    grant_shipped_plugins "$FORK" headless
     exec node "$AHV_BOT" "$@"
     ;;
   web)
     shift
+    grant_shipped_plugins "$FORK" web
+    AHV_WEB_AUTH="$(web_auth_mode "$@")"
+    export AHV_WEB_AUTH
     exec node --import tsx/esm "$BIN" --profile web --patch "$PATCH_WEB" "$@"
     ;;
   plugin)
+    grant_shipped_plugins "$FORK" headless web
     exec node --import tsx/esm "$BIN" "$@"
     ;;
   update)
@@ -200,6 +233,7 @@ HINT
     exit 0
     ;;
   *)
+    grant_shipped_plugins "$FORK" headless
     exec node --import tsx/esm "$BIN" --profile headless --patch "$PATCH" "$@"
     ;;
 esac
