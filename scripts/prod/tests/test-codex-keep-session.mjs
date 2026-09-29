@@ -27,7 +27,10 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 function pluginDir(argv) {
-  if (argv[0] === '--plugin') return resolve(argv[1])
+  if (argv[0] === '--plugin') {
+    if (!argv[1]) { console.error('usage: test-codex-keep-session.mjs [<ahv tree>] | --plugin <dir>'); process.exit(2) }
+    return resolve(argv[1])
+  }
   const tree = resolve(argv[0] ?? new URL('../../..', import.meta.url).pathname)
   // apps/cli depends on the AHV bundle, and the bundle on the plugin: resolving
   // from the bundle is the copy `ahv run`, `ahv login` and `ahv web` load.
@@ -39,6 +42,7 @@ const dir = pluginDir(process.argv.slice(2))
 const version = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).version
 
 const home = mkdtempSync(join(tmpdir(), 'codex-keep-'))
+process.on('exit', () => rmSync(home, { recursive: true, force: true }))
 process.env.DSH_HOME = join(home, '.dsh')
 process.env.HOME = home
 for (const k of ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'ALL_PROXY', 'all_proxy']) delete process.env[k]
@@ -84,7 +88,10 @@ globalThis.fetch = async (input) => {
 
 // The smallest host apply() runs in: routes are captured, everything else inert.
 const routes = new Map()
-const handle = () => Object.assign(() => {}, { replace: () => {}, dispose: () => {} })
+// authChanged() re-registers every adapter route: counting replace() calls is
+// how the test sees the plugin's auth-changed hook run.
+let authChanges = 0
+const handle = () => Object.assign(() => {}, { replace: () => { authChanges++ }, dispose: () => {} })
 const ctx = {
   effect: (fn) => { fn(); },
   get: () => undefined,
@@ -141,6 +148,28 @@ await check('codex dead login is still reported as INVALID_CREDENTIAL / login ex
   assert.ok(stored().codex?.accounts?.[CODEX], 'second failure deleted the account')
 })
 
+await check('codex spent refresh token is not sent again', async () => {
+  seed()
+  const calls = tokenCalls.codex
+  const result = await usage('codex', CODEX)
+  assert.match(JSON.stringify(result?.error ?? result), /INVALID_CREDENTIAL|login expired or was revoked/)
+  assert.equal(tokenCalls.codex, calls, 'the dead refresh token went to auth.openai.com again')
+})
+
+await check('codex login refilled in the store (login-sync) is used and clears the pool state', async () => {
+  seed()
+  const store$ = stored()
+  store$.codex.accounts[CODEX] = { accessToken: 'fake-codex-at-2', refreshToken: 'fake-codex-rt-2', expiresAt: Date.now() + 3_600_000, accountId: CODEX }
+  writeFileSync(store, JSON.stringify(store$), { mode: 0o600 })
+  const calls = tokenCalls.codex
+  const changes = authChanges
+  const result = await usage('codex', CODEX)
+  assert.equal(tokenCalls.codex, calls, 'a live session was refreshed')
+  assert.doesNotMatch(JSON.stringify(result?.error ?? result), /INVALID_CREDENTIAL|login expired or was revoked/)
+  assert.ok(authChanges > changes, 'auth-changed hook did not run after the login came back')
+  assert.equal(stored().codex.accounts[CODEX].refreshToken, 'fake-codex-rt-2')
+})
+
 await check('claude invalid_grant still removes the claude account (unchanged)', async () => {
   seed()
   const result = await usage('claude', CLAUDE)
@@ -150,6 +179,5 @@ await check('claude invalid_grant still removes the claude account (unchanged)',
   assert.ok(stored().codex?.accounts?.[CODEX], 'claude removal took the codex account with it')
 })
 
-rmSync(home, { recursive: true, force: true })
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed ? 1 : 0)

@@ -108,7 +108,17 @@ log "Cài dependencies (mất 3-8 phút, tốn ~2GB disk)..."
 # pnpm 11 exit 1 khi có build scripts bị ignore (cloudflared/cpu-features/ssh2 —
 # optional deps của các plugin community, không blocker cho AHV core). Chấp nhận
 # non-zero exit ở đây; bước sau (wrapper, skin) sẽ fail rõ ràng nếu thật sự hỏng.
-PNPM_CONFIG_MINIMUM_RELEASE_AGE=0 pnpm install --prefer-offline || warn "pnpm install returned non-zero (thường do build scripts optional bị skip, an toàn bỏ qua)"
+# Trừ lỗi bản vá (patches/, patchedDependencies): cây dựng tiếp mà thiếu vá thì
+# chạy được nhưng mang lỗi cũ — vd plugin đăng nhập xoá phiên Codex chết.
+pnpm_log="$(mktemp)"
+if PNPM_CONFIG_MINIMUM_RELEASE_AGE=0 pnpm install --prefer-offline 2>&1 | tee "$pnpm_log"; [ "${PIPESTATUS[0]}" -ne 0 ]; then
+  if grep -qE 'ERR_PNPM_(PATCH_FAILED|UNUSED_PATCH|INVALID_PATCH|PATCH_NOT_FOUND)' "$pnpm_log"; then
+    rm -f "$pnpm_log"
+    fail "pnpm install: bản vá trong patches/ không áp được — không dựng cây thiếu vá"
+  fi
+  warn "pnpm install returned non-zero (thường do build scripts optional bị skip, an toàn bỏ qua)"
+fi
+rm -f "$pnpm_log"
 
 # Node picks its old-space heap from total RAM, and on a small host the share it
 # picks is under what `pnpm run build` (tsc -b + tsdown across the monorepo)
