@@ -21,6 +21,7 @@ import { resolve as resolvePath, dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { zstdDecompressSync } from 'node:zlib'
 import { homedir } from 'node:os'
+import { createHash, randomBytes } from 'node:crypto'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const FORK = process.env.AHV_FORK ?? resolvePath(HERE, '..', 'src')
@@ -722,6 +723,22 @@ export async function antigravityOAuthClient() {
 export const REFRESH_AHEAD_MS = 60_000
 
 /**
+ * Whether a stored session is due a refresh, by the rule both commands share.
+ *
+ * @param kind - provider id.
+ * @param session - the stored session.
+ * @param now - epoch ms.
+ * @returns 'unsupported' when this file cannot refresh it (no refresh endpoint
+ *   or no refresh token), 'fresh' when it outlives REFRESH_AHEAD_MS, else 'stale'.
+ */
+export function refreshNeed(kind, session, now = Date.now()) {
+  if (REFRESH_ENDPOINTS[kind] === undefined || !session || typeof session.accessToken !== 'string') return 'unsupported'
+  if (typeof session.refreshToken !== 'string' || session.refreshToken === '') return 'unsupported'
+  const expiresAt = typeof session.expiresAt === 'number' ? session.expiresAt : 0
+  return expiresAt > now + REFRESH_AHEAD_MS ? 'fresh' : 'stale'
+}
+
+/**
  * Refresh a stored session when its access token is expired or about to be.
  *
  * Never throws: a failed refresh is reported beside the stale session so the
@@ -731,18 +748,12 @@ export const REFRESH_AHEAD_MS = 60_000
  * @param session - the stored session for that provider.
  * @param fetchFn - injected for tests.
  * @param now - epoch ms, injected for tests.
- * @returns the session to use, whether it was refreshed, and the error if not.
+ * @returns the session to use, whether it was refreshed, and the error if not;
+ *   a failure also carries `failure`: 'invalid_grant', 'http' or 'network'.
  */
 export async function refreshSessionIfStale(kind, session, fetchFn = fetch, now = Date.now()) {
+  if (refreshNeed(kind, session, now) !== 'stale') return { session, refreshed: false }
   const endpoint = REFRESH_ENDPOINTS[kind]
-  if (endpoint === undefined || !session || typeof session.accessToken !== 'string') {
-    return { session, refreshed: false }
-  }
-  if (typeof session.refreshToken !== 'string' || session.refreshToken === '') {
-    return { session, refreshed: false }
-  }
-  const expiresAt = typeof session.expiresAt === 'number' ? session.expiresAt : 0
-  if (expiresAt > now + REFRESH_AHEAD_MS) return { session, refreshed: false }
   const scope = Array.isArray(session.scopes) ? session.scopes.join(' ') : session.scopes
   try {
     const client = endpoint.client ? await endpoint.client() : endpoint
@@ -768,13 +779,21 @@ export async function refreshSessionIfStale(kind, session, fetchFn = fetch, now 
           }),
         })
     if (!response.ok) {
-      const detail = typeof response.text === 'function' ? String(await response.text()).slice(0, 120) : ''
-      return { session, refreshed: false, error: `refresh HTTP ${response.status}${detail ? `: ${detail}` : ''}` }
+      const body = typeof response.text === 'function' ? String(await response.text()) : ''
+      const detail = body.slice(0, 120)
+      // The whole body is searched: the grant error can sit past the part shown.
+      const dead = (response.status === 400 || response.status === 401) && body.includes('invalid_grant')
+      return {
+        session,
+        refreshed: false,
+        failure: dead ? 'invalid_grant' : 'http',
+        error: `refresh HTTP ${response.status}${detail ? `: ${detail}` : ''}`,
+      }
     }
     const tokens = await response.json()
     if (typeof tokens?.access_token !== 'string' || tokens.access_token === ''
       || typeof tokens?.expires_in !== 'number' || !(tokens.expires_in > 0)) {
-      return { session, refreshed: false, error: 'refresh returned no usable token' }
+      return { session, refreshed: false, failure: 'http', error: 'refresh returned no usable token' }
     }
     return {
       refreshed: true,
@@ -788,7 +807,12 @@ export async function refreshSessionIfStale(kind, session, fetchFn = fetch, now 
       },
     }
   } catch (error) {
-    return { session, refreshed: false, error: `refresh failed: ${error instanceof Error ? error.message : String(error)}` }
+    return {
+      session,
+      refreshed: false,
+      failure: 'network',
+      error: `refresh failed: ${error instanceof Error ? error.message : String(error)}`,
+    }
   }
 }
 
@@ -951,10 +975,25 @@ export function normaliseUsagePayload(kind, payload) {
  * @returns normalised usage, or supported:false with a reason.
  */
 export async function fetchProviderUsage(kind, session, fetchFn = fetch) {
+  return (await readProviderUsage(kind, session, fetchFn)).result
+}
+
+/**
+ * fetchProviderUsage, plus what the usage book needs from the HTTP answer.
+ *
+ * @param kind - provider id.
+ * @param session - the stored session for that provider.
+ * @param fetchFn - injected for tests.
+ * @returns `result` as fetchProviderUsage; `status` (the HTTP status, or null
+ *   when no request answered) and `retryAfter` (the raw Retry-After header or null).
+ */
+async function readProviderUsage(kind, session, fetchFn) {
   const endpoint = USAGE_ENDPOINTS[kind]
-  if (endpoint === undefined) return { supported: false, windows: [], error: `unknown provider ${kind}` }
+  if (endpoint === undefined) {
+    return { status: null, retryAfter: null, result: { supported: false, windows: [], error: `unknown provider ${kind}` } }
+  }
   if (!session || typeof session.accessToken !== 'string' || session.accessToken === '') {
-    return { supported: false, windows: [], error: 'chua login provider nay' }
+    return { status: null, retryAfter: null, result: { supported: false, windows: [], error: 'chua login provider nay' } }
   }
   try {
     const response = await fetchFn(endpoint.url, {
@@ -964,12 +1003,231 @@ export async function fetchProviderUsage(kind, session, fetchFn = fetch) {
     })
     if (!response.ok) {
       const detail = typeof response.text === 'function' ? String(await response.text()).slice(0, 120) : ''
-      return { supported: false, windows: [], error: `HTTP ${response.status}${detail ? `: ${detail}` : ''}` }
+      const retryAfter = typeof response.headers?.get === 'function' ? response.headers.get('retry-after') : null
+      return {
+        status: response.status,
+        retryAfter,
+        result: { supported: false, windows: [], error: `HTTP ${response.status}${detail ? `: ${detail}` : ''}` },
+      }
     }
-    return normaliseUsagePayload(kind, await response.json())
+    return { status: response.status, retryAfter: null, result: normaliseUsagePayload(kind, await response.json()) }
   } catch (error) {
-    return { supported: false, windows: [], error: error instanceof Error ? error.message : String(error) }
+    return { status: null, retryAfter: null, result: { supported: false, windows: [], error: error instanceof Error ? error.message : String(error) } }
   }
+}
+
+// ── refresh book and usage book ─────────────────────────────────────────
+// `ahv login usage` used to ask every account's quota and re-try every dead
+// refresh token on every call. With the CMS agent and login-sync both calling
+// it, each account was asked ~11 times an hour per machine: Anthropic answered
+// 429 with Retry-After ~2800–3450 s and kept answering it, and ~15 machines
+// sent refresh tokens already refused (`invalid_grant`) every ten minutes
+// (fleet, 29/09). Two small files beside the store remember what the last call
+// learnt. Neither holds a token: a refresh token is known only by a hash.
+
+/** Hold a refresh token the provider refused (`invalid_grant`) this long. */
+export const REFRESH_DEAD_HOLD_MS = 6 * 60 * 60_000
+/** Hold after a 429, a 5xx or another HTTP failure of the refresh call. */
+export const REFRESH_HTTP_HOLD_MS = 30 * 60_000
+/** Hold after the refresh call never got an answer. */
+export const REFRESH_NETWORK_HOLD_MS = 10 * 60_000
+/** Longest Retry-After honoured on the usage call; a longer one is clipped. */
+export const USAGE_RETRY_AFTER_CAP_MS = 2 * 60 * 60_000
+/** Hold after a usage 429 that names no Retry-After. */
+export const USAGE_RETRY_DEFAULT_MS = 5 * 60_000
+/** Oldest last reading offered in place of a throttled account's figures. */
+export const USAGE_STALE_READING_MS = 24 * 60 * 60_000
+
+const REFRESH_HOLD_MS = {
+  invalid_grant: REFRESH_DEAD_HOLD_MS,
+  http: REFRESH_HTTP_HOLD_MS,
+  network: REFRESH_NETWORK_HOLD_MS,
+}
+
+/**
+ * A refresh token's identity in the refresh book, without the token.
+ *
+ * A new refresh token — the account logged in again, or login-sync brought a
+ * live one — gets a new fingerprint, so a hold left by the old one never
+ * delays it.
+ *
+ * @param refreshToken - the refresh token.
+ * @returns the first 16 hex digits of its SHA-256.
+ */
+export function refreshTokenFingerprint(refreshToken) {
+  return createHash('sha256').update(String(refreshToken)).digest('hex').slice(0, 16)
+}
+
+/**
+ * Milliseconds a usage 429 asks to wait, from its Retry-After header.
+ *
+ * @param header - the raw header (delta-seconds or an HTTP date), or null.
+ * @param now - epoch ms.
+ * @returns the wait, capped at USAGE_RETRY_AFTER_CAP_MS; USAGE_RETRY_DEFAULT_MS
+ *   when the header is absent or unreadable.
+ */
+export function retryAfterMs(header, now = Date.now()) {
+  const text = typeof header === 'string' ? header.trim() : ''
+  let wait = null
+  if (/^\d+$/.test(text)) wait = Number(text) * 1000
+  else if (text !== '') {
+    const at = Date.parse(text)
+    if (Number.isFinite(at)) wait = Math.max(0, at - now)
+  }
+  if (wait === null) return USAGE_RETRY_DEFAULT_MS
+  return Math.min(wait, USAGE_RETRY_AFTER_CAP_MS)
+}
+
+/**
+ * One book file held in memory: `{kind: {key: entry}}` plus the entries changed.
+ *
+ * Only changed entries are written back, onto a fresh read of the file, so two
+ * commands running at once each keep the other's accounts.
+ */
+function bookOf(data) {
+  const store = data !== null && typeof data === 'object' && !Array.isArray(data) ? data : {}
+  const touched = new Set()
+  return {
+    get: (kind, key) => store[kind]?.[key],
+    set(kind, key, entry) {
+      touched.add(JSON.stringify([kind, key]))
+      if (store[kind] === undefined || typeof store[kind] !== 'object') store[kind] = {}
+      if (entry === undefined) delete store[kind][key]
+      else store[kind][key] = entry
+    },
+    changes: () => [...touched].map(t => {
+      const [kind, key] = JSON.parse(t)
+      return { kind, key, entry: store[kind]?.[key] }
+    }),
+  }
+}
+
+/** A book file's contents, or {} when absent or unreadable (it is only a memo). */
+function readBookFile(file) {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8'))
+  } catch {
+    // Missing or torn: the book only saves requests, so starting empty is safe.
+    return {}
+  }
+}
+
+/** Write a book's changed entries onto a fresh read of its file, atomically, 0600. */
+function writeBookFile(file, book) {
+  const changes = book.changes()
+  if (changes.length === 0) return
+  const current = readBookFile(file)
+  for (const { kind, key, entry } of changes) {
+    if (current[kind] === undefined || typeof current[kind] !== 'object') current[kind] = {}
+    if (entry === undefined) delete current[kind][key]
+    else current[kind][key] = entry
+    if (Object.keys(current[kind]).length === 0) delete current[kind]
+  }
+  writeFileAtomic600(file, JSON.stringify(current, null, 2))
+}
+
+/** Replace a file with tmp + rename, so a reader never sees half of it. */
+function writeFileAtomic600(file, text) {
+  const dir = dirname(file)
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 })
+  const tmp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+  writeFileSync(tmp, text, { mode: 0o600 })
+  chmodSync(tmp, 0o600)
+  renameSync(tmp, file)
+}
+
+/**
+ * Refresh one account unless the refresh book says the answer is known.
+ *
+ * @param kind - provider id.
+ * @param key - the account key.
+ * @param session - the stored session.
+ * @param book - the refresh book (see bookOf).
+ * @param fetchFn - injected for tests.
+ * @param now - epoch ms.
+ * @returns refreshSessionIfStale's result plus `skipped` ('unsupported',
+ *   'fresh', 'dead-refresh' or 'backoff') when no request was sent; a held
+ *   account carries the error that put it on hold.
+ */
+async function refreshWithBook(kind, key, session, book, fetchFn, now) {
+  const need = refreshNeed(kind, session, now)
+  if (need !== 'stale') return { session, refreshed: false, skipped: need }
+  const fp = refreshTokenFingerprint(session.refreshToken)
+  const held = book.get(kind, key)
+  if (held && held.fp === fp && typeof held.retry_at === 'number' && held.retry_at > now) {
+    return {
+      session,
+      refreshed: false,
+      skipped: held.failure === 'invalid_grant' ? 'dead-refresh' : 'backoff',
+      ...(typeof held.error === 'string' ? { error: held.error } : {}),
+    }
+  }
+  const fresh = await refreshSessionIfStale(kind, session, fetchFn, now)
+  if (fresh.refreshed) {
+    if (held) book.set(kind, key, undefined)
+  } else if (fresh.error) {
+    const failure = fresh.failure ?? 'http'
+    book.set(kind, key, {
+      fp,
+      failure,
+      error: fresh.error,
+      failed_at: now,
+      retry_at: now + (REFRESH_HOLD_MS[failure] ?? REFRESH_HTTP_HOLD_MS),
+    })
+  }
+  return fresh
+}
+
+/** A cached reading's windows, minus those whose reset time has passed. */
+function liveWindows(windows, now) {
+  return (Array.isArray(windows) ? windows : []).filter(w => {
+    const at = typeof w?.resets_at === 'string' ? Date.parse(w.resets_at) : NaN
+    return !(Number.isFinite(at) && at <= now)
+  })
+}
+
+/**
+ * One account's usage, from the usage book when it may be, else the network.
+ *
+ * @param kind - provider id.
+ * @param key - the account key.
+ * @param session - the session to ask with.
+ * @param cache - the usage book (see bookOf).
+ * @param opts - fetchFn, now (epoch ms), maxAgeMs (null: always ask).
+ * @returns the fields fetchProviderUsage returns, plus `read_at` for a real
+ *   reading, `cached` for one served from the book, and `throttled` with
+ *   `retry_at` while a 429 holds the account.
+ */
+async function usageWithBook(kind, key, session, cache, { fetchFn, now, maxAgeMs }) {
+  const memo = cache.get(kind, key)
+  const reading = memo && typeof memo.read_at === 'number' ? memo : undefined
+  const recent = (limit) => reading && now - reading.read_at <= limit
+    ? { supported: reading.supported, windows: liveWindows(reading.windows, now), read_at: new Date(reading.read_at).toISOString() }
+    : { supported: false, windows: [] }
+  const throttled = (until, error) => ({
+    ...recent(USAGE_STALE_READING_MS),
+    // The CMS agent recognises a rate limit by this exact "HTTP 429" text.
+    error,
+    throttled: true,
+    retry_at: new Date(until).toISOString(),
+  })
+  if (memo && typeof memo.throttled_until === 'number' && memo.throttled_until > now) {
+    return throttled(memo.throttled_until, memo.throttle_error ?? 'HTTP 429')
+  }
+  if (maxAgeMs !== null && reading && now - reading.read_at <= maxAgeMs) {
+    return { ...recent(maxAgeMs), cached: true }
+  }
+  const { result, status, retryAfter } = await readProviderUsage(kind, session, fetchFn)
+  if (status === 429) {
+    const until = now + retryAfterMs(retryAfter, now)
+    cache.set(kind, key, { ...(reading ?? {}), throttled_until: until, throttle_error: result.error })
+    return throttled(until, result.error)
+  }
+  if (status !== null && status >= 200 && status < 300) {
+    cache.set(kind, key, { read_at: now, supported: result.supported, windows: result.windows })
+    return { ...result, read_at: new Date(now).toISOString() }
+  }
+  return result
 }
 
 /**
@@ -982,25 +1240,34 @@ export async function fetchProviderUsage(kind, session, fetchFn = fetch) {
  *
  * @param auth - the subscriptions store, as read from disk.
  * @param fetchFn - injected for tests.
+ * @param opts - `now` (epoch ms), `refreshBook` and `usageCache` (bookOf; an
+ *   empty in-memory book when omitted, so nothing is read or written here), and
+ *   `maxAgeSec` (serve readings this young from the usage book).
  * @returns providers keyed by id, and the sessions whose tokens were renewed.
  */
-export async function collectSubscriptionUsage(auth, fetchFn = fetch) {
+export async function collectSubscriptionUsage(auth, fetchFn = fetch, opts = {}) {
+  const now = opts.now ?? Date.now()
+  const refreshBook = opts.refreshBook ?? bookOf({})
+  const usageCache = opts.usageCache ?? bookOf({})
+  const maxAgeMs = typeof opts.maxAgeSec === 'number' ? opts.maxAgeSec * 1000 : null
   const providers = {}
   const refreshed = []
   await Promise.all(SUPPORTED_LOGIN_PROVIDERS.map(async (kind) => {
     const stored = auth?.[kind]
     const { defaultKey, accounts } = storeAccounts(stored && typeof stored === 'object' ? stored : undefined)
     const rows = await Promise.all(Object.entries(accounts).map(async ([key, session]) => {
-      const fresh = await refreshSessionIfStale(kind, session, fetchFn)
+      const fresh = await refreshWithBook(kind, key, session, refreshBook, fetchFn, now)
       if (fresh.refreshed) refreshed.push({ kind, key, session: fresh.session })
+      const held = fresh.skipped === 'dead-refresh' || fresh.skipped === 'backoff'
       return {
         key,
         account: accountLabel(session, key),
         is_default: key === defaultKey,
         logged_in: Boolean(session && session.accessToken),
-        ...(await fetchProviderUsage(kind, fresh.session, fetchFn)),
+        ...(await usageWithBook(kind, key, fresh.session, usageCache, { fetchFn, now, maxAgeMs })),
         ...(fresh.refreshed ? { refreshed: true } : {}),
         ...(fresh.error ? { refresh_error: fresh.error } : {}),
+        ...(held ? { refresh_skipped: fresh.skipped } : {}),
       }
     }))
     // The default's figures stay at the top level, unchanged, so a console or
@@ -1027,27 +1294,120 @@ export async function collectSubscriptionUsage(auth, fetchFn = fetch) {
  * just run out.
  *
  * Every account is refreshed on the way past, so the accounts kept in reserve
- * stay usable instead of quietly expiring while they wait.
+ * stay usable instead of quietly expiring while they wait — except a refresh
+ * token the refresh book holds. An account under a usage 429 is not asked
+ * again until its Retry-After passes; `--max-age SEC` answers accounts read at
+ * most SEC seconds ago from the usage book.
  */
-async function loginUsage() {
-  const { providers, refreshed } = await collectSubscriptionUsage(readSubscriptionsAuth())
-  if (refreshed.length > 0) {
-    // Re-read before writing: another process may have refreshed meanwhile,
-    // and a token issued later must never be replaced by an older one.
-    const current = readSubscriptionsAuth()
-    let changed = false
-    for (const { kind, key, session } of refreshed) {
-      const existing = storeAccounts(current[kind]).accounts[key]
-      const existingExpiry = existing && typeof existing.expiresAt === 'number' ? existing.expiresAt : 0
-      if (existingExpiry >= session.expiresAt) continue
-      // Back into the account it came from: writing the bare session at the
-      // top of the entry is what shadowed a live login with a stale one.
-      current[kind] = withAccountSession(current[kind], key, session)
-      changed = true
+async function loginUsage(args) {
+  let maxAgeSec
+  const flag = args.indexOf('--max-age')
+  if (flag !== -1) {
+    const value = args[flag + 1]
+    if (value === undefined || !/^\d+$/.test(value)) {
+      errJson('internal_error', 'login usage: --max-age cần số giây (số nguyên >= 0)', true, 0, 2)
     }
-    if (changed) writeSubscriptionsAuth(current)
+    maxAgeSec = Number(value)
   }
-  printJson({ checked_at: new Date().toISOString(), providers }, 0)
+  printJson(await loginUsageReport({ maxAgeSec }), 0)
+}
+
+/** Where the refresh book and the usage book live: beside the store. */
+const REFRESH_BOOK_FILE = join(dirname(SUBSCRIPTIONS_AUTH_FILE), 'refresh-state.json')
+const USAGE_BOOK_FILE = join(dirname(SUBSCRIPTIONS_AUTH_FILE), 'usage-cache.json')
+
+/**
+ * What `ahv login usage` prints, with the store and both books updated.
+ *
+ * @param opts - `fetchFn` and `now` (injected for tests); `maxAgeSec` answers
+ *   accounts read at most that long ago from the usage book.
+ * @returns `{checked_at, providers}` as collectSubscriptionUsage builds it.
+ */
+export async function loginUsageReport({ fetchFn = fetch, now = Date.now(), maxAgeSec } = {}) {
+  const refreshBook = bookOf(readBookFile(REFRESH_BOOK_FILE))
+  const usageCache = bookOf(readBookFile(USAGE_BOOK_FILE))
+  const { providers, refreshed } = await collectSubscriptionUsage(readSubscriptionsAuth(), fetchFn, {
+    now, refreshBook, usageCache, maxAgeSec,
+  })
+  persistRefreshed(refreshed)
+  writeBookFile(REFRESH_BOOK_FILE, refreshBook)
+  writeBookFile(USAGE_BOOK_FILE, usageCache)
+  return { checked_at: new Date(now).toISOString(), providers }
+}
+
+/**
+ * File refreshed sessions back into the store.
+ *
+ * Re-reads before writing: another process may have refreshed meanwhile, and a
+ * token issued later must never be replaced by an older one.
+ *
+ * @param refreshed - `{kind, key, session}` for each session renewed.
+ */
+function persistRefreshed(refreshed) {
+  if (refreshed.length === 0) return
+  const current = readSubscriptionsAuth()
+  let changed = false
+  for (const { kind, key, session } of refreshed) {
+    const existing = storeAccounts(current[kind]).accounts[key]
+    const existingExpiry = existing && typeof existing.expiresAt === 'number' ? existing.expiresAt : 0
+    if (existingExpiry >= session.expiresAt) continue
+    // Back into the account it came from: writing the bare session at the
+    // top of the entry is what shadowed a live login with a stale one.
+    current[kind] = withAccountSession(current[kind], key, session)
+    changed = true
+  }
+  if (changed) writeSubscriptionsAuth(current)
+}
+
+/**
+ * Renew the sessions about to expire, and ask nothing else.
+ *
+ * login-sync's keepalive called `ahv login usage` only to keep tokens alive,
+ * which also asked every account's quota each time and added to the 429s.
+ * This sends a request only for a session within REFRESH_AHEAD_MS of expiry
+ * whose refresh token the refresh book does not hold.
+ *
+ * @param opts - `fetchFn` and `now`, injected for tests.
+ * @returns `{checked_at, providers: {kind: {accounts: [{key, account,
+ *   is_default, expires_at, refreshed, refresh_error?, skipped?}]}}}`.
+ * @throws when the store exists but cannot be read or parsed.
+ */
+export async function loginRefreshReport({ fetchFn = fetch, now = Date.now() } = {}) {
+  const auth = existsSync(SUBSCRIPTIONS_AUTH_FILE) ? JSON.parse(readFileSync(SUBSCRIPTIONS_AUTH_FILE, 'utf8')) : {}
+  const refreshBook = bookOf(readBookFile(REFRESH_BOOK_FILE))
+  const refreshed = []
+  const providers = {}
+  await Promise.all(SUPPORTED_LOGIN_PROVIDERS.map(async (kind) => {
+    const stored = auth?.[kind]
+    const { defaultKey, accounts } = storeAccounts(stored && typeof stored === 'object' ? stored : undefined)
+    const rows = await Promise.all(Object.entries(accounts).map(async ([key, session]) => {
+      const fresh = await refreshWithBook(kind, key, session, refreshBook, fetchFn, now)
+      if (fresh.refreshed) refreshed.push({ kind, key, session: fresh.session })
+      return {
+        key,
+        account: accountLabel(session, key),
+        is_default: key === defaultKey,
+        expires_at: typeof fresh.session?.expiresAt === 'number' ? fresh.session.expiresAt : null,
+        refreshed: fresh.refreshed === true,
+        ...(fresh.error ? { refresh_error: fresh.error } : {}),
+        ...(fresh.skipped ? { skipped: fresh.skipped } : {}),
+      }
+    }))
+    providers[kind] = { accounts: rows }
+  }))
+  persistRefreshed(refreshed)
+  writeBookFile(REFRESH_BOOK_FILE, refreshBook)
+  return { checked_at: new Date(now).toISOString(), providers }
+}
+
+async function loginRefresh() {
+  let report
+  try {
+    report = await loginRefreshReport()
+  } catch (e) {
+    errJson('internal_error', `không đọc được ${SUBSCRIPTIONS_AUTH_FILE}: ${e.message}`, true, 0, 1)
+  }
+  printJson(report, 0)
 }
 
 function loginStatus() {
@@ -1892,7 +2252,8 @@ function usage() {
   ahv login forget PROVIDER ACCOUNT_KEY --json (xoa mot tai khoan, giu cac cai khac)
   ahv login logout PROVIDER --json             (remove stored token)
   ahv login import --json                      (import codex/grok CLI login vao AHV)
-  ahv login usage --json                       (han muc con lai that tu grok/codex/claude)
+  ahv login usage --json [--max-age SEC]       (han muc con lai that tu grok/codex/claude)
+  ahv login refresh --json                     (chi lam moi phien sap het han, khong hoi han muc)
   ahv models list --json
   ahv models show MODEL_ID --json
   ahv sessions list --json
@@ -1944,7 +2305,8 @@ if (subcommand === 'version') {
   else if (action === 'forget') loginForget(rest[1], rest[2])
   else if (action === 'logout') loginLogout(rest[1])
   else if (action === 'import') loginImport()
-  else if (action === 'usage') void loginUsage()
+  else if (action === 'usage') void loginUsage(rest.slice(1))
+  else if (action === 'refresh') void loginRefresh()
   else usage()
 } else if (subcommand === 'models') {
   const action = rest[0]
