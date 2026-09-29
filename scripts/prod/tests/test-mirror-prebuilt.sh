@@ -140,6 +140,18 @@ PY
   check "refused: $field" '[ "$(entry v1.0.1 linux-x64 glibc)" = 2.39 ] && [ ! -e "$T/tmp/evil.tar.zst" ] && [ "$(fetched linux-x64)" = 0 ] && [ "$(python3 -c "import json;print(json.load(open(\"$T/ch/channels.json\"))[\"canary\"])")" = v1.0.1 ]'
 done
 
+echo "== the asset name is checked, not just its path (the fake GitHub serves the file, sha matching)"
+setup
+printf '{"stable":"v1.0.0","canary":"v1.0.1"}\n' > "$T/ch/channels.json"
+cp "$T/ch/channels.json" "$T/channels.orig"
+local_x64 v1.0.1 2.39 "x64-reference"
+printf '{"stable":"v6.6.6"}' > "$T/gh/v1.0.1/channels.json"
+sha="$(sha256sum "$T/gh/v1.0.1/channels.json" | cut -d' ' -f1)"
+printf '{"version":"v1.0.1","packages":{"linux-x64":{"file":"channels.json","sha256":"%s","size":1,"glibc":"2.28"}}}\n' "$sha" > "$T/gh/v1.0.1/v1.0.1-linux-x64.json"
+PATH="$T/bin:$PATH" AHV_MIRROR_PLATFORMS="linux-x64" bash "$MIRROR" "$T/ch" > "$T/out.log" 2>&1
+check "channels.json not overwritten by a served asset" 'cmp -s "$T/ch/channels.json" "$T/channels.orig"'
+check "entry unchanged" '[ "$(entry v1.0.1 linux-x64 glibc)" = 2.39 ]'
+
 echo "== tags outside channels.json are ignored"
 setup
 printf '{"stable":"v1.0.0","canary":"v1.0.0"}\n' > "$T/ch/channels.json"

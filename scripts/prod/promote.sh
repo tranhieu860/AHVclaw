@@ -36,7 +36,7 @@ keep_owner(tmp)
 os.replace(tmp, path)
 manifest_path = os.path.join(d, "manifest.json")
 # Copy then rename: a host fetching manifest.json mid-copy must never read half a file.
-staged = manifest_path + ".tmp"
+staged = manifest_path + ".promote.%d" % os.getpid()  # never the name mirror-prebuilt.sh stages under
 shutil.copyfile(os.path.join(d, tag + ".json"), staged)
 os.chmod(staged, 0o644)
 keep_owner(staged)
