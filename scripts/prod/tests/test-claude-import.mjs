@@ -152,6 +152,53 @@ check('a newer token in the matching account is left alone', () => {
   assert.equal(read().claude.accounts['b@claude.test'].accessToken, 'ab')
 })
 
+// Codex logins are filed by workspace + user from the id token, as the plugin files them.
+const jwt = claims => ['e30', Buffer.from(JSON.stringify(claims)).toString('base64url'), 'sig'].join('.')
+function writeCodex(home, { user, refresh, exp }) {
+  const d = join(home, '.codex')
+  mkdirSync(d, { recursive: true })
+  writeFileSync(join(d, 'auth.json'), JSON.stringify({ tokens: {
+    access_token: jwt({ exp: Math.floor(exp / 1000) }),
+    refresh_token: refresh,
+    account_id: 'ws-123',
+    id_token: jwt({ email: `${user}@codex.test`, 'https://api.openai.com/auth': { chatgpt_user_id: user } }),
+  } }))
+}
+const codexKey = user => JSON.stringify(['ws-123', 'user', user])
+const codexStore = () => ({
+  codex: {
+    default: codexKey('u_1'),
+    accounts: {
+      [codexKey('u_1')]: { accessToken: 'c1', refreshToken: 'r1', expiresAt: past, accountId: 'ws-123' },
+      [codexKey('u_2')]: { accessToken: 'c2', refreshToken: 'r2', expiresAt: past, accountId: 'ws-123' },
+    },
+    aliases: { 'ws-123': codexKey('u_1') },
+  },
+})
+
+check('a Codex CLI login renews the account the plugin keys it under, not a new one', () => {
+  const home = makeHome()
+  const read = seedStore(home, codexStore())
+  writeCodex(home, { user: 'u_2', refresh: 'r2-new', exp: future })
+  const report = importCliCredentials({ home })
+  assert.equal(report.codex?.imported, true, JSON.stringify(report.codex))
+  const store = read()
+  assert.deepEqual(Object.keys(store.codex.accounts).sort(), [codexKey('u_1'), codexKey('u_2')].sort(), 'an extra Codex account appeared')
+  assert.equal(store.codex.accounts[codexKey('u_2')].refreshToken, 'r2-new')
+  assert.equal(store.codex.accounts[codexKey('u_1')].accessToken, 'c1')
+  assert.deepEqual(store.codex.aliases, codexStore().codex.aliases)
+})
+
+check('a Codex CLI login for a user not in the store is added beside the others', () => {
+  const home = makeHome()
+  const read = seedStore(home, codexStore())
+  writeCodex(home, { user: 'u_3', refresh: 'r3', exp: future })
+  importCliCredentials({ home })
+  const store = read()
+  assert.equal(store.codex.accounts[codexKey('u_3')].refreshToken, 'r3')
+  assert.equal(Object.keys(store.codex.accounts).length, 3)
+})
+
 check('putting a session back keeps the entry\'s other fields (Codex aliases)', () => {
   const entry = withAccountSession(perAccount().codex, 'c', { accessToken: 'x', refreshToken: 'y', expiresAt: future, accountId: 'c' })
   assert.deepEqual(entry.aliases, { old: 'c' })

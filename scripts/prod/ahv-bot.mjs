@@ -2223,7 +2223,7 @@ export function importCliCredentials({ home = homedir(), claudeConfigDir } = {})
     // the entry as a single legacy session and drop every other account.
     const perAccount = existing !== null && typeof existing === 'object' && typeof existing.accessToken !== 'string'
       && existing.accounts !== null && typeof existing.accounts === 'object' && !Array.isArray(existing.accounts)
-    const key = perAccount ? importAccountKey(session, storeAccounts(existing).accounts) : ''
+    const key = perAccount ? importAccountKey(provider, session, existing) : ''
     const current = perAccount ? existing.accounts[key] : existing
     const existingExpiry = typeof current?.expiresAt === 'number' ? current.expiresAt : 0
     if (existingExpiry >= session.expiresAt) {
@@ -2245,15 +2245,45 @@ export function importCliCredentials({ home = homedir(), claudeConfigDir } = {})
 }
 
 /**
- * The account an imported CLI login belongs to: its identity when the CLI
- * recorded one, the account already holding that refresh token, else the
- * plugin's own key for an anonymous session (`token-` + refresh-token hash).
+ * The key the subscriptions plugin files a session under (its `accountKeyOf`):
+ * Codex by workspace plus the user (or email) in the id token, Claude by email,
+ * the rest by account name, and an anonymous session by `token-` + a hash of
+ * its refresh token.
  */
-function importAccountKey(session, accounts) {
-  const identity = accountKeyOf(session)
-  if (identity !== '') return identity
-  const same = Object.keys(accounts).find(key => accounts[key]?.refreshToken === session.refreshToken)
-  return same ?? `token-${refreshTokenFingerprint(session.refreshToken)}`
+export function pluginAccountKey(provider, session) {
+  const nonEmpty = value => (typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined)
+  const anonymous = () => `token-${refreshTokenFingerprint(session.refreshToken)}`
+  if (provider === 'codex') {
+    let claims
+    const token = session.idToken ?? session.id_token
+    if (typeof token === 'string') {
+      try {
+        claims = JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8'))
+      } catch { /* a malformed id token carries no identity */ }
+    }
+    const auth = claims?.['https://api.openai.com/auth']
+    const user = nonEmpty(auth?.chatgpt_user_id) ?? nonEmpty(auth?.user_id)
+    const email = nonEmpty(session.emailAddress) ?? nonEmpty(claims?.email) ?? nonEmpty(claims?.['https://api.openai.com/profile']?.email)
+    if (user === undefined && email === undefined) return String(session.accountId ?? '')
+    return JSON.stringify([session.accountId, user === undefined ? 'email' : 'user', user ?? email.toLowerCase()])
+  }
+  if (provider === 'claude') return nonEmpty(session.emailAddress) ?? anonymous()
+  return nonEmpty(session.account) ?? anonymous()
+}
+
+/**
+ * The account an imported CLI login belongs to: the plugin's own key for it,
+ * or an alias of that key, or the account already holding its refresh token;
+ * a login matching none of them becomes a new account under the plugin's key.
+ */
+function importAccountKey(provider, session, entry) {
+  const { accounts } = storeAccounts(entry)
+  const key = pluginAccountKey(provider, session)
+  if (key in accounts) return key
+  const alias = entry?.aliases?.[key]
+  if (typeof alias === 'string' && alias in accounts) return alias
+  const same = Object.keys(accounts).find(k => accounts[k]?.refreshToken === session.refreshToken)
+  return same ?? key
 }
 
 function loginImport() {

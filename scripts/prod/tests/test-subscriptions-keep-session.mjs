@@ -309,6 +309,33 @@ await check('a store write keeps accounts without tokens, unknown providers and 
   assert.deepEqual(data.grok, TORN, 'the unreadable grok entry was dropped')
 })
 
+await check('an entry whose default is not a string survives a write untouched', async () => {
+  seed()
+  const data = stored()
+  const odd = { ...data.claude, default: 5 }
+  data.claude = odd
+  writeFileSync(store, JSON.stringify(data), { mode: 0o600 })
+  const result = await rpc('setDefault', { provider: 'codex', account: KEY.codex })
+  assert.equal(result?.ok, true, `setDefault failed: ${JSON.stringify(result).slice(0, 200)}`)
+  assert.deepEqual(stored().claude, odd, 'the claude entry with an odd default was dropped or rewritten')
+})
+
+await check('a new login replaces an unreadable entry of its provider instead of losing to it', async () => {
+  seed({ claude: TORN })
+  // The Claude "keychain" login copies what the claude CLI stored.
+  mkdirSync(join(home, '.claude'), { recursive: true })
+  writeFileSync(join(home, '.claude/.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'fake-claude-at-new', refreshToken: 'fake-claude-rt-new', expiresAt: Date.now() + 3_600_000, scopes: ['user:inference'] } }), { mode: 0o600 })
+  try {
+    const result = await rpc('login', { provider: 'claude', method: 'keychain' })
+    assert.equal(result?.ok, true, `login failed: ${JSON.stringify(result).slice(0, 200)}`)
+    const claude = stored().claude
+    assert.ok(claude?.accounts && !Array.isArray(claude.accounts), `the unreadable entry won: ${JSON.stringify(claude).slice(0, 80)}`)
+    assert.ok(Object.values(claude.accounts).some(account => account.refreshToken === 'fake-claude-rt-new'), 'the new login is missing')
+  } finally {
+    rmSync(join(home, '.claude'), { recursive: true, force: true })
+  }
+})
+
 await check('user logout still removes exactly that account', async () => {
   seedOdd()
   const result = await rpc('logout', { provider: 'claude', account: KEY.claude })
