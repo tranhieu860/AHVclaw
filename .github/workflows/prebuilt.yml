@@ -102,7 +102,9 @@ jobs:
           core="$(node -p "require('$GITHUB_WORKSPACE/.ahv-build/src/apps/cli/package.json').version")"
           case "$core" in
             0.0.*|0.1.*) echo "dsh $core: no telemetry rows to check" ;;
-            *) bash _ci/scripts/prod/tests/test-no-telemetry.sh "$GITHUB_WORKSPACE/.ahv-build/src" --strict ;;
+            *) bash _ci/scripts/prod/tests/test-no-telemetry.sh "$GITHUB_WORKSPACE/.ahv-build/src" --strict
+               # A dead shared Codex login must stay in auth.json (patches/dsh-plugin-subscriptions.patch).
+               node _ci/scripts/prod/tests/test-codex-keep-session.mjs "$GITHUB_WORKSPACE/.ahv-build/src" ;;
           esac
           bash _ci/scripts/prod/tests/test-browser-playwright.sh "$GITHUB_WORKSPACE/.ahv-build/src" --strict
       - uses: actions/upload-artifact@v4
@@ -143,6 +145,14 @@ jobs:
           mv "out/$TAG.json" "out/$TAG-linux-arm64.json"
           rm -f out/manifest.json
           ls -la out
+      - name: Smoke the built tree (no login needed)
+        run: |
+          set -euo pipefail
+          core="$(node -p "require('$GITHUB_WORKSPACE/.ahv-build/src/apps/cli/package.json').version")"
+          case "$core" in
+            0.0.*|0.1.*) echo "dsh $core: plugin predates the Codex keep-session patch" ;;
+            *) node scripts/prod/tests/test-codex-keep-session.mjs "$GITHUB_WORKSPACE/.ahv-build/src" ;;
+          esac
       - uses: actions/upload-artifact@v4
         with:
           name: ahv-cli-${{ env.TAG }}-linux-arm64

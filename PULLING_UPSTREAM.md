@@ -46,6 +46,7 @@ Commit gộp chạy lefthook (lint, third-party notices, ghép bản dịch) —
 | `packages/bundle/ahv/cordis.patch*.yml` (telemetry) + `ahv-wrapper.sh` (`DSH_TELEMETRY_DISABLED=1`) | không gửi gì về DeepSeek (0.2 bật mặc định gửi log phiên khi có phản hồi); tắt tài khoản DeepSeek trên web | mỗi lần gộp: soát dòng mới gửi dữ liệu ra ngoài trong `packages/bundle/{base,web-app}`; `scripts/prod/tests/test-no-telemetry.sh` phải xanh |
 | `packages/client/**/locales.ts`, `apps/web/index.html`, `vite.config.ts`, `Rows.module.css` | thương hiệu AHV, tiêu đề, lời chào, thao tác hàng trên màn cảm ứng | lấy upstream, thay chữ |
 | `pnpm-workspace.yaml` | allowBuilds + miễn tuổi phát hành cho plugin AHV; override `playwright: 1.62.1` (dsh-browser dùng bản hoist, máy AHV có Chromium 1234) | upstream + khối AHV; `scripts/prod/tests/test-browser-playwright.sh` phải xanh |
+| `patches/dsh-plugin-subscriptions.patch` (+ khoá theo tên trong `patchedDependencies`) | phiên Codex chết (`refresh_token_reused` — đội dùng chung tài khoản, máy làm mới trước làm hỏng token máy khác) KHÔNG bị xoá khỏi `~/.dsh/plugins/subscriptions/auth.json`, vẫn báo `INVALID_CREDENTIAL`; Claude/Grok/Antigravity giữ nguyên | nâng pin plugin: vá không áp được thì `pnpm install` đỏ (`ERR_PNPM_PATCH_FAILED`) → chuyển vá sang bản mới; `scripts/prod/tests/test-codex-keep-session.mjs` phải xanh (release-cli + CI prebuilt chạy trên cây dựng) |
 | `README.md`, `README.i18n.yaml`, `.gitlab-ci.yml` (xoá) | trang AHV | giữ phía fork |
 | `scripts/prod/**`, `scripts/install-ahv-skin.sh`, `.github/workflows/prebuilt.yml` | công cụ phát hành AHV | của AHV |
 
@@ -54,7 +55,7 @@ Commit gộp chạy lefthook (lint, third-party notices, ghép bản dịch) —
 1. `pnpm run build` xanh.
 2. Test liên quan: `npx vitest run packages/client/connection/tests packages/session/session-format-v0-to-v1/tests packages/bundle packages/boot/app-boot/tests apps/cli/tests packages/client/ui-sidebar/tests`
    và `for t in scripts/prod/tests/*.mjs; do node $t; done` (+ `bash scripts/prod/tests/test-*.sh`).
-   `release-cli.sh` tự chạy `smoke-run.sh` (một `ahv run` thật) và `test-browser-playwright.sh` trên bản dựng.
+   `release-cli.sh` tự chạy `smoke-run.sh` (một `ahv run` thật), `test-browser-playwright.sh` và `test-codex-keep-session.mjs` trên bản dựng.
 3. Chạy thật từ cây vừa dựng trong một HOME tạm (không đụng `~/.ahv` thật):
    `ahv --version`, `ahv doctor`, `ahv run --prompt-file … --output jsonl`
    (ra `assistant_final` + `turn_end completed`), `ahv models list --json`,

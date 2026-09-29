@@ -1,0 +1,39 @@
+diff --git a/lib/index.js b/lib/index.js
+index 7a43a75..b696734 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -2411,6 +2411,11 @@ async function oauthEndpointError(response, label) {
+ * coalesces concurrent refreshes behind one in-flight promise. Permanent
+ * refresh failures delete the stored session and surface INVALID_CREDENTIAL
+ * with a re-login hint; transient failures fall back to a still-valid token.
++*
++* AHV: `keepOnPermanent` (Codex) keeps the stored session and still surfaces
++* INVALID_CREDENTIAL. AHV hosts share one Codex login: the first to refresh
++* spends the token and the rest get `refresh_token_reused`, which must not
++* erase the account from their store (login-sync refills it from the CLI).
+ */
+ var TokenManager = class {
+ 	inflight;
+@@ -2456,8 +2461,10 @@ var TokenManager = class {
+ 				const attempted = this.attempted;
+ 				const stored = await this.options.load();
+ 				if (stored !== void 0 && attempted !== void 0 && stored.refreshToken !== attempted.refreshToken) return stored;
+-				await this.options.remove();
+-				this.options.onRemoved?.();
++				if (this.options.keepOnPermanent !== true) {
++					await this.options.remove();
++					this.options.onRemoved?.();
++				}
+ 				throw new LlmError(`${this.options.displayName} login expired or was revoked; log in again via Settings → Subscriptions`, "INVALID_CREDENTIAL", { cause: error });
+ 			}
+ 			if (!forceRefresh && session.expiresAt > Date.now()) return session;
+@@ -10966,7 +10973,8 @@ function apply(ctx, config) {
+ 				makeOptions: () => ({
+ 					preemptMs: CODEX_PREEMPT_MS,
+ 					refresh: refreshCodex,
+-					isPermanent: isCodexPermanentRefreshError
++					isPermanent: isCodexPermanentRefreshError,
++					keepOnPermanent: true
+ 				}),
+ 				onAccountRemoved: (account) => {
+ 					authChanged("codex", account);

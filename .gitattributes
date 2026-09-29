@@ -30,3 +30,5 @@ CONTRIBUTING*        linguist-documentation
 *.i18n.yaml          linguist-generated
 scripts/snapshots/** linguist-generated
 scripts/fixtures/**  linguist-generated
+# Context lines of a patch over tab-indented dist code start with " \t".
+patches/dsh-plugin-subscriptions.patch -whitespace

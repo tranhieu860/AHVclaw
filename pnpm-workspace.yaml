@@ -133,6 +133,11 @@ minimumReleaseAgeExclude:
   - '@linxin666/dsh-tool-describe-image@0.2.7'
   - '@linxin666/dsh-web-ui-all@0.2.7'
 patchedDependencies:
+  # AHV: keyed by name, not version, so a registry pin bump (0.9.7+) carries the
+  # patch or fails `pnpm install` (ERR_PNPM_PATCH_FAILED) instead of dropping it.
+  # Keeps a dead Codex login in auth.json (refresh_token_reused on shared
+  # accounts); release-cli's smoke runs scripts/prod/tests/test-codex-keep-session.mjs.
+  dsh-plugin-subscriptions: patches/dsh-plugin-subscriptions.patch
   '@earendil-works/pi-ai@0.85.1': patches/@earendil-works__pi-ai@0.85.1.patch
   '@electron/osx-sign@1.3.3': patches/@electron__osx-sign@1.3.3.patch
   '@fortune-sheet/core@1.0.4': patches/@fortune-sheet__core@1.0.4.patch
