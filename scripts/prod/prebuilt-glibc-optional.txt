@@ -1,0 +1,19 @@
+# npm packages whose prebuilt native module may need a newer glibc than the
+# archive's floor. They are optional features loaded on demand (speech,
+# computer use, a UniFFI runtime); a host below their need still runs the CLI
+# and the bot (`ahv run` answered PONG on glibc 2.28, 29/09). build-prebuilt.sh
+# records them as glibc_optional instead of raising the manifest's glibc.
+# One pnpm store name per line (the part before "@<version>" under node_modules/.pnpm).
+# Adding a name here is a decision: check the CLI still runs on the oldest host.
+sherpa-onnx-linux-x64
+sherpa-onnx-linux-arm64
+@trycua+cua-driver-linux-x64-gnu
+@trycua+cua-driver-linux-arm64-gnu
+@ubjs+node-linux-x64-gnu
+@ubjs+node-linux-arm64-gnu
+# The Codex CLI package ships its own zsh (codex-resources) linked against
+# GLIBC_2.38; only Codex's shell tool uses it, never `ahv run`.
+@openai+codex
+# jscpd: the monorepo's copy-paste checker (a lint tool), never run by the CLI.
+jscpd-linux-x64-gnu
+jscpd-linux-arm64-gnu

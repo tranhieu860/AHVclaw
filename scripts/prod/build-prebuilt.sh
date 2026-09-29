@@ -9,8 +9,11 @@
 #   which must already be at <tag> with a baked AHV_VERSION.
 #
 # Writes <output-dir>/ahv-cli-<tag>-<platform>.tar.zst and merges the platform
-# entry into <output-dir>/manifest.json, recording the glibc and node the tree
-# was built against so a host with an older glibc keeps building from source.
+# entry into <output-dir>/manifest.json, recording the glibc the archive needs
+# (the builder's, raised by any ELF in the tree that links a newer GLIBC_x.y;
+# optional npm prebuilds listed in prebuilt-glibc-optional.txt are recorded
+# as glibc_optional instead) and the node it was built with. The promote gate
+# only sends a tag to hosts whose glibc meets that floor.
 set -euo pipefail
 
 tag="${1:?tag}"
@@ -40,18 +43,66 @@ sha="$(sha256sum "$tmp" | cut -d' ' -f1)"
 size="$(stat -c %s "$tmp")"
 mv -f "$tmp" "$out/$file"
 
-glibc="$(getconf GNU_LIBC_VERSION | awk '{print $2}')"
+build_glibc="${AHV_BUILD_GLIBC:-$(getconf GNU_LIBC_VERSION | awk '{print $2}')}"
+scan="$(python3 - "$src" "$build_glibc" "$(dirname "$0")/prebuilt-glibc-optional.txt" <<'PY'
+import json, os, platform, re, sys
+root, floor, optional_path = sys.argv[1:]
+# e_machine of the ELF files this archive runs: x86-64 = 62, aarch64 = 183.
+machine = {"x86_64": 62, "aarch64": 183, "arm64": 183}[platform.machine()]
+try:
+    optional = {l.strip() for l in open(optional_path, encoding="utf-8") if l.strip() and not l.startswith("#")}
+except OSError:
+    optional = set()
+def key(v):
+    return tuple(int(p) for p in v.split("."))
+need = re.compile(rb"GLIBC_(\d+\.\d+(?:\.\d+)?)\0")
+top, top_file, extra = floor, "", {}
+for base, dirs, files in os.walk(root):
+    dirs[:] = [d for d in dirs if d != ".git"]
+    for name in files:
+        path = os.path.join(base, name)
+        if os.path.islink(path) or not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "rb") as stream:
+                head = stream.read(20)
+                if head[:4] != b"\x7fELF" or len(head) < 20 or int.from_bytes(head[18:20], "little") != machine:
+                    continue
+                data = head + stream.read()
+        except OSError:
+            continue
+        versions = [v.decode() for v in need.findall(data)]
+        if not versions:
+            continue
+        v = max(versions, key=key)
+        rel = os.path.relpath(path, root)
+        parts = rel.split(os.sep)
+        # node_modules/.pnpm/<store-name>@<version>/...: the store name decides "optional".
+        store = parts[2].rsplit("@", 1)[0] if len(parts) > 2 and parts[0] == "node_modules" and parts[1] == ".pnpm" else ""
+        if store in optional:
+            if key(v) > key(extra.get(store, "0")):
+                extra[store] = v
+            continue
+        if key(v) > key(top):
+            top, top_file = v, rel
+if top_file:
+    print(f"{top_file} needs GLIBC_{top} (builder has {floor})", file=sys.stderr)
+print(json.dumps({"glibc": top, "optional": extra}))
+PY
+)" || { echo "glibc scan failed" >&2; exit 1; }
+glibc="$(printf '%s' "$scan" | python3 -c 'import json,sys; print(json.load(sys.stdin)["glibc"])')"
+glibc_optional="$(printf '%s' "$scan" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["optional"]))')"
 node="$(node -v 2>/dev/null || echo unknown)"
 # Every tag gets its own manifest (<tag>.json). manifest.json describes the
 # stable channel and is only rewritten when this tag is stable — or when no
 # channels.json exists yet.
-python3 - "$out" "$tag" "$platform" "$file" "$sha" "$size" "$glibc" "$node" <<'PY'
+python3 - "$out" "$tag" "$platform" "$file" "$sha" "$size" "$glibc" "$node" "$build_glibc" "$glibc_optional" <<'PY'
 import json
 import os
 import sys
 import time
 
-out, tag, platform, file, sha, size, glibc, node = sys.argv[1:]
+out, tag, platform, file, sha, size, glibc, node, build_glibc, glibc_optional = sys.argv[1:]
 
 def load(path):
     try:
@@ -73,6 +124,7 @@ def write(path, data):
 
 entry = {
     "file": file, "sha256": sha, "size": int(size), "glibc": glibc, "node": node,
+    "glibc_build": build_glibc, "glibc_optional": json.loads(glibc_optional),
     "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
 }
 tag_path = os.path.join(out, tag + ".json")
