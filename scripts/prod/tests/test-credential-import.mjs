@@ -12,8 +12,8 @@ const { importCliCredentials, decodeJwtExpiry } = await import(
 
 let passed = 0
 let failed = 0
-function test(name, fn) {
-  try { fn(); passed++; console.log(`  ok  ${name}`) }
+async function test(name, fn) {
+  try { await fn(); passed++; console.log(`  ok  ${name}`) }
   catch (e) { failed++; console.log(`  FAIL ${name}\n       ${e.message}`) }
 }
 
@@ -36,11 +36,11 @@ const readStore = (root) => JSON.parse(readFileSync(storePath(root), 'utf8'))
 
 console.log('decodeJwtExpiry')
 
-test('reads exp from a JWT payload', () => {
+await test('reads exp from a JWT payload', async () => {
   assert.equal(decodeJwtExpiry(jwt(1800000000)), 1800000000 * 1000)
 })
 
-test('returns null for a malformed token', () => {
+await test('returns null for a malformed token', async () => {
   assert.equal(decodeJwtExpiry('not-a-jwt'), null)
   assert.equal(decodeJwtExpiry(''), null)
   assert.equal(decodeJwtExpiry(undefined), null)
@@ -48,7 +48,7 @@ test('returns null for a malformed token', () => {
 
 console.log('importCliCredentials')
 
-test('imports codex tokens into plugin shape', () => {
+await test('imports codex tokens into plugin shape', async () => {
   const root = sandbox()
   const exp = Math.floor(Date.now() / 1000) + 3600
   writeFileSync(join(root, '.codex', 'auth.json'), JSON.stringify({
@@ -62,7 +62,7 @@ test('imports codex tokens into plugin shape', () => {
     last_refresh: new Date().toISOString(),
   }))
 
-  const report = importCliCredentials({ home: root })
+  const report = await importCliCredentials({ home: root })
 
   assert.equal(report.codex.imported, true)
   const store = readStore(root)
@@ -71,7 +71,7 @@ test('imports codex tokens into plugin shape', () => {
   assert.equal(store.codex.expiresAt, exp * 1000)
 })
 
-test('imports grok tokens into plugin shape', () => {
+await test('imports grok tokens into plugin shape', async () => {
   const root = sandbox()
   writeFileSync(join(root, '.grok', 'auth.json'), JSON.stringify({
     access_token: 'grok-access',
@@ -80,7 +80,7 @@ test('imports grok tokens into plugin shape', () => {
     email: 'user@example.com',
   }))
 
-  const report = importCliCredentials({ home: root })
+  const report = await importCliCredentials({ home: root })
 
   assert.equal(report.grok.imported, true)
   const store = readStore(root)
@@ -89,7 +89,7 @@ test('imports grok tokens into plugin shape', () => {
   assert.equal(store.grok.expiresAt, 1800000000000)
 })
 
-test('keeps a newer plugin token over an older CLI token', () => {
+await test('keeps a newer plugin token over an older CLI token', async () => {
   const root = sandbox()
   const older = Math.floor(Date.now() / 1000) + 60
   writeFileSync(join(root, '.codex', 'auth.json'), JSON.stringify({
@@ -99,17 +99,17 @@ test('keeps a newer plugin token over an older CLI token', () => {
     codex: { accessToken: 'newer', refreshToken: 'newer', expiresAt: Date.now() + 7200_000 },
   }))
 
-  const report = importCliCredentials({ home: root })
+  const report = await importCliCredentials({ home: root })
 
   assert.equal(report.codex.imported, false)
   assert.equal(report.codex.reason, 'plugin_token_newer')
   assert.equal(readStore(root).codex.accessToken, 'newer')
 })
 
-test('reports absent CLI credentials without writing a store', () => {
+await test('reports absent CLI credentials without writing a store', async () => {
   const root = sandbox()
 
-  const report = importCliCredentials({ home: root })
+  const report = await importCliCredentials({ home: root })
 
   assert.equal(report.codex.imported, false)
   assert.equal(report.codex.reason, 'cli_not_logged_in')
@@ -117,7 +117,7 @@ test('reports absent CLI credentials without writing a store', () => {
   assert.equal(existsSync(storePath(root)), false)
 })
 
-test('leaves other providers untouched', () => {
+await test('leaves other providers untouched', async () => {
   const root = sandbox()
   writeFileSync(join(root, '.grok', 'auth.json'), JSON.stringify({
     access_token: 'g', refresh_token: 'r', expires_at: 1800000000000,
@@ -126,38 +126,38 @@ test('leaves other providers untouched', () => {
     claude: { accessToken: 'claude-token', expiresAt: 1800000000000 },
   }))
 
-  importCliCredentials({ home: root })
+  await importCliCredentials({ home: root })
 
   assert.equal(readStore(root).claude.accessToken, 'claude-token')
 })
 
-test('tolerates malformed CLI credential files', () => {
+await test('tolerates malformed CLI credential files', async () => {
   const root = sandbox()
   writeFileSync(join(root, '.codex', 'auth.json'), 'not json at all')
 
-  const report = importCliCredentials({ home: root })
+  const report = await importCliCredentials({ home: root })
 
   assert.equal(report.codex.imported, false)
   assert.equal(report.codex.reason, 'cli_unreadable')
 })
 
-test('skips a codex file with no usable tokens', () => {
+await test('skips a codex file with no usable tokens', async () => {
   const root = sandbox()
   writeFileSync(join(root, '.codex', 'auth.json'), JSON.stringify({ auth_mode: 'apikey', tokens: {} }))
 
-  const report = importCliCredentials({ home: root })
+  const report = await importCliCredentials({ home: root })
 
   assert.equal(report.codex.imported, false)
   assert.equal(report.codex.reason, 'cli_not_logged_in')
 })
 
-test('writes the store with owner-only permissions', () => {
+await test('writes the store with owner-only permissions', async () => {
   const root = sandbox()
   writeFileSync(join(root, '.grok', 'auth.json'), JSON.stringify({
     access_token: 'g', refresh_token: 'r', expires_at: 1800000000000,
   }))
 
-  importCliCredentials({ home: root })
+  await importCliCredentials({ home: root })
 
   assert.equal(statSync(storePath(root)).mode & 0o777, 0o600)
 })
