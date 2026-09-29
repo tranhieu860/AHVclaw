@@ -126,13 +126,16 @@ mv -f "$tmp" "$out/$file"
 # Every tag gets its own manifest (<tag>.json). manifest.json describes the
 # stable channel and is only rewritten when this tag is stable — or when no
 # channels.json exists yet.
-python3 - "$out" "$tag" "$platform" "$file" "$sha" "$size" "$glibc" "$node" "$build_glibc" "$glibc_optional" <<'PY'
+# The dsh core decides what a host that cannot use the archive may do: a 0.1
+# core builds from source there, a 0.2 core must not (the CMS gate reads it).
+core="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("version",""))' "$src/apps/cli/package.json" 2>/dev/null || true)"
+python3 - "$out" "$tag" "$platform" "$file" "$sha" "$size" "$glibc" "$node" "$build_glibc" "$glibc_optional" "$core" <<'PY'
 import json
 import os
 import sys
 import time
 
-out, tag, platform, file, sha, size, glibc, node, build_glibc, glibc_optional = sys.argv[1:]
+out, tag, platform, file, sha, size, glibc, node, build_glibc, glibc_optional, core = sys.argv[1:]
 
 def load(path):
     try:
@@ -161,6 +164,8 @@ tag_path = os.path.join(out, tag + ".json")
 manifest = load(tag_path)
 if manifest.get("version") != tag:
     manifest = {"version": tag, "packages": {}}
+if core:
+    manifest["core"] = core
 manifest.setdefault("packages", {})[platform] = entry
 write(tag_path, manifest)
 

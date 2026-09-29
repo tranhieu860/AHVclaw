@@ -51,7 +51,18 @@ check "the log names the file" 'grep -q "pty.node needs GLIBC_2.34" "$T/log"'
 echo "== versions compare as numbers"
 tree; elf "$T/b/src/a.so" $MACHINE 2.9; elf "$T/b/src/b.so.1" $MACHINE 2.10
 build 2.2
-check "2.10 beats 2.9" '[ "$(field glibc)" = 2.10 ]'
+check "2.10 beats 2.9 across files" '[ "$(field glibc)" = 2.10 ]'
+tree; elf "$T/b/src/a.so" $MACHINE 2.10 2.9
+build 2.2
+check "2.10 beats 2.9 within one file" '[ "$(field glibc)" = 2.10 ]'
+tree; elf "$T/b/src/a.so" $MACHINE 2.9
+build 2.17
+check "the builder floor beats a lower need" '[ "$(field glibc)" = 2.17 ]'
+
+echo "== the manifest names the dsh core"
+tree; mkdir -p "$T/b/src/apps/cli"; printf '{"name":"@deepseek-ai/dsh","version":"0.2.0-rc.1"}' > "$T/b/src/apps/cli/package.json"
+build 2.28
+check "core recorded" '[ "$(python3 -c "import json;print(json.load(open(\"$T/out/v9.9.9.json\")).get(\"core\"))")" = 0.2.0-rc.1 ]'
 
 echo "== another architecture's prebuild is ignored"
 tree; elf "$T/b/src/node_modules/.pnpm/zip@1/node_modules/zip/index.linux-other.node" $OTHER 2.40

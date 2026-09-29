@@ -98,7 +98,12 @@ jobs:
           set -euo pipefail
           # The checks release-cli.sh runs on the reference build that need no
           # account; the real `ahv run` happens on canary hosts before a promote.
-          bash _ci/scripts/prod/tests/test-no-telemetry.sh "$GITHUB_WORKSPACE/.ahv-build/src" --strict
+          # DeepSeek telemetry arrived with dsh 0.2; a dsh 0.1 tag has none to switch off.
+          core="$(node -p "require('$GITHUB_WORKSPACE/.ahv-build/src/apps/cli/package.json').version")"
+          case "$core" in
+            0.0.*|0.1.*) echo "dsh $core: no telemetry rows to check" ;;
+            *) bash _ci/scripts/prod/tests/test-no-telemetry.sh "$GITHUB_WORKSPACE/.ahv-build/src" --strict ;;
+          esac
           bash _ci/scripts/prod/tests/test-browser-playwright.sh "$GITHUB_WORKSPACE/.ahv-build/src" --strict
       - uses: actions/upload-artifact@v4
         with:

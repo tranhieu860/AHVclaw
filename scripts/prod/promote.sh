@@ -35,8 +35,11 @@ def keep_owner(target):
 keep_owner(tmp)
 os.replace(tmp, path)
 manifest_path = os.path.join(d, "manifest.json")
-shutil.copyfile(os.path.join(d, tag + ".json"), manifest_path)
-os.chmod(manifest_path, 0o644)
-keep_owner(manifest_path)
+# Copy then rename: a host fetching manifest.json mid-copy must never read half a file.
+staged = manifest_path + ".tmp"
+shutil.copyfile(os.path.join(d, tag + ".json"), staged)
+os.chmod(staged, 0o644)
+keep_owner(staged)
+os.replace(staged, manifest_path)
 print("stable →", tag, "| channels:", json.dumps(channels))
 PY
