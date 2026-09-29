@@ -57,13 +57,13 @@ jobs:
           fetch-depth: 0
       - name: Build the tag with the product installer
         env:
-          AHV_HOME: ${{ github.workspace }}/.ahv-build
-          AHV_BIN: ${{ github.workspace }}/.ahv-build/bin-link
-          AHV_REPO_URL: file://${{ github.workspace }}
           NO_COLOR: '1'
           PNPM_CONFIG_MINIMUM_RELEASE_AGE: '0'
         run: |
           set -euo pipefail
+          # Inside a container ${{ github.workspace }} is the runner's path; the
+          # shell's GITHUB_WORKSPACE is the one mounted here.
+          export AHV_HOME="$GITHUB_WORKSPACE/.ahv-build" AHV_BIN="$GITHUB_WORKSPACE/.ahv-build/bin-link" AHV_REPO_URL="file://$GITHUB_WORKSPACE"
           node -v; python3 --version; gcc --version | head -1
           corepack enable
           AHV_BRANCH="$TAG" AHV_CLI_VERSION="$TAG" bash scripts/prod/install.sh
