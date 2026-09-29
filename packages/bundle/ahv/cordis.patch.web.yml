@@ -8,8 +8,11 @@
 
 - id: agent-default-model
   config:
-    provider: ahv-router
-    model: ahv-qwen38
+    # The user's own choice when there is one (the wrapper resolves it from the
+    # web setting or the 0.1 settings.yaml into AHV_DEFAULT_*), else the router.
+    provider: !!js "process.env.AHV_DEFAULT_PROVIDER || 'ahv-router'"
+    model: !!js "process.env.AHV_DEFAULT_MODEL || 'ahv-qwen38'"
+    reasoningEffort: !!js "process.env.AHV_DEFAULT_REASONING || undefined"
 
 - id: llm-pi-ai
   config:

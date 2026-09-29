@@ -102,10 +102,21 @@ ensure_profile_plugins() {
 # unless the profile grants that exact version. The bundle's pinned plugins
 # (subscriptions, browser, …) still declare 0.1.x peers, so without this every
 # run loses them quietly. Grants name only what this install ships.
+#
+# The same pass reports the default model the user chose (web setting, then the
+# 0.1 settings.yaml, then the AHV default). The 0.1 CLI applied settings.yaml to
+# every run; 0.2 renames that file and the AHV patch layer would override a
+# profile choice, so the patch reads it from AHV_DEFAULT_* instead.
 grant_shipped_plugins() {
   local fork="$1"; shift
   [ -f "$fork/scripts/prod/ahv-plugin-grants.mjs" ] || return 0
-  node "$fork/scripts/prod/ahv-plugin-grants.mjs" "$fork" "${DSH_HOME:-$HOME/.dsh}" "$@" || true
+  local provider="" model="" effort=""
+  { IFS= read -r provider; IFS= read -r model; IFS= read -r effort; } < <(
+    node "$fork/scripts/prod/ahv-plugin-grants.mjs" --print-default-model "$fork" "${DSH_HOME:-$HOME/.dsh}" "$@" || true
+  )
+  if [ -n "$provider" ] && [ -n "$model" ]; then
+    export AHV_DEFAULT_PROVIDER="$provider" AHV_DEFAULT_MODEL="$model" AHV_DEFAULT_REASONING="$effort"
+  fi
 }
 
 # Browser authentication for `ahv web`. A loopback bind is only reachable
