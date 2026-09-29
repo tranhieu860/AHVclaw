@@ -1,29 +1,104 @@
 # Build the prebuilt AHV CLI archive for every platform when a release tag is
-# pushed, and attach it to a GitHub Release. The reference machine (x64) builds
-# its own archive during release-cli.sh; this job is what supplies the
-# platforms it cannot build — today linux-arm64 — and a second, independent
-# x64 build. ahvclaw.com mirrors the assets it needs into its release channel.
+# pushed, and attach it to a GitHub Release. ahvclaw.com mirrors the assets
+# into its release channel (scripts/prod/mirror-prebuilt.sh).
+#
+# linux-x64 is built inside manylinux_2_28 (glibc 2.28), not on the runner's
+# Ubuntu 24.04: the reference machine's own x64 archive needs glibc 2.39, so
+# ten hosts (AlmaLinux 8/9, Ubuntu 22.04) fell back to building from source,
+# and a dsh 0.2 core cannot be built there (29/09: #5 #6 broke at
+# build:native-system, #1 hit 3.6 GB). The mirror swaps this archive in for
+# the reference one whenever it needs an older glibc.
+#
+# workflow_dispatch rebuilds an existing tag; `publish` attaches the result to
+# that tag's release (replacing assets of the same name), otherwise it is only
+# kept as a workflow artifact for testing.
 name: prebuilt
 on:
   push:
     tags: ['v0.*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: existing tag to build (v0.2.x)
+        required: true
+      publish:
+        description: attach the archives to that tag's release
+        type: boolean
+        default: false
 permissions:
   contents: write
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+  NODE_VERSION: '22.22.2'
+  # CI must never report to the telemetry endpoint baked into the core.
+  DSH_TELEMETRY_DISABLED: '1'
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-24.04
-            platform: linux-x64
-          - runner: ubuntu-24.04-arm
-            platform: linux-arm64
-    runs-on: ${{ matrix.runner }}
+  linux-x64:
+    runs-on: ubuntu-24.04
+    container: quay.io/pypa/manylinux_2_28_x86_64
+    timeout-minutes: 90
+    steps:
+      - name: Toolchain (git, zstd, Node from nodejs.org)
+        run: |
+          set -euo pipefail
+          dnf install -y -q git zstd xz >/dev/null
+          git config --global --add safe.directory '*'
+          cd /tmp
+          curl -fsSLO "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-x64.tar.xz"
+          curl -fsSL "https://nodejs.org/dist/v$NODE_VERSION/SHASUMS256.txt" | grep " node-v$NODE_VERSION-linux-x64.tar.xz\$" | sha256sum -c -
+          mkdir -p /opt/node && tar -xJf "node-v$NODE_VERSION-linux-x64.tar.xz" -C /opt/node --strip-components=1
+          echo /opt/node/bin >> "$GITHUB_PATH"
+          # node-gyp (node-pty) wants a modern python3 first on PATH.
+          echo /opt/python/cp312-cp312/bin >> "$GITHUB_PATH"
+          getconf GNU_LIBC_VERSION
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+      - name: Build the tag with the product installer
+        env:
+          AHV_HOME: ${{ github.workspace }}/.ahv-build
+          AHV_BIN: ${{ github.workspace }}/.ahv-build/bin-link
+          AHV_REPO_URL: file://${{ github.workspace }}
+          NO_COLOR: '1'
+          PNPM_CONFIG_MINIMUM_RELEASE_AGE: '0'
+        run: |
+          set -euo pipefail
+          node -v; python3 --version; gcc --version | head -1
+          corepack enable
+          AHV_BRANCH="$TAG" AHV_CLI_VERSION="$TAG" bash scripts/prod/install.sh
+          "$AHV_HOME/bin/ahv" --version | grep -F "$TAG"
+      - name: Package
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          bash scripts/prod/build-prebuilt.sh "$TAG" out "$GITHUB_WORKSPACE/.ahv-build/src"
+          mv "out/$TAG.json" "out/$TAG-linux-x64.json"
+          rm -f out/manifest.json
+          # The archive is only as portable as the newest glibc symbol it links.
+          grep -q '"glibc": "2.28"' "out/$TAG-linux-x64.json"
+          cat "out/$TAG-linux-x64.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ahv-cli-${{ env.TAG }}-linux-x64
+          path: out/
+          retention-days: 7
+          compression-level: 0
+      - if: github.event_name == 'push' || inputs.publish
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          files: |
+            out/ahv-cli-${{ env.TAG }}-linux-x64.tar.zst
+            out/${{ env.TAG }}-linux-x64.json
+  linux-arm64:
+    if: github.event_name == 'push' || inputs.publish
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ env.TAG }}
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
@@ -33,24 +108,23 @@ jobs:
           AHV_HOME: ${{ github.workspace }}/.ahv-build
           AHV_BIN: ${{ github.workspace }}/.ahv-build/bin-link
           AHV_REPO_URL: file://${{ github.workspace }}
-          AHV_BRANCH: ${{ github.ref_name }}
-          AHV_CLI_VERSION: ${{ github.ref_name }}
           NO_COLOR: '1'
           PNPM_CONFIG_MINIMUM_RELEASE_AGE: '0'
         run: |
           corepack enable
           sudo apt-get update -qq && sudo apt-get install -y -qq zstd build-essential python3 pkg-config >/dev/null
-          bash scripts/prod/install.sh
-          "$AHV_HOME/bin/ahv" --version | grep -F "${{ github.ref_name }}"
+          AHV_BRANCH="$TAG" AHV_CLI_VERSION="$TAG" bash scripts/prod/install.sh
+          "$AHV_HOME/bin/ahv" --version | grep -F "$TAG"
       - name: Package
         run: |
           mkdir -p out
-          bash scripts/prod/build-prebuilt.sh "${{ github.ref_name }}" out "$GITHUB_WORKSPACE/.ahv-build/src"
-          mv out/${{ github.ref_name }}.json out/${{ github.ref_name }}-${{ matrix.platform }}.json
+          bash scripts/prod/build-prebuilt.sh "$TAG" out "$GITHUB_WORKSPACE/.ahv-build/src"
+          mv "out/$TAG.json" "out/$TAG-linux-arm64.json"
           rm -f out/manifest.json
           ls -la out
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.TAG }}
           files: |
-            out/ahv-cli-${{ github.ref_name }}-${{ matrix.platform }}.tar.zst
-            out/${{ github.ref_name }}-${{ matrix.platform }}.json
+            out/ahv-cli-${{ env.TAG }}-linux-arm64.tar.zst
+            out/${{ env.TAG }}-linux-arm64.json
