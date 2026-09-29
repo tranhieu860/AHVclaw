@@ -12,6 +12,10 @@
 # workflow_dispatch rebuilds an existing tag; `publish` attaches the result to
 # that tag's release (replacing assets of the same name), otherwise it is only
 # kept as a workflow artifact for testing.
+#
+# The build jobs run third-party install scripts (pnpm install), so they get a
+# read-only token and do not keep it in .git/config; only the publish job,
+# which runs no project code, may write to the release.
 name: prebuilt
 on:
   push:
@@ -26,7 +30,7 @@ on:
         type: boolean
         default: false
 permissions:
-  contents: write
+  contents: read
 env:
   TAG: ${{ inputs.tag || github.ref_name }}
   NODE_VERSION: '22.22.2'
@@ -55,6 +59,15 @@ jobs:
         with:
           ref: ${{ env.TAG }}
           fetch-depth: 0
+          persist-credentials: false
+      # Package and check with this workflow's own scripts, so rebuilding an
+      # older tag still gets today's glibc scan and smoke checks.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: _ci
+          sparse-checkout: scripts/prod
+          persist-credentials: false
       - name: Build the tag with the product installer
         env:
           NO_COLOR: '1'
@@ -72,25 +85,27 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
-          bash scripts/prod/build-prebuilt.sh "$TAG" out "$GITHUB_WORKSPACE/.ahv-build/src"
+          bash _ci/scripts/prod/build-prebuilt.sh "$TAG" out "$GITHUB_WORKSPACE/.ahv-build/src"
           mv "out/$TAG.json" "out/$TAG-linux-x64.json"
           rm -f out/manifest.json
-          # The archive is only as portable as the newest glibc symbol it links.
-          grep -q '"glibc": "2.28"' "out/$TAG-linux-x64.json"
           cat "out/$TAG-linux-x64.json"
+          # build-prebuilt.sh scans every ELF in the tree: a native module that
+          # links a GLIBC_x.y above 2.28 (outside prebuilt-glibc-optional.txt)
+          # raises this and would leave the old hosts behind.
+          grep -q '"glibc": "2.28"' "out/$TAG-linux-x64.json"
+      - name: Smoke the built tree (no login needed)
+        run: |
+          set -euo pipefail
+          # The checks release-cli.sh runs on the reference build that need no
+          # account; the real `ahv run` happens on canary hosts before a promote.
+          bash _ci/scripts/prod/tests/test-no-telemetry.sh "$GITHUB_WORKSPACE/.ahv-build/src" --strict
+          bash _ci/scripts/prod/tests/test-browser-playwright.sh "$GITHUB_WORKSPACE/.ahv-build/src" --strict
       - uses: actions/upload-artifact@v4
         with:
           name: ahv-cli-${{ env.TAG }}-linux-x64
           path: out/
           retention-days: 7
           compression-level: 0
-      - if: github.event_name == 'push' || inputs.publish
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.TAG }}
-          files: |
-            out/ahv-cli-${{ env.TAG }}-linux-x64.tar.zst
-            out/${{ env.TAG }}-linux-x64.json
   linux-arm64:
     if: github.event_name == 'push' || inputs.publish
     runs-on: ubuntu-24.04-arm
@@ -100,6 +115,7 @@ jobs:
         with:
           ref: ${{ env.TAG }}
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -122,9 +138,30 @@ jobs:
           mv "out/$TAG.json" "out/$TAG-linux-arm64.json"
           rm -f out/manifest.json
           ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ahv-cli-${{ env.TAG }}-linux-arm64
+          path: out/
+          retention-days: 7
+          compression-level: 0
+  publish:
+    if: github.event_name == 'push' || inputs.publish
+    needs: [linux-x64, linux-arm64]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ahv-cli-${{ env.TAG }}-linux-*
+          merge-multiple: true
+          path: out
+      - run: ls -la out && cd out && for f in *.json; do python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$f"; done
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
           files: |
+            out/ahv-cli-${{ env.TAG }}-linux-x64.tar.zst
+            out/${{ env.TAG }}-linux-x64.json
             out/ahv-cli-${{ env.TAG }}-linux-arm64.tar.zst
             out/${{ env.TAG }}-linux-arm64.json
