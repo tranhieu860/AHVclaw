@@ -74,4 +74,16 @@ check "glibc 2.33" '[ "$(field glibc)" = 2.33 ]'
 echo "== the archive and its sha still match"
 check "sha" 'f="$(field file)"; [ "$(field sha256)" = "$(sha256sum "$T/out/$f" | cut -d" " -f1)" ]'
 
+echo "== AHV_PREBUILT_REQUIRE_GLIBC keeps a too-new archive out of the channel"
+tree; elf "$T/b/src/node_modules/.pnpm/node-pty@1.1.0/node_modules/node-pty/build/Release/pty.node" $MACHINE 2.34
+AHV_PREBUILT_REQUIRE_GLIBC=2.28 AHV_BUILD_GLIBC=2.39 bash "$BUILD" v9.9.9 "$T/out" "$T/b/src" > "$T/log" 2>&1; rc=$?
+check "exit 0" '[ "$rc" = 0 ]'
+check "no archive, no part file" '! ls "$T/out" | grep -q "tar.zst"'
+check "tag manifest exists with no packages" '[ "$(python3 -c "import json;print(json.load(open(\"$T/out/v9.9.9.json\"))[\"packages\"])")" = "{}" ]'
+check "the log says why" 'grep -q "needs glibc 2.39 > 2.28; not published" "$T/log"'
+check "manifest.json untouched" '[ ! -e "$T/out/manifest.json" ]'
+tree; AHV_PREBUILT_REQUIRE_GLIBC=2.28 AHV_BUILD_GLIBC=2.28 bash "$BUILD" v9.9.9 "$T/out" "$T/b/src" > "$T/log" 2>&1
+check "an archive at the floor is published" '[ "$(field glibc)" = 2.28 ] && ls "$T/out" | grep -q "tar.zst"'
+check "release-cli sets the floor" 'grep -q "AHV_PREBUILT_REQUIRE_GLIBC=\"\${AHV_FLEET_GLIBC_FLOOR:-2.28}\"" "$HERE/../release-cli.sh"'
+
 echo; echo "  $pass passed, $fail failed"; [ "$fail" -eq 0 ]

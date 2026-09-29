@@ -169,7 +169,13 @@ log "smoke passed"
 # that a proven build exists.
 log "packaging $next → $RELEASE_DIR"
 mkdir -p "$RELEASE_DIR" || { rollback; fail "cannot create $RELEASE_DIR"; }
-bash "$FORK/scripts/prod/build-prebuilt.sh" "$next" "$RELEASE_DIR" "$BUILD_HOME/src" || { rollback; fail "prebuilt packaging failed"; }
+# The reference machine's glibc (2.39) is newer than the fleet's oldest hosts
+# (2.28): its x64 archive would not run there, and a dsh 0.2 core cannot be
+# built from source on them. Publish it only if it happens to run on the
+# floor; otherwise the manylinux_2_28 CI build (mirror-prebuilt.sh) is the
+# tag's one x64 archive, and the canary tries exactly that before a promote.
+AHV_PREBUILT_REQUIRE_GLIBC="${AHV_FLEET_GLIBC_FLOOR:-2.28}" \
+  bash "$FORK/scripts/prod/build-prebuilt.sh" "$next" "$RELEASE_DIR" "$BUILD_HOME/src" || { rollback; fail "prebuilt packaging failed"; }
 # Only the files we own: the rollout controller runs as root and may own
 # channels.json, and one EPERM here used to abort a release that had already
 # built and packaged.

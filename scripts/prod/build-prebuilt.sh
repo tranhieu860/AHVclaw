@@ -33,16 +33,6 @@ baked="$(sed -n 1p "$src/AHV_VERSION" 2>/dev/null || true)"
 [ -d "$src/node_modules" ] || { echo "node_modules missing in $src (not built)" >&2; exit 1; }
 command -v zstd >/dev/null || { echo "zstd missing" >&2; exit 1; }
 
-mkdir -p "$out"
-file="ahv-cli-$tag-$platform.tar.zst"
-tmp="$out/.$file.part"
-# --strip-components=1 on the way in expects one top-level directory.
-tar -C "$(dirname "$src")" --exclude="$(basename "$src")/.git" -cf - "$(basename "$src")" \
-  | zstd -T0 -3 -q -o "$tmp" --force
-sha="$(sha256sum "$tmp" | cut -d' ' -f1)"
-size="$(stat -c %s "$tmp")"
-mv -f "$tmp" "$out/$file"
-
 build_glibc="${AHV_BUILD_GLIBC:-$(getconf GNU_LIBC_VERSION | awk '{print $2}')}"
 scan="$(python3 - "$src" "$build_glibc" "$(dirname "$0")/prebuilt-glibc-optional.txt" <<'PY'
 import json, os, platform, re, sys
@@ -93,6 +83,46 @@ PY
 glibc="$(printf '%s' "$scan" | python3 -c 'import json,sys; print(json.load(sys.stdin)["glibc"])')"
 glibc_optional="$(printf '%s' "$scan" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["optional"]))')"
 node="$(node -v 2>/dev/null || echo unknown)"
+# AHV_PREBUILT_REQUIRE_GLIBC: publish the archive only when it runs on hosts
+# this old. release-cli.sh sets the fleet's floor: the reference machine's own
+# build (glibc 2.39) then stays out of the channel and the platform is left to
+# the glibc 2.28 CI build (mirror-prebuilt.sh) — so the canary host runs, and
+# the promote gate judges, the very archive stable will get.
+if [ -n "${AHV_PREBUILT_REQUIRE_GLIBC:-}" ] && ! python3 -c 'import sys; k=lambda v: tuple(int(p) for p in v.split(".")); sys.exit(0 if k(sys.argv[1]) <= k(sys.argv[2]) else 1)' "$glibc" "$AHV_PREBUILT_REQUIRE_GLIBC"; then
+  echo "prebuilt $platform needs glibc $glibc > $AHV_PREBUILT_REQUIRE_GLIBC; not published (the CI build supplies it)" >&2
+  mkdir -p "$out"
+  python3 - "$out" "$tag" <<'PY'
+import json, os, sys
+out, tag = sys.argv[1:]
+path = os.path.join(out, tag + ".json")
+try:
+    manifest = json.load(open(path, encoding="utf-8"))
+except Exception:
+    manifest = {}
+if manifest.get("version") != tag:
+    manifest = {"version": tag, "packages": {}}
+manifest.setdefault("packages", {})
+tmp = path + ".tmp"
+with open(tmp, "w", encoding="utf-8") as stream:
+    json.dump(manifest, stream, indent=2)
+    stream.write("\n")
+os.chmod(tmp, 0o644)
+os.replace(tmp, path)
+print(json.dumps({"version": tag, "platform": None, "skipped": "glibc"}))
+PY
+  exit 0
+fi
+
+mkdir -p "$out"
+file="ahv-cli-$tag-$platform.tar.zst"
+tmp="$out/.$file.part"
+# --strip-components=1 on the way in expects one top-level directory.
+tar -C "$(dirname "$src")" --exclude="$(basename "$src")/.git" -cf - "$(basename "$src")" \
+  | zstd -T0 -3 -q -o "$tmp" --force
+sha="$(sha256sum "$tmp" | cut -d' ' -f1)"
+size="$(stat -c %s "$tmp")"
+mv -f "$tmp" "$out/$file"
+
 # Every tag gets its own manifest (<tag>.json). manifest.json describes the
 # stable channel and is only rewritten when this tag is stable — or when no
 # channels.json exists yet.
