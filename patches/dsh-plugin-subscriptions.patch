@@ -1,5 +1,5 @@
 diff --git a/lib/index.js b/lib/index.js
-index 7a43a75..dd9652c 100644
+index 7a43a75..f665fec 100644
 --- a/lib/index.js
 +++ b/lib/index.js
 @@ -2411,6 +2411,14 @@ async function oauthEndpointError(response, label) {
@@ -34,7 +34,7 @@ index 7a43a75..dd9652c 100644
  		if (!forceRefresh && session.expiresAt - Date.now() > this.options.preemptMs) return session;
  		this.inflight ??= this.doRefresh(session).finally(() => {
  			this.inflight = void 0;
-@@ -2456,8 +2474,14 @@ var TokenManager = class {
+@@ -2456,8 +2474,15 @@ var TokenManager = class {
  				const attempted = this.attempted;
  				const stored = await this.options.load();
  				if (stored !== void 0 && attempted !== void 0 && stored.refreshToken !== attempted.refreshToken) return stored;
@@ -44,6 +44,7 @@ index 7a43a75..dd9652c 100644
 +					this.deadRefreshToken = (attempted ?? session).refreshToken;
 +					this.deadAccessToken = (attempted ?? session).accessToken;
 +					this.deadError = error;
++					if (!forceRefresh && session.expiresAt > Date.now()) return session;
 +				} else {
 +					await this.options.remove();
 +					this.options.onRemoved?.();
@@ -51,7 +52,7 @@ index 7a43a75..dd9652c 100644
  				throw new LlmError(`${this.options.displayName} login expired or was revoked; log in again via Settings → Subscriptions`, "INVALID_CREDENTIAL", { cause: error });
  			}
  			if (!forceRefresh && session.expiresAt > Date.now()) return session;
-@@ -10966,7 +10990,8 @@ function apply(ctx, config) {
+@@ -10966,7 +10991,8 @@ function apply(ctx, config) {
  				makeOptions: () => ({
  					preemptMs: CODEX_PREEMPT_MS,
  					refresh: refreshCodex,

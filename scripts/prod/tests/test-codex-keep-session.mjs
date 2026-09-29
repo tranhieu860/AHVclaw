@@ -176,8 +176,10 @@ await check('codex login refreshed elsewhere without rotating the refresh token 
   const store$ = stored()
   store$.codex.accounts[CODEX] = { ...store$.codex.accounts[CODEX], accessToken: 'fake-codex-at-3', expiresAt: Date.now() + 3_600_000 }
   writeFileSync(store, JSON.stringify(store$), { mode: 0o600 })
+  const changes = authChanges
   const result = await usage('codex', CODEX)
   assert.doesNotMatch(JSON.stringify(result?.error ?? result), /INVALID_CREDENTIAL|login expired or was revoked/)
+  assert.ok(authChanges > changes, 'auth-changed hook did not run after the access token changed')
 })
 
 await check('codex dead login whose access token is still valid keeps being used', async () => {
@@ -192,6 +194,19 @@ await check('codex dead login whose access token is still valid keeps being used
   assert.equal(tokenCalls.codex, calls, 'the dead refresh token went to auth.openai.com again')
   assert.ok(stored().codex?.accounts?.[CODEX])
   assert.doesNotMatch(JSON.stringify(result?.error ?? result), /INVALID_CREDENTIAL|login expired or was revoked/, 'a still-valid access token was refused')
+})
+
+await check('codex refresh that fails permanently while the access token is still valid keeps using it', async () => {
+  seed()
+  // A session this process has not seen die, inside the 5-minute refresh window.
+  const store$ = stored()
+  store$.codex.accounts[CODEX] = { accessToken: 'fake-codex-at-4', refreshToken: 'fake-codex-rt-4', expiresAt: Date.now() + 60_000, accountId: CODEX }
+  writeFileSync(store, JSON.stringify(store$), { mode: 0o600 })
+  const calls = tokenCalls.codex
+  const result = await usage('codex', CODEX)
+  assert.equal(tokenCalls.codex, calls + 1, 'the refresh inside the window was not attempted')
+  assert.doesNotMatch(JSON.stringify(result?.error ?? result), /INVALID_CREDENTIAL|login expired or was revoked/, 'a still-valid access token was refused on the first failure')
+  assert.ok(stored().codex?.accounts?.[CODEX])
 })
 
 await check('claude invalid_grant still removes the claude account (unchanged)', async () => {
