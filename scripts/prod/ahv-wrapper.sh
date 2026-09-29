@@ -69,6 +69,13 @@ cd "$FORK"
 #
 # The farm is left alone when absent — dsh scaffolds it on first run, and an
 # empty one makes the whole plugin tree fail to load.
+#
+# dsh 0.2 resolves plugins from the installation (apps/cli depends on the AHV
+# bundle) and never reads the farm, so this core no longer calls it. Leaving
+# the farm pointed at the last 0.1 tree is what keeps a rollback working: the
+# 0.1 wrapper's `web` branch does not relink, and a farm pointing into a 0.2
+# tree made ahv-web crash on 0.2-only plugin code (review 1, VỪA-2). Kept for
+# the tests and for a tree that still runs a 0.1 core.
 ensure_profile_plugins() {
   local fork="$1"
   local farm="${DSH_HOME:-$HOME/.dsh}/profiles/node_modules"
@@ -123,15 +130,11 @@ AHV_BOT="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)/ahv-bot.mjs"
 
 case "${1:-}" in
   auth|login|doctor|sessions|models|version|run)
-    ensure_profile_plugins "$FORK"
     grant_shipped_plugins "$FORK" headless
     exec node "$AHV_BOT" "$@"
     ;;
   web)
     shift
-    # Relink the farm here too: after a rollback to a 0.1 core the farm still
-    # points at the newer tree's plugins, and 0.1 cannot load them.
-    ensure_profile_plugins "$FORK"
     grant_shipped_plugins "$FORK" web
     AHV_WEB_AUTH="$(web_auth_mode "$@")"
     export AHV_WEB_AUTH

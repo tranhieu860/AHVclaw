@@ -277,7 +277,8 @@ async function doctor() {
   }
   checks.push(modelCheck)
 
-  checks.push(checkProfileBundleLink(FORK, DSH_HOME))
+  // dsh 0.2 never reads the profile farm (checkProfileBundleLink); what a run
+  // loads is decided by the installation's dependency closure.
   checks.push(checkInstallBundleLink(FORK))
 
   // Aggregate ok = TRUE trừ khi có ít nhất 1 check severity='error'.
