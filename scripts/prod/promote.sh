@@ -29,7 +29,7 @@ except Exception:
 channels = channels if isinstance(channels, dict) else {}
 key = lambda t: tuple(int(p) for p in t[1:].split(".")) if isinstance(t, str) and re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", t) else None
 floor = channels.get("store_floor") if key(channels.get("store_floor")) else floor_default
-if key(tag) < key(floor):
+if key(tag) is None or key(tag) < key(floor):
     sys.exit(f"refusing {tag}: under the store-safe floor {floor} (tags under it drop accounts from the store); "
              "lower the floor in the CMS (Cài đặt) first if this is really needed")
 channels["stable"] = tag
