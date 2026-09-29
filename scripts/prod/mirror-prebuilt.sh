@@ -22,11 +22,16 @@ trap 'rm -rf "$work"' EXIT
 # Prints "<local-file> <sha256>" when the CI entry should be mirrored, nothing otherwise.
 plan() {
   python3 - "$dir" "$1" "$2" "$work/meta.json" <<'PY'
-import json, os, sys
+import json, os, re, sys
 d, tag, platform, meta_path = sys.argv[1:]
 def parse(value):
     return tuple(int(p) for p in str(value).split("."))
 ci = json.load(open(meta_path))["packages"][platform]
+# The name becomes a path in the channel and part of a URL: only the exact
+# asset name this workflow produces, with a hex sha256 and a numeric glibc.
+if (ci.get("file") != f"ahv-cli-{tag}-{platform}.tar.zst" or not re.fullmatch(r"v\d+\.\d+\.\d+", tag)
+        or not re.fullmatch(r"[0-9a-f]{64}", str(ci.get("sha256", ""))) or not re.fullmatch(r"\d+(\.\d+)+", str(ci.get("glibc", "")))):
+    sys.exit(1)
 try:
     current = json.load(open(os.path.join(d, tag + ".json")))["packages"].get(platform)
 except (OSError, ValueError, KeyError):

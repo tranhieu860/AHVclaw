@@ -124,6 +124,22 @@ check "x64 entry still the reference build" '[ "$(entry v1.0.1 linux-x64 glibc)"
 check "no partial or tampered file left" '! ls "$T/ch" | grep -q -E "\.part$|glibc2\.28"'
 check "mismatch is logged" 'grep -q "checksum mismatch" "$T/out.log"'
 
+echo "== metadata naming another file, or with a junk sha/glibc, is refused"
+for field in 'file="../../../tmp/evil.tar.zst"' 'sha256="../x"' 'glibc="2.28; rm"'; do
+  setup
+  printf '{"stable":"v1.0.0","canary":"v1.0.1"}\n' > "$T/ch/channels.json"
+  local_x64 v1.0.1 2.39 "x64-reference"
+  gh_asset v1.0.1 linux-x64 2.28 "x64-ci"
+  python3 - "$T/gh/v1.0.1/v1.0.1-linux-x64.json" "$field" <<'PY'
+import json, sys
+path, assign = sys.argv[1:]
+key, value = assign.split("=", 1)
+d = json.load(open(path)); d["packages"]["linux-x64"][key] = json.loads(value); json.dump(d, open(path, "w"))
+PY
+  run_mirror
+  check "refused: $field" '[ "$(entry v1.0.1 linux-x64 glibc)" = 2.39 ] && [ ! -e "$T/tmp/evil.tar.zst" ] && [ "$(fetched linux-x64)" = 0 ]'
+done
+
 echo "== tags outside channels.json are ignored"
 setup
 printf '{"stable":"v1.0.0","canary":"v1.0.0"}\n' > "$T/ch/channels.json"
