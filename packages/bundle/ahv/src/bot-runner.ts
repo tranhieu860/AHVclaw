@@ -283,6 +283,33 @@ export async function resolveModelSelection(
 }
 
 /**
+ * Resume, turning a session log this core refuses to migrate into the error
+ * the Telegram bot already recovers from.
+ *
+ * dsh 0.2 migrates a pre-0.2 log on first open and refuses anything outside
+ * its frozen inventory (an unexpected member, an unknown plugin event). The
+ * refusal is terminal, so the bot resent the same id and the chat was stuck on
+ * one error. Reported as "session … not found", the bot starts a fresh session
+ * once and the conversation goes on without the old context; the log itself is
+ * left untouched for recovery or a rollback.
+ *
+ * @param resume - the registry resume call.
+ * @param sessionId - the id being resumed, for the message.
+ * @returns what resume returned.
+ */
+export async function resumeOrReportUnreadable<T>(resume: () => Promise<T>, sessionId: string): Promise<T> {
+  try {
+    return await resume()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (/refuses this format v\d+ Session|unsupported descriptor version|unknown historical event/i.test(message)) {
+      throw new Error(`session "${sessionId}" not found in a format this CLI can open (${message.slice(0, 200)})`, { cause: error })
+    }
+    throw error
+  }
+}
+
+/**
  * Drive one prompt to quiescence and emit the JSONL stream.
  * @param ctx - plugin context carrying agents, default model, sessions, session bus.
  * @param config - resolved bot config (prompt + session identity).
@@ -347,11 +374,11 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
       installModelSelection(agentCtx, selected)
     }
     const { agent } = resumed
-      ? await agents.resume({
+      ? await resumeOrReportUnreadable(() => agents.resume({
         resumeSessionId: SessionId(targetId),
         agentOptions: { provider: chosen.provider, model: chosen.model },
         setup,
-      })
+      }), targetId)
       : await agents.create({
         sessionId: SessionId(targetId),
         meta: { cwd: config.cwd },
