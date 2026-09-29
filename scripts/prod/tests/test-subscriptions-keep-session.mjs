@@ -19,6 +19,7 @@
 // (what `ahv models list` and `ahv run` resolve through), and stub token
 // endpoints answering the way the real ones do for a dead refresh token.
 //
+// The tree must be built: the plugin imports workspace vendor packages from lib/.
 // Usage: node test-subscriptions-keep-session.mjs [<ahv tree>]   (default: this checkout)
 //        node test-subscriptions-keep-session.mjs --plugin <plugin dir>
 // Exit 0 only when every check passes. Tokens here are fake and never printed.
@@ -331,6 +332,25 @@ await check('a new login replaces an unreadable entry of its provider instead of
     const claude = stored().claude
     assert.ok(claude?.accounts && !Array.isArray(claude.accounts), `the unreadable entry won: ${JSON.stringify(claude).slice(0, 80)}`)
     assert.ok(Object.values(claude.accounts).some(account => account.refreshToken === 'fake-claude-rt-new'), 'the new login is missing')
+  } finally {
+    rmSync(join(home, '.claude'), { recursive: true, force: true })
+  }
+})
+
+await check('a new login keeps the accounts of an entry this build could not read', async () => {
+  seed()
+  const data = stored()
+  const odd = { default: null, accounts: { [KEY.claude]: session('claude', 11) } }
+  data.claude = odd
+  writeFileSync(store, JSON.stringify(data), { mode: 0o600 })
+  mkdirSync(join(home, '.claude'), { recursive: true })
+  writeFileSync(join(home, '.claude/.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'fake-claude-at-12', refreshToken: 'fake-claude-rt-12', expiresAt: Date.now() + 3_600_000 } }), { mode: 0o600 })
+  try {
+    const result = await rpc('login', { provider: 'claude', method: 'keychain' })
+    assert.equal(result?.ok, true, `login failed: ${JSON.stringify(result).slice(0, 200)}`)
+    const accounts = Object.values(stored().claude?.accounts ?? {})
+    assert.ok(accounts.some(account => account.refreshToken === 'fake-claude-rt-11'), 'the account of the unreadable entry was lost')
+    assert.ok(accounts.some(account => account.refreshToken === 'fake-claude-rt-12'), 'the new login is missing')
   } finally {
     rmSync(join(home, '.claude'), { recursive: true, force: true })
   }

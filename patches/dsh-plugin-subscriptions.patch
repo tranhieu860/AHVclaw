@@ -1,8 +1,8 @@
 diff --git a/lib/index.js b/lib/index.js
-index 7a43a75..7d7127a 100644
+index 7a43a75..f8577a3 100644
 --- a/lib/index.js
 +++ b/lib/index.js
-@@ -1238,8 +1238,51 @@ function isValidSessionShape(value) {
+@@ -1238,8 +1238,62 @@ function isValidSessionShape(value) {
  	const entry = value;
  	return typeof entry.accessToken === "string" && entry.accessToken.length > 0 && typeof entry.refreshToken === "string" && entry.refreshToken.length > 0 && typeof entry.expiresAt === "number" && Number.isFinite(entry.expiresAt);
  }
@@ -29,6 +29,17 @@ index 7a43a75..7d7127a 100644
 +		const whole = !PROVIDER_IDS.includes(provider) || typeof entry !== "object" || entry === null || Array.isArray(entry) || typeof entry.accessToken === "string" && !isValidSessionShape(entry) || typeof entry.accessToken !== "string" && (typeof entry.accounts !== "object" || entry.accounts === null || Array.isArray(entry.accounts) || entry.default !== void 0 && typeof entry.default !== "string");
 +		if (whole) {
 +			if (out[provider] === void 0) out[provider] = entry;
++			else if (PROVIDER_IDS.includes(provider) && typeof entry === "object" && entry !== null && !Array.isArray(entry)) {
++				const unread = typeof entry.accessToken === "string" ? { [`unparsed-${provider}`]: entry } : typeof entry.accounts === "object" && entry.accounts !== null && !Array.isArray(entry.accounts) ? entry.accounts : {};
++				const kept = Object.entries(unread).filter(([key]) => out[provider].accounts?.[key] === void 0);
++				if (kept.length > 0) out[provider] = {
++					...out[provider],
++					accounts: {
++						...Object.fromEntries(kept),
++						...out[provider].accounts
++					}
++				};
++			}
 +			continue;
 +		}
 +		if (typeof entry.accessToken === "string") continue;
@@ -54,7 +65,7 @@ index 7a43a75..7d7127a 100644
  	await mkdir(dirname(path), { recursive: true });
  	const tmp = `${path}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`;
  	try {
-@@ -2411,6 +2454,15 @@ async function oauthEndpointError(response, label) {
+@@ -2411,6 +2465,15 @@ async function oauthEndpointError(response, label) {
  * coalesces concurrent refreshes behind one in-flight promise. Permanent
  * refresh failures delete the stored session and surface INVALID_CREDENTIAL
  * with a re-login hint; transient failures fall back to a still-valid token.
@@ -70,7 +81,7 @@ index 7a43a75..7d7127a 100644
  */
  var TokenManager = class {
  	inflight;
-@@ -2445,6 +2497,16 @@ var TokenManager = class {
+@@ -2445,6 +2508,16 @@ var TokenManager = class {
  	async session(forceRefresh = false) {
  		const session = await this.options.load();
  		if (session === void 0) throw new LlmError(`dsh-plugin-subscriptions: not logged in to ${this.options.displayName}; log in via Settings → Subscriptions in the dsh web app`, "MISSING_CREDENTIAL");
@@ -87,7 +98,7 @@ index 7a43a75..7d7127a 100644
  		if (!forceRefresh && session.expiresAt - Date.now() > this.options.preemptMs) return session;
  		this.inflight ??= this.doRefresh(session).finally(() => {
  			this.inflight = void 0;
-@@ -2456,8 +2518,10 @@ var TokenManager = class {
+@@ -2456,8 +2529,10 @@ var TokenManager = class {
  				const attempted = this.attempted;
  				const stored = await this.options.load();
  				if (stored !== void 0 && attempted !== void 0 && stored.refreshToken !== attempted.refreshToken) return stored;
@@ -100,7 +111,7 @@ index 7a43a75..7d7127a 100644
  				throw new LlmError(`${this.options.displayName} login expired or was revoked; log in again via Settings → Subscriptions`, "INVALID_CREDENTIAL", { cause: error });
  			}
  			if (!forceRefresh && session.expiresAt > Date.now()) return session;
-@@ -4866,6 +4930,7 @@ const PERMANENT_REFRESH_CODES = new Set([
+@@ -4866,6 +4941,7 @@ const PERMANENT_REFRESH_CODES = new Set([
  	"refresh_token_expired",
  	"refresh_token_reused",
  	"refresh_token_invalidated",

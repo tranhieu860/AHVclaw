@@ -528,6 +528,18 @@ function readSubscriptionsAuth() {
 }
 
 /**
+ * The store for a read-modify-write: a missing file is empty, but a file that
+ * exists and cannot be read throws. Treating it as empty would write back only
+ * the change and erase every other account.
+ */
+function readSubscriptionsAuthForWrite() {
+  if (!existsSync(SUBSCRIPTIONS_AUTH_FILE)) return {}
+  const data = JSON.parse(readFileSync(SUBSCRIPTIONS_AUTH_FILE, 'utf8'))
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) throw new Error('not a JSON object')
+  return data
+}
+
+/**
  * One provider's entry as {defaultKey, accounts}, whichever shape it is on disk.
  *
  * dsh-plugin-subscriptions 0.6 keeps several accounts per provider under
@@ -639,10 +651,7 @@ function withSession(entry, session) {
 }
 
 function writeSubscriptionsAuth(obj) {
-  const dir = dirname(SUBSCRIPTIONS_AUTH_FILE)
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 })
-  writeFileSync(SUBSCRIPTIONS_AUTH_FILE, JSON.stringify(obj, null, 2))
-  chmodSync(SUBSCRIPTIONS_AUTH_FILE, 0o600)
+  writeFileAtomic600(SUBSCRIPTIONS_AUTH_FILE, JSON.stringify(obj, null, 2))
 }
 
 /**
@@ -1355,7 +1364,13 @@ export async function loginUsageReport({ fetchFn = fetch, now = Date.now(), maxA
  */
 function persistRefreshed(refreshed) {
   if (refreshed.length === 0) return
-  const current = readSubscriptionsAuth()
+  let current
+  try {
+    current = readSubscriptionsAuthForWrite()
+  } catch (e) {
+    process.stderr.write(`ahv login usage: ${SUBSCRIPTIONS_AUTH_FILE} không đọc được (${e.message}) — không ghi token vừa làm mới\n`)
+    return
+  }
   let changed = false
   for (const { kind, key, session } of refreshed) {
     const existing = storeAccounts(current[kind]).accounts[key]
@@ -1510,18 +1525,27 @@ function loginAccounts(provider) {
  * @param provider - provider id.
  * @param key - the account key from `login accounts`.
  */
+/** The store for a login command that writes it; refuses (exit 1) when the file cannot be read. */
+function authForWrite() {
+  try {
+    return readSubscriptionsAuthForWrite()
+  } catch (e) {
+    return errJson('internal_error', `${SUBSCRIPTIONS_AUTH_FILE} không đọc được (${e.message}) — không ghi đè kho`, true, 0, 1)
+  }
+}
+
 function loginUse(provider, key) {
   if (!provider || !key) errJson('internal_error', 'use: cần truyền provider và account key', true, 0, 2)
   if (!SUPPORTED_LOGIN_PROVIDERS.includes(provider)) {
     errJson('internal_error', `provider "${provider}" không hỗ trợ`, true, 0, 2)
   }
-  const auth = readSubscriptionsAuth()
+  const auth = authForWrite()
   const { defaultKey, accounts } = storeAccounts(auth[provider])
   if (!(key in accounts)) {
     errJson('internal_error', `account "${key}" chưa có trong kho của ${provider}`, true, 0, 2)
   }
   if (defaultKey !== key) {
-    auth[provider] = { default: key, accounts }
+    auth[provider] = { ...entryExtras(auth[provider]), default: key, accounts }
     try {
       writeSubscriptionsAuth(auth)
     } catch (e) {
@@ -1542,14 +1566,14 @@ function loginForget(provider, key) {
   if (!SUPPORTED_LOGIN_PROVIDERS.includes(provider)) {
     errJson('internal_error', `provider "${provider}" không hỗ trợ`, true, 0, 2)
   }
-  const auth = readSubscriptionsAuth()
+  const auth = authForWrite()
   const { defaultKey, accounts } = storeAccounts(auth[provider])
   const existed = key in accounts
   if (existed) {
     delete accounts[key]
     const nextDefault = defaultKey === key ? (Object.keys(accounts)[0] ?? '') : defaultKey
     if (Object.keys(accounts).length === 0) delete auth[provider]
-    else auth[provider] = { default: nextDefault, accounts }
+    else auth[provider] = { ...entryExtras(auth[provider]), default: nextDefault, accounts }
     try {
       writeSubscriptionsAuth(auth)
     } catch (e) {
@@ -1565,7 +1589,7 @@ function loginLogout(provider) {
   if (!SUPPORTED_LOGIN_PROVIDERS.includes(provider)) {
     errJson('internal_error', `provider "${provider}" không hỗ trợ`, true, 0, 2)
   }
-  const auth = readSubscriptionsAuth()
+  const auth = authForWrite()
   const wasLoggedIn = Boolean(auth[provider])
   if (wasLoggedIn) {
     delete auth[provider]
@@ -2185,21 +2209,26 @@ function readGrokCliSession(home) {
 }
 
 /**
- * Import codex/grok credentials from their CLI-native stores into the
+ * Import codex/grok/claude credentials from their CLI-native stores into the
  * subscriptions plugin store. An existing plugin entry with a later expiry
  * wins, so a token the plugin refreshed itself is never rolled back to the
- * older copy the CLI still holds. Other providers in the store are preserved.
- * @param {{home?: string}} options - override HOME for tests.
- * @returns {Record<string, {imported: boolean, reason: string | null}>} per-provider outcome.
+ * older copy the CLI still holds. Other providers and accounts in the store are
+ * preserved, and a store that exists but cannot be read is left alone rather
+ * than replaced.
+ * @param {{home?: string, claudeConfigDir?: string, fetchFn?: typeof fetch}} options - overrides for tests.
+ * @returns {Promise<Record<string, {imported: boolean, reason: string | null}>>} per-provider outcome.
  */
-export function importCliCredentials({ home = homedir(), claudeConfigDir } = {}) {
+export async function importCliCredentials({ home = homedir(), claudeConfigDir, fetchFn = fetch } = {}) {
   const storePath = join(home, '.dsh', 'plugins', 'subscriptions', 'auth.json')
   let store = {}
   if (existsSync(storePath)) {
     try {
-      store = JSON.parse(readFileSync(storePath, 'utf8')) ?? {}
+      store = JSON.parse(readFileSync(storePath, 'utf8'))
     } catch {
-      store = {}
+      store = null
+    }
+    if (store === null || typeof store !== 'object' || Array.isArray(store)) {
+      return Object.fromEntries(['codex', 'grok', 'claude'].map(p => [p, { imported: false, reason: 'store_unreadable' }]))
     }
   }
 
@@ -2212,10 +2241,16 @@ export function importCliCredentials({ home = homedir(), claudeConfigDir } = {})
   let changed = false
 
   for (const [provider, read] of Object.entries(readers)) {
-    const { session, reason } = read(home)
-    if (!session) {
+    const { session: read$, reason } = read(home)
+    if (!read$) {
       report[provider] = { imported: false, reason }
       continue
+    }
+    // Fields the CLI file lacks come through as null; they must not blank what the store knows.
+    const session = Object.fromEntries(Object.entries(read$).filter(([, value]) => value !== null && value !== undefined))
+    if (provider === 'claude' && session.emailAddress === undefined) {
+      const email = await claudeProfileEmail(session.accessToken, fetchFn)
+      if (email !== '') session.emailAddress = email
     }
     const existing = store[provider]
     // A store the plugin already keeps per account takes the login into one
@@ -2235,13 +2270,30 @@ export function importCliCredentials({ home = homedir(), claudeConfigDir } = {})
     changed = true
   }
 
-  if (changed) {
-    const dir = dirname(storePath)
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 })
-    writeFileSync(storePath, JSON.stringify(store, null, 2))
-    chmodSync(storePath, 0o600)
-  }
+  if (changed) writeFileAtomic600(storePath, JSON.stringify(store, null, 2))
   return report
+}
+
+/**
+ * The address of the Claude account an access token belongs to, asked of the
+ * provider (Claude Code's credentials file carries none); "" when unknown.
+ * Without it an imported login could only be filed under a hash of its refresh
+ * token — a new, duplicate account after every CLI refresh — and guessing the
+ * address from ~/.claude.json can name another account than the token's.
+ */
+async function claudeProfileEmail(accessToken, fetchFn) {
+  try {
+    const res = await fetchFn('https://api.anthropic.com/api/oauth/profile', {
+      headers: { Authorization: `Bearer ${accessToken}`, 'anthropic-beta': 'oauth-2025-04-20', Accept: 'application/json' },
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (!res.ok) return ''
+    const email = (await res.json())?.account?.email
+    return typeof email === 'string' ? email : ''
+  } catch {
+    // Offline or refused: the login is filed without an address instead.
+    return ''
+  }
 }
 
 /**
@@ -2286,8 +2338,8 @@ function importAccountKey(provider, session, entry) {
   return same ?? key
 }
 
-function loginImport() {
-  const report = importCliCredentials()
+async function loginImport() {
+  const report = await importCliCredentials()
   const importedCount = Object.values(report).filter(r => r.imported).length
   printJson({
     imported_count: importedCount,
@@ -2363,7 +2415,7 @@ if (subcommand === 'version') {
   else if (action === 'use') loginUse(rest[1], rest[2])
   else if (action === 'forget') loginForget(rest[1], rest[2])
   else if (action === 'logout') loginLogout(rest[1])
-  else if (action === 'import') loginImport()
+  else if (action === 'import') void loginImport()
   else if (action === 'usage') void loginUsage(rest.slice(1))
   else if (action === 'refresh') void loginRefresh()
   else usage()

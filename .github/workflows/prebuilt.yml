@@ -108,6 +108,9 @@ jobs:
           # Keyed on the tag carrying the check, so rebuilding an older tag still works.
           if [ -f scripts/prod/tests/test-subscriptions-keep-session.mjs ]; then
             node _ci/scripts/prod/tests/test-subscriptions-keep-session.mjs "$GITHUB_WORKSPACE/.ahv-build/src"
+          elif [ -f scripts/prod/tests/test-codex-keep-session.mjs ]; then
+            # v0.2.54–v0.2.55 carry the Codex-only check; run their own copy.
+            node scripts/prod/tests/test-codex-keep-session.mjs "$GITHUB_WORKSPACE/.ahv-build/src"
           fi
           bash _ci/scripts/prod/tests/test-browser-playwright.sh "$GITHUB_WORKSPACE/.ahv-build/src" --strict
       - uses: actions/upload-artifact@v4
@@ -154,6 +157,8 @@ jobs:
           # Tags before the keep-every-login patch have no such check to run.
           if [ -f scripts/prod/tests/test-subscriptions-keep-session.mjs ]; then
             node scripts/prod/tests/test-subscriptions-keep-session.mjs "$GITHUB_WORKSPACE/.ahv-build/src"
+          elif [ -f scripts/prod/tests/test-codex-keep-session.mjs ]; then
+            node scripts/prod/tests/test-codex-keep-session.mjs "$GITHUB_WORKSPACE/.ahv-build/src"
           fi
       - uses: actions/upload-artifact@v4
         with:
