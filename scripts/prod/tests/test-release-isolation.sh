@@ -32,6 +32,14 @@ if grep -q 'rollback; fail "smoke: ahv run failed' "$SCRIPT"; then
 else
   printf '  FAIL  a failed ahv run does not stop the release\n'; fails=$((fails + 1))
 fi
+for guard in 'test-browser-playwright.sh" "$BUILD_HOME/src" --strict' 'test-no-telemetry.sh" "$BUILD_HOME/src" --strict'; do
+  line="$(grep -F "$guard" "$SCRIPT" | head -1)"
+  if printf '%s' "$line" | grep -q 'run_as env "${BUILD_ENV\[@\]}"'; then
+    printf '  PASS  build guard runs strict in the builder env: %s\n' "${guard%%\"*}"
+  else
+    printf '  FAIL  build guard missing or not strict/pinned: %s\n' "${guard%%\"*}"; fails=$((fails + 1))
+  fi
+done
 # A rolled-back tag gets re-cut with the same name; a clone that fetched the
 # first one refuses the second ("would clobber existing tag") and every later
 # build on that clone fails — which is exactly what happened to the builder.

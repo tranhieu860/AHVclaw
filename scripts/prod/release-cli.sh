@@ -152,7 +152,11 @@ fi
 log "smoke run: $runverdict"
 # The browser plugin loads the hoisted playwright; a lockfile shift once moved it
 # off the Chromium every host already has and broke browser_open everywhere.
-bash "$FORK/scripts/prod/tests/test-browser-playwright.sh" "$BUILD_HOME/src" || { rollback; fail "smoke: browser playwright mismatch"; }
+run_as env "${BUILD_ENV[@]}" bash "$FORK/scripts/prod/tests/test-browser-playwright.sh" "$BUILD_HOME/src" --strict \
+  || { rollback; fail "smoke: browser playwright mismatch"; }
+# dsh 0.2 would upload session logs to DeepSeek on feedback; the build must ship with it off.
+run_as env "${BUILD_ENV[@]}" bash "$FORK/scripts/prod/tests/test-no-telemetry.sh" "$BUILD_HOME/src" --strict \
+  || { rollback; fail "smoke: DeepSeek telemetry is not disabled"; }
 usage="$(run_as env "${BUILD_ENV[@]}" NO_COLOR=1 timeout 90 "$smoke" login usage --json 2>/dev/null || true)"
 python3 - "$usage" <<'PY' || { rollback; fail "smoke: login usage malformed"; }
 import json, sys

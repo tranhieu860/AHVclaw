@@ -67,6 +67,27 @@
 - id: llm-deepseek-account
   disabled: true
 
+# --- Nothing leaves the machine for DeepSeek --------------------------------
+# dsh 0.2 ships session telemetry on by default (FEEDBACK_ONLY): one thumbs
+# up/down in the web uploads the session-log prefix -- messages, tool
+# arguments and results, workspace paths -- to dsh-otel-collector.deepseeksvc.com.
+# 0.1.1 had it off. session-log-deepseek attaches the log to DeepSeek-protocol
+# requests. AHV users talk to the AHV router; none of this may run. The wrapper
+# also exports DSH_TELEMETRY_DISABLED as a second lock.
+- id: session-telemetry-otel
+  disabled: true
+
+- id: otel
+  disabled: true
+
+- id: session-log-deepseek
+  disabled: true
+
+# DeepSeek platform account (sign-in, top-up). Re-branded by the skin it would
+# read "Sign in to AHV Harness" while it signs into DeepSeek.
+- id: deepseek-account
+  disabled: true
+
 # The web-search tool now has no provider mounted. Disable the tool so the
 # model doesn't see a broken option; add a real search provider (Brave,
 # Tavily, or AHV's own once available) in a future patch.
@@ -107,10 +128,9 @@
       config:
         enableRunInBackground: true
 
-    # Self-modification runtime — the agent can inspect its own live
-    # runtime and mount ephemeral in-process plugins (`cordis_inspect`,
-    # `cordis_define`, `cordis_run`, `cordis_stop`, `cordis_undefine`).
-    # In-memory only; nothing survives restart, no files written.
+    # Runtime introspection — since dsh 0.2 tool-cordis exposes only the
+    # read side (`cordis_inspect_list`, `cordis_inspect_query`); the define/
+    # run/stop/undefine tools of 0.1 were removed upstream.
     - id: cordis-host-runner
       name: '@deepseek-ai/dsh-cordis-host-runner'
     - id: tool-cordis

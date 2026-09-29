@@ -1021,9 +1021,11 @@ async function loadCoreLag() {
   if (!r || !r.checked_at) { box.innerHTML = '<span class="muted">Lõi dsh: chưa kiểm upstream lần nào (kiểm mỗi ngày).</span>'; return }
   const parts = []
   let warn = false
+  let unknown = false
   for (const name of ['stable', 'canary']) {
     const c = (r.channels || {})[name] || {}
     if (!c.core) { parts.push(`<span>${name} <b>${escText(c.tag || '—')}</b>: <span class="muted">không rõ lõi</span></span>`); continue }
+    if (c.unknown) { unknown = true; parts.push(`<span>${name} <b>${escText(c.tag)}</b>: lõi dsh <b>${escText(c.core)}</b> · <span class="muted">không so được với upstream</span></span>`); continue }
     const gap = c.behind > 0 ? `tụt ${escText(c.days)} ngày (${escText(c.behind)} bản)` : 'mới nhất'
     if (c.warn) warn = true
     parts.push(`<span>${name} <b>${escText(c.tag)}</b>: lõi dsh <b>${escText(c.core)}</b> · ${gap}</span>`)
@@ -1031,7 +1033,7 @@ async function loadCoreLag() {
   const latest = r.latest ? `upstream mới nhất <b>${escText(r.latest.version)}</b> <span class="muted">(${escText(new Date(r.latest.publishedAt).toLocaleDateString('vi-VN'))})</span>` : 'upstream: —'
   const badge = warn
     ? `<span class="badge-warn">⚠ tụt quá ${escText(r.warn_days)} ngày — cần nâng lõi</span>`
-    : '<span class="badge-ok">✓ trong hạn</span>'
+    : (unknown || !r.latest ? '<span class="badge-warn">? không đọc được bản phát hành upstream</span>' : '<span class="badge-ok">✓ trong hạn</span>')
   box.className = 'core-lag' + (warn ? ' warn' : '')
   box.innerHTML = parts.join('') + `<span>${latest}</span>` + badge +
     `<span class="muted">kiểm ${escText(new Date(r.checked_at).toLocaleString('vi-VN'))}</span>`

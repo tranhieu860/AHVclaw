@@ -21,6 +21,12 @@ fi
 
 [ -f "$HOME/.ahv/env" ] && . "$HOME/.ahv/env"
 
+# dsh 0.2 uploads the session-log prefix to DeepSeek's collector when a user
+# leaves feedback. The AHV bundle disables those rows; any non-empty value here
+# is dsh's own process-wide opt-out, a second lock that no profile layer can
+# re-enable.
+export DSH_TELEMETRY_DISABLED=1
+
 DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 INSTALL_MARKER="$DSH_HOME/.ahv-agents-installed"
 if [ -f "$DEFAULT_AGENTS_MD" ] && [ ! -f "$INSTALL_MARKER" ]; then
@@ -123,6 +129,9 @@ case "${1:-}" in
     ;;
   web)
     shift
+    # Relink the farm here too: after a rollback to a 0.1 core the farm still
+    # points at the newer tree's plugins, and 0.1 cannot load them.
+    ensure_profile_plugins "$FORK"
     grant_shipped_plugins "$FORK" web
     AHV_WEB_AUTH="$(web_auth_mode "$@")"
     export AHV_WEB_AUTH

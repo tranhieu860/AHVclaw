@@ -69,8 +69,12 @@ export function trackedReleases(raw) {
 export function coreLag(core, releases, now) {
   const latest = releases[0] ?? null
   const newer = releases.filter(r => compareVersions(r.version, core) > 0)
-  if (!latest || newer.length === 0) {
-    return { core, latest: latest?.version ?? null, latestAt: latest?.publishedAt ?? null, behind: 0, days: 0, since: null, warn: false }
+  if (!latest) {
+    // Upstream renamed its tags or the API answered nothing usable: say so.
+    return { core, latest: null, latestAt: null, behind: null, days: null, since: null, warn: false, unknown: true }
+  }
+  if (newer.length === 0) {
+    return { core, latest: latest.version, latestAt: latest.publishedAt, behind: 0, days: 0, since: null, warn: false }
   }
   const since = newer.reduce((first, r) => (Date.parse(r.publishedAt) < Date.parse(first.publishedAt) ? r : first))
   const days = Math.max(0, Math.floor((now - Date.parse(since.publishedAt)) / DAY_MS))

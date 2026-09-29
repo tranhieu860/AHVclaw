@@ -21,6 +21,7 @@ const RAW = [
   { tag_name: 'dsh-v0.1.7-alpha.2', published_at: '2026-09-22T15:49:49Z', prerelease: true },
   { tag_name: 'dsh-v0.1.5-rc.1', published_at: '2026-09-10T08:00:00Z', prerelease: true },
   { tag_name: 'dsh-v0.1.2-rc.1', published_at: '2026-08-27T08:00:00Z', prerelease: true },
+  { tag_name: 'dsh-v0.1.1-rc.2', published_at: '2026-08-22T08:00:00Z', prerelease: true },
   { tag_name: 'dsh-v0.1.1-rc.1', published_at: '2026-08-21T08:00:00Z', prerelease: true },
   { tag_name: 'dsh-v9.9.9', published_at: '2026-09-29T00:00:00Z', draft: true },
   { tag_name: 'not-a-version', published_at: '2026-09-29T00:00:00Z' },
@@ -35,14 +36,14 @@ await check('orders versions like SemVer (rc before release, alpha before rc)', 
 })
 await check('tracks rc and releases, skips alphas, drafts and junk', () => {
   const versions = lag.trackedReleases(RAW).map(r => r.version)
-  assert.deepEqual(versions, ['0.2.0-rc.1', '0.1.7-rc.2', '0.1.5-rc.1', '0.1.2-rc.1', '0.1.1-rc.1'])
+  assert.deepEqual(versions, ['0.2.0-rc.1', '0.1.7-rc.2', '0.1.5-rc.1', '0.1.2-rc.1', '0.1.1-rc.2', '0.1.1-rc.1'])
 })
-await check('the 29/09 state: 0.1.1-rc.1 is 32 days behind, warned', () => {
+await check('the 29/09 state: 0.1.1-rc.1 is 37 days and 5 releases behind, warned', () => {
   const r = lag.coreLag('0.1.1-rc.1', lag.trackedReleases(RAW), NOW)
   assert.equal(r.latest, '0.2.0-rc.1')
-  assert.equal(r.since, '0.1.2-rc.1')
-  assert.equal(r.behind, 4)
-  assert.equal(r.days, 32)
+  assert.equal(r.since, '0.1.1-rc.2')
+  assert.equal(r.behind, 5)
+  assert.equal(r.days, 37)
   assert.equal(r.warn, true)
 })
 await check('on the latest core: 0 days, no warning', () => {
@@ -81,6 +82,11 @@ await check('the view follows a promote without refetching GitHub', async () => 
   assert.equal(view.channels.canary.tag, 'v0.2.51')
   assert.equal(view.checked_at, new Date(NOW).toISOString())
   assert.equal(lag.readCoreLag({ fork, channelsPath: channels, cachePath: join(dir, 'missing'), now: NOW }).checked_at, null)
+})
+await check('no readable upstream release is "unknown", never "up to date"', () => {
+  const r = lag.coreLag('0.1.1-rc.1', [], NOW)
+  assert.equal(r.latest, null)
+  assert.equal(r.unknown, true)
 })
 await check('an unknown tag reports no core instead of throwing', async () => {
   assert.equal(lag.dshVersionAtTag('/nonexistent', 'v0.2.49'), null)

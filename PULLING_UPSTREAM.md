@@ -43,6 +43,7 @@ Commit gộp chạy lefthook (lint, third-party notices, ghép bản dịch) —
 | `packages/session/session-list-metadata` | projection cho `ahv run` | đồng bộ với `sessionListMetadata` của session-controller |
 | `packages/session/session-format-v0-to-v1/src/ahv-fork-legacy.ts` | chuẩn hoá phiên do lõi 0.1.1-rc.1 ghi | giữ; thiếu là mọi hội thoại bot cũ bị từ chối |
 | `packages/client/connection` (`browserAuth: external`) | ahv-web bind loopback sau cổng ahv-web-ui-auth | giữ |
+| `packages/bundle/ahv/cordis.patch*.yml` (telemetry) + `ahv-wrapper.sh` (`DSH_TELEMETRY_DISABLED=1`) | không gửi gì về DeepSeek (0.2 bật mặc định gửi log phiên khi có phản hồi); tắt tài khoản DeepSeek trên web | mỗi lần gộp: soát dòng mới gửi dữ liệu ra ngoài trong `packages/bundle/{base,web-app}`; `scripts/prod/tests/test-no-telemetry.sh` phải xanh |
 | `packages/client/**/locales.ts`, `apps/web/index.html`, `vite.config.ts`, `Rows.module.css` | thương hiệu AHV, tiêu đề, lời chào, thao tác hàng trên màn cảm ứng | lấy upstream, thay chữ |
 | `pnpm-workspace.yaml` | allowBuilds + miễn tuổi phát hành cho plugin AHV; override `playwright: 1.62.1` (dsh-browser dùng bản hoist, máy AHV có Chromium 1234) | upstream + khối AHV; `scripts/prod/tests/test-browser-playwright.sh` phải xanh |
 | `README.md`, `README.i18n.yaml`, `.gitlab-ci.yml` (xoá) | trang AHV | giữ phía fork |
@@ -76,7 +77,11 @@ Commit gộp chạy lefthook (lint, third-party notices, ghép bản dịch) —
   tag đó (cổng `run_ok`), sau thời gian ngấm.
 - Lùi: `promote.sh <tag cũ>` hoặc nút *Lùi* trên CMS; trên máy, updater lật
   `~/.ahv/src` về `versions/<tag cũ>`. Phiên đã nâng vẫn đọc được ở bản cũ
-  (xem bước 4).
+  (xem bước 4), nhưng các lượt chạy trên lõi mới không có ở bản cũ.
+- Tiến lại sau khi lùi: `ahv run --resume` thấy log cũ ghi sau bản đã nâng thì
+  cất bản đã nâng (`session.vN….superseded-<ts>`, không xoá) và để lõi mới nâng
+  lại từ log cũ — giữ lượt làm lúc lùi, mất lượt làm trên lõi mới trước khi lùi.
+  Web mở phiên không qua đường này.
 
 ## Hotfix
 

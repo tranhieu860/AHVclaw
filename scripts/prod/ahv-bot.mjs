@@ -16,7 +16,7 @@
 //   124 = timeout / cancelled
 
 import { spawn } from 'node:child_process'
-import { readFileSync, existsSync, statSync, readdirSync, writeFileSync, chmodSync, mkdirSync, realpathSync } from 'node:fs'
+import { renameSync, readFileSync, existsSync, statSync, readdirSync, writeFileSync, chmodSync, mkdirSync, realpathSync } from 'node:fs'
 import { resolve as resolvePath, dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { zstdDecompressSync } from 'node:zlib'
@@ -338,33 +338,71 @@ function decodeSessionJsonl(filePath) {
   return lines.map(l => JSON.parse(l))
 }
 
+/** Session log files in one directory with their format generation and mtime. */
+function sessionLogGenerations(sessionPath) {
+  const out = []
+  for (const name of readdirSync(sessionPath)) {
+    const match = /^session(?:\.v(\d+))?\.jsonl(\.zstd)?$/.exec(name)
+    if (!match) continue
+    const path = join(sessionPath, name)
+    let mtime = 0
+    try { mtime = statSync(path).mtimeMs } catch { continue }
+    out.push({ path, name, version: match[1] === undefined ? 0 : Number(match[1]), compressed: match[2] !== undefined, mtime })
+  }
+  return out
+}
+
 /**
- * The log a session's newest format generation lives in.
+ * The log a session's live conversation is in.
  *
- * dsh 0.2 writes `session.v<N>.jsonl.zstd` and migrates an older log into a
- * new generation on first open, leaving the source file in place (that is
- * what keeps a rollback to the old CLI working). Reading the version-0
- * `session.jsonl.zstd` after that would report a conversation frozen at the
- * upgrade, so the highest generation wins.
+ * dsh 0.2 migrates the version-0 `session.jsonl.zstd` into `session.v<N>.jsonl.zstd`
+ * on first open and leaves the source in place, which is what lets a rollback
+ * to the 0.1 CLI keep reading it. Normally the newest generation is live. After
+ * a rollback the old CLI appends to the version-0 file again, so the file written
+ * last is live: that is the rule here, and the rule supersedeStaleGenerations()
+ * enforces before a resume.
  *
  * @param sessionPath - one session directory.
  * @returns the log path, or null when the directory holds none.
  */
 export function currentSessionLog(sessionPath) {
   let best = null
-  let bestVersion = -1
-  for (const name of readdirSync(sessionPath)) {
-    const match = /^session(?:\.v(\d+))?\.jsonl(\.zstd)?$/.exec(name)
-    if (!match) continue
-    const version = match[1] === undefined ? 0 : Number(match[1])
-    // Same generation in both encodings: prefer the compressed file, which is
-    // what the harness writes.
-    if (version > bestVersion || (version === bestVersion && match[2] !== undefined)) {
-      best = join(sessionPath, name)
-      bestVersion = version
+  for (const gen of sessionLogGenerations(sessionPath)) {
+    if (best === null
+      || gen.mtime > best.mtime
+      || (gen.mtime === best.mtime && (gen.version > best.version || (gen.version === best.version && gen.compressed)))) {
+      best = gen
     }
   }
-  return best
+  return best === null ? null : best.path
+}
+
+/**
+ * Before a resume: when the version-0 log was written after the newest
+ * migrated generation (a rollback to the 0.1 CLI ran in between), move the
+ * migrated generations aside so dsh 0.2 migrates again from the complete log.
+ * Otherwise 0.2 would resume its own older copy and silently drop every turn
+ * made during the rollback. Files are renamed, never deleted.
+ *
+ * @param sessionPath - one session directory.
+ * @param now - timestamp for the suffix.
+ * @returns the paths that were moved aside.
+ */
+export function supersedeStaleGenerations(sessionPath, now = Date.now()) {
+  const gens = sessionLogGenerations(sessionPath)
+  const legacy = gens.filter(g => g.version === 0)
+  const migrated = gens.filter(g => g.version > 0)
+  if (legacy.length === 0 || migrated.length === 0) return []
+  const legacyAt = Math.max(...legacy.map(g => g.mtime))
+  const migratedAt = Math.max(...migrated.map(g => g.mtime))
+  if (legacyAt <= migratedAt) return []
+  const moved = []
+  for (const gen of migrated) {
+    const target = `${gen.path}.superseded-${now}`
+    renameSync(gen.path, target)
+    moved.push(target)
+  }
+  return moved
 }
 
 function findSessionFiles() {
@@ -1585,6 +1623,19 @@ function runBot(argv) {
       process.stderr.write('ahv run: missing_credential (AHV_API_KEY chưa set)\n')
     }
     process.exit(1)
+  }
+  const resumeAt = argv.indexOf('--resume')
+  const resumeId = resumeAt >= 0 ? argv[resumeAt + 1] : undefined
+  if (resumeId && /^[A-Za-z0-9._-]+$/.test(resumeId) && existsSync(SESSIONS_ROOT)) {
+    for (const project of readdirSync(SESSIONS_ROOT)) {
+      const dir = join(SESSIONS_ROOT, project, resumeId)
+      try {
+        if (!statSync(dir).isDirectory()) continue
+        for (const moved of supersedeStaleGenerations(dir)) {
+          process.stderr.write(`ahv: log cũ mới hơn bản đã nâng (vừa lùi bản?) — nâng lại từ log cũ; cất ${moved}\n`)
+        }
+      } catch { /* not this project, or unreadable: dsh reports it */ }
+    }
   }
   const AHV_PATCH = join(FORK, 'packages/bundle/ahv/cordis.patch.yml')
   const BOT_PATCH = join(FORK, 'packages/bundle/ahv/cordis.patch.bot.yml')

@@ -20,7 +20,7 @@ mkdir -p "$work/cwd"
 
 start=$(date +%s)
 # The bot's own flags (ahv-bot/bot.py): prompt file, cwd, JSONL, no colour/banner.
-timeout "$limit" "$bin" run --prompt-file "$work/prompt.txt" --cwd "$work/cwd" \
+timeout -k 15 "$limit" "$bin" run --prompt-file "$work/prompt.txt" --cwd "$work/cwd" \
   --output jsonl --no-color --no-banner > "$work/out.jsonl" 2> "$work/err.txt"
 rc=$?
 elapsed=$(( $(date +%s) - start ))
