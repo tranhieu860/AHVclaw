@@ -81,7 +81,13 @@ Commit gộp chạy lefthook (lint, third-party notices, ghép bản dịch) —
 - Tiến lại sau khi lùi: `ahv run --resume` thấy log cũ ghi sau bản đã nâng thì
   cất bản đã nâng (`session.vN….superseded-<ts>`, không xoá) và để lõi mới nâng
   lại từ log cũ — giữ lượt làm lúc lùi, mất lượt làm trên lõi mới trước khi lùi.
-  Web mở phiên không qua đường này.
+  Web mở phiên không qua đường này: mở phiên trên web trước khi bot resume thì
+  lõi mới dùng bản đã nâng cũ và các lượt lúc lùi bị che. Quy tắc dựa vào mtime
+  — chép kho phiên sang máy khác phải giữ mtime (`cp -a`, `rsync -a`).
+- Máy chỉ từng chạy lõi 0.2 (không có farm `~/.dsh/profiles/node_modules`) lùi
+  về tag 0.1: updater gói bot (từ bản có `warm_ahv_cli_profile_for_user`) chạy
+  `ahv models list` + `ahv version` bằng user bot để lõi 0.1 dựng farm trước khi
+  ahv-web khởi động lại.
 
 ## Hotfix
 

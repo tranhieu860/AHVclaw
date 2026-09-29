@@ -25,7 +25,7 @@ check_profile() { # label, rows..., -- dsh args
 import re,sys
 s=sys.stdin.read(); m=re.search(r"- id: "+re.escape(sys.argv[1])+r"\n((?:  .*\n)*)", s)
 print("absent" if not m else ("disabled" if "disabled: true" in m.group(1) else "ENABLED"))' "$row")"
-    if [ "$state" = ENABLED ]; then echo "  FAIL  $label: $row is enabled"; fail=1; else echo "  PASS  $label: $row $state"; fi
+    if [ "$state" = disabled ]; then echo "  PASS  $label: $row disabled"; else echo "  FAIL  $label: $row is $state (renamed upstream? re-check what now sends data out)"; fail=1; fi
   done
 }
 check_profile web session-telemetry-otel otel session-log-deepseek deepseek-account ui-settings-account account-controller -- \
