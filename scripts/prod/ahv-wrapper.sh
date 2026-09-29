@@ -179,7 +179,16 @@ case "${1:-}" in
     # plugin releases (<24h). AHV pin exact version qua workspace exclude,
     # rủi ro attack chain thấp; fresh plugin (dshmarket, @anweat/dsh-browser)
     # thường patch security nên nên get sớm hơn.
-    (cd "$FORK" && PNPM_CONFIG_MINIMUM_RELEASE_AGE=0 pnpm install --prefer-offline || true)
+    # Non-zero is tolerated (optional build scripts), except a patch from
+    # patches/ that did not apply: that tree would run without the fix.
+    pnpm_log="$(mktemp)"
+    (cd "$FORK" && PNPM_CONFIG_MINIMUM_RELEASE_AGE=0 pnpm install --prefer-offline 2>&1 | tee "$pnpm_log") || true
+    if grep -qE 'ERR_PNPM_(PATCH_FAILED|UNUSED_PATCH|INVALID_PATCH|PATCH_NOT_FOUND)' "$pnpm_log"; then
+      rm -f "$pnpm_log"
+      echo "ahv update: bản vá trong patches/ không áp được — dừng, không dựng cây thiếu vá." >&2
+      exit 1
+    fi
+    rm -f "$pnpm_log"
     (cd "$FORK" && PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false PNPM_CONFIG_MINIMUM_RELEASE_AGE=0 pnpm run build)
     [ -x "$FORK/scripts/install-ahv-skin.sh" ] && bash "$FORK/scripts/install-ahv-skin.sh" || true
     # Bake version vào $FORK/AHV_VERSION (2 dòng: tag, short SHA) để

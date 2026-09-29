@@ -107,7 +107,7 @@ const ctx = {
 }
 
 const plugin = await import(pathToFileURL(join(dir, 'lib/index.js')).href)
-plugin.apply(ctx, {})
+plugin.apply(ctx, { pool: { enabled: false } })
 
 async function usage(provider, account) {
   const route = routes.get('/api/subscriptions-auth.usage')
@@ -148,7 +148,7 @@ await check('codex dead login is still reported as INVALID_CREDENTIAL / login ex
   assert.ok(stored().codex?.accounts?.[CODEX], 'second failure deleted the account')
 })
 
-await check('codex spent refresh token is not sent again', async () => {
+await check('codex spent refresh token is not sent again (same process)', async () => {
   seed()
   const calls = tokenCalls.codex
   const result = await usage('codex', CODEX)
@@ -168,6 +168,30 @@ await check('codex login refilled in the store (login-sync) is used and clears t
   assert.doesNotMatch(JSON.stringify(result?.error ?? result), /INVALID_CREDENTIAL|login expired or was revoked/)
   assert.ok(authChanges > changes, 'auth-changed hook did not run after the login came back')
   assert.equal(stored().codex.accounts[CODEX].refreshToken, 'fake-codex-rt-2')
+})
+
+await check('codex login refreshed elsewhere without rotating the refresh token is used', async () => {
+  seed()
+  await usage('codex', CODEX)
+  const store$ = stored()
+  store$.codex.accounts[CODEX] = { ...store$.codex.accounts[CODEX], accessToken: 'fake-codex-at-3', expiresAt: Date.now() + 3_600_000 }
+  writeFileSync(store, JSON.stringify(store$), { mode: 0o600 })
+  const result = await usage('codex', CODEX)
+  assert.doesNotMatch(JSON.stringify(result?.error ?? result), /INVALID_CREDENTIAL|login expired or was revoked/)
+})
+
+await check('codex dead login whose access token is still valid keeps being used', async () => {
+  seed()
+  await usage('codex', CODEX)
+  // The same dead session, but its access token has not run out yet.
+  const store$ = stored()
+  store$.codex.accounts[CODEX] = { ...store$.codex.accounts[CODEX], expiresAt: Date.now() + 60_000 }
+  writeFileSync(store, JSON.stringify(store$), { mode: 0o600 })
+  const calls = tokenCalls.codex
+  const result = await usage('codex', CODEX)
+  assert.equal(tokenCalls.codex, calls, 'the dead refresh token went to auth.openai.com again')
+  assert.ok(stored().codex?.accounts?.[CODEX])
+  assert.doesNotMatch(JSON.stringify(result?.error ?? result), /INVALID_CREDENTIAL|login expired or was revoked/, 'a still-valid access token was refused')
 })
 
 await check('claude invalid_grant still removes the claude account (unchanged)', async () => {

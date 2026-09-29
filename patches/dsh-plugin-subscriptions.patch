@@ -1,5 +1,5 @@
 diff --git a/lib/index.js b/lib/index.js
-index 7a43a75..cdfe609 100644
+index 7a43a75..dd9652c 100644
 --- a/lib/index.js
 +++ b/lib/index.js
 @@ -2411,6 +2411,14 @@ async function oauthEndpointError(response, label) {
@@ -11,26 +11,30 @@ index 7a43a75..cdfe609 100644
 +* INVALID_CREDENTIAL. AHV hosts share one Codex login: the first to refresh
 +* spends the token and the rest get `refresh_token_reused`, which must not
 +* erase the account from their store (login-sync refills it from the CLI).
-+* The spent refresh token is remembered so it is not sent again; once the
-+* store holds a different one, `onRemoved` (the auth-changed hook) runs so the
-+* pool forgets the account's cooldown.
++* The dead session is remembered (in this process) so its refresh token is not
++* sent again; once the store holds a different session, `onRemoved` (the
++* auth-changed hook) runs so the pool forgets the account's cooldown.
  */
  var TokenManager = class {
  	inflight;
-@@ -2445,6 +2453,12 @@ var TokenManager = class {
+@@ -2445,6 +2453,16 @@ var TokenManager = class {
  	async session(forceRefresh = false) {
  		const session = await this.options.load();
  		if (session === void 0) throw new LlmError(`dsh-plugin-subscriptions: not logged in to ${this.options.displayName}; log in via Settings → Subscriptions in the dsh web app`, "MISSING_CREDENTIAL");
 +		if (this.deadRefreshToken !== void 0) {
-+			if (session.refreshToken === this.deadRefreshToken) throw new LlmError(`${this.options.displayName} login expired or was revoked; log in again via Settings → Subscriptions`, "INVALID_CREDENTIAL", { cause: this.deadError });
++			if (session.refreshToken === this.deadRefreshToken && session.accessToken === this.deadAccessToken) {
++				if (!forceRefresh && session.expiresAt > Date.now()) return session;
++				throw new LlmError(`${this.options.displayName} login expired or was revoked; log in again via Settings → Subscriptions`, "INVALID_CREDENTIAL", { cause: this.deadError });
++			}
 +			this.deadRefreshToken = void 0;
++			this.deadAccessToken = void 0;
 +			this.deadError = void 0;
 +			this.options.onRemoved?.();
 +		}
  		if (!forceRefresh && session.expiresAt - Date.now() > this.options.preemptMs) return session;
  		this.inflight ??= this.doRefresh(session).finally(() => {
  			this.inflight = void 0;
-@@ -2456,8 +2470,13 @@ var TokenManager = class {
+@@ -2456,8 +2474,14 @@ var TokenManager = class {
  				const attempted = this.attempted;
  				const stored = await this.options.load();
  				if (stored !== void 0 && attempted !== void 0 && stored.refreshToken !== attempted.refreshToken) return stored;
@@ -38,6 +42,7 @@ index 7a43a75..cdfe609 100644
 -				this.options.onRemoved?.();
 +				if (this.options.keepOnPermanent === true) {
 +					this.deadRefreshToken = (attempted ?? session).refreshToken;
++					this.deadAccessToken = (attempted ?? session).accessToken;
 +					this.deadError = error;
 +				} else {
 +					await this.options.remove();
@@ -46,7 +51,7 @@ index 7a43a75..cdfe609 100644
  				throw new LlmError(`${this.options.displayName} login expired or was revoked; log in again via Settings → Subscriptions`, "INVALID_CREDENTIAL", { cause: error });
  			}
  			if (!forceRefresh && session.expiresAt > Date.now()) return session;
-@@ -10966,7 +10985,8 @@ function apply(ctx, config) {
+@@ -10966,7 +10990,8 @@ function apply(ctx, config) {
  				makeOptions: () => ({
  					preemptMs: CODEX_PREEMPT_MS,
  					refresh: refreshCodex,
