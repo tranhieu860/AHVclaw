@@ -1,23 +1,76 @@
 diff --git a/lib/index.js b/lib/index.js
-index 7a43a75..f665fec 100644
+index 7a43a75..7d7127a 100644
 --- a/lib/index.js
 +++ b/lib/index.js
-@@ -2411,6 +2411,14 @@ async function oauthEndpointError(response, label) {
+@@ -1238,8 +1238,51 @@ function isValidSessionShape(value) {
+ 	const entry = value;
+ 	return typeof entry.accessToken === "string" && entry.accessToken.length > 0 && typeof entry.refreshToken === "string" && entry.refreshToken.length > 0 && typeof entry.expiresAt === "number" && Number.isFinite(entry.expiresAt);
+ }
++/**
++* AHV: put back what {@link parseStore} skipped in the file being replaced —
++* accounts without usable tokens, providers this build does not know, and
++* provider entries it cannot read. Every write is a read-modify-write of the
++* parsed store, so without this the first write after a skip erases those
++* entries from the store for good.
++* @param store - the parsed store about to be written.
++* @param path - the store file about to be replaced.
++* @returns the store with the skipped entries restored.
++*/
++async function carrySkippedEntries(store, path) {
++	let raw;
++	try {
++		raw = JSON.parse(await readFile(path, "utf8"));
++	} catch {
++		return store;
++	}
++	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return store;
++	const out = { ...store };
++	for (const [provider, entry] of Object.entries(raw)) {
++		const whole = !PROVIDER_IDS.includes(provider) || typeof entry !== "object" || entry === null || Array.isArray(entry) || typeof entry.accessToken === "string" && !isValidSessionShape(entry) || typeof entry.accessToken !== "string" && (typeof entry.accounts !== "object" || entry.accounts === null || Array.isArray(entry.accounts) || entry.default !== void 0 && typeof entry.default !== "string");
++		if (whole) {
++			if (out[provider] === void 0) out[provider] = entry;
++			continue;
++		}
++		if (typeof entry.accessToken === "string") continue;
++		const current = out[provider];
++		const skipped = Object.entries(entry.accounts).filter(([key, session]) => !isValidSessionShape(session) && current?.accounts?.[key] === void 0);
++		if (skipped.length === 0) continue;
++		out[provider] = current === void 0 ? {
++			...entry,
++			accounts: Object.fromEntries(skipped)
++		} : {
++			...current,
++			accounts: {
++				...Object.fromEntries(skipped),
++				...current.accounts
++			}
++		};
++	}
++	return out;
++}
+ /** Persist the whole store atomically with owner-only permissions. */
+ async function writeStore(store, path) {
++	store = await carrySkippedEntries(store, path);
+ 	await mkdir(dirname(path), { recursive: true });
+ 	const tmp = `${path}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`;
+ 	try {
+@@ -2411,6 +2454,15 @@ async function oauthEndpointError(response, label) {
  * coalesces concurrent refreshes behind one in-flight promise. Permanent
  * refresh failures delete the stored session and surface INVALID_CREDENTIAL
  * with a re-login hint; transient failures fall back to a still-valid token.
 +*
-+* AHV: `keepOnPermanent` (Codex) keeps the stored session and still surfaces
-+* INVALID_CREDENTIAL. AHV hosts share one Codex login: the first to refresh
-+* spends the token and the rest get `refresh_token_reused`, which must not
-+* erase the account from their store (login-sync refills it from the CLI).
++* AHV: a permanent refresh failure keeps the stored session for every provider
++* and still surfaces INVALID_CREDENTIAL. The AHV store is the hosts' master copy
++* of their logins: accounts are shared across hosts (the first to refresh spends
++* the token for the rest) and login-sync refills the store from the CLIs, so a
++* failed refresh must never erase an account — only a user logout does.
 +* The dead session is remembered (in this process) so its refresh token is not
 +* sent again; once the store holds a different session, `onRemoved` (the
 +* auth-changed hook) runs so the pool forgets the account's cooldown.
  */
  var TokenManager = class {
  	inflight;
-@@ -2445,6 +2453,16 @@ var TokenManager = class {
+@@ -2445,6 +2497,16 @@ var TokenManager = class {
  	async session(forceRefresh = false) {
  		const session = await this.options.load();
  		if (session === void 0) throw new LlmError(`dsh-plugin-subscriptions: not logged in to ${this.options.displayName}; log in via Settings → Subscriptions in the dsh web app`, "MISSING_CREDENTIAL");
@@ -34,31 +87,24 @@ index 7a43a75..f665fec 100644
  		if (!forceRefresh && session.expiresAt - Date.now() > this.options.preemptMs) return session;
  		this.inflight ??= this.doRefresh(session).finally(() => {
  			this.inflight = void 0;
-@@ -2456,8 +2474,15 @@ var TokenManager = class {
+@@ -2456,8 +2518,10 @@ var TokenManager = class {
  				const attempted = this.attempted;
  				const stored = await this.options.load();
  				if (stored !== void 0 && attempted !== void 0 && stored.refreshToken !== attempted.refreshToken) return stored;
 -				await this.options.remove();
 -				this.options.onRemoved?.();
-+				if (this.options.keepOnPermanent === true) {
-+					this.deadRefreshToken = (attempted ?? session).refreshToken;
-+					this.deadAccessToken = (attempted ?? session).accessToken;
-+					this.deadError = error;
-+					if (!forceRefresh && session.expiresAt > Date.now()) return session;
-+				} else {
-+					await this.options.remove();
-+					this.options.onRemoved?.();
-+				}
++				this.deadRefreshToken = (attempted ?? session).refreshToken;
++				this.deadAccessToken = (attempted ?? session).accessToken;
++				this.deadError = error;
++				if (!forceRefresh && session.expiresAt > Date.now()) return session;
  				throw new LlmError(`${this.options.displayName} login expired or was revoked; log in again via Settings → Subscriptions`, "INVALID_CREDENTIAL", { cause: error });
  			}
  			if (!forceRefresh && session.expiresAt > Date.now()) return session;
-@@ -10966,7 +10991,8 @@ function apply(ctx, config) {
- 				makeOptions: () => ({
- 					preemptMs: CODEX_PREEMPT_MS,
- 					refresh: refreshCodex,
--					isPermanent: isCodexPermanentRefreshError
-+					isPermanent: isCodexPermanentRefreshError,
-+					keepOnPermanent: true
- 				}),
- 				onAccountRemoved: (account) => {
- 					authChanged("codex", account);
+@@ -4866,6 +4930,7 @@ const PERMANENT_REFRESH_CODES = new Set([
+ 	"refresh_token_expired",
+ 	"refresh_token_reused",
+ 	"refresh_token_invalidated",
++	"invalid_refresh_token",
+ 	"invalid_grant"
+ ]);
+ const CODEX_EFFORTS = [

@@ -157,12 +157,12 @@ run_as env "${BUILD_ENV[@]}" bash "$FORK/scripts/prod/tests/test-browser-playwri
 # dsh 0.2 would upload session logs to DeepSeek on feedback; the build must ship with it off.
 run_as env "${BUILD_ENV[@]}" bash "$FORK/scripts/prod/tests/test-no-telemetry.sh" "$BUILD_HOME/src" --strict \
   || { rollback; fail "smoke: DeepSeek telemetry is not disabled"; }
-# Hosts share Codex logins, so all but the first to refresh get
-# refresh_token_reused; the plugin this tree ships must keep that account in
-# auth.json (patches/dsh-plugin-subscriptions.patch). A pin bump that lost the
+# auth.json is each host's master copy of its logins: the plugin this tree ships
+# must keep every provider's login through a failed refresh and through store
+# writes (patches/dsh-plugin-subscriptions.patch). A pin bump that lost the
 # patch stops here.
-run_as env "${BUILD_ENV[@]}" node "$FORK/scripts/prod/tests/test-codex-keep-session.mjs" "$BUILD_HOME/src" \
-  || { rollback; fail "smoke: plugin subscriptions deletes a dead Codex login (patch missing?)"; }
+run_as env "${BUILD_ENV[@]}" node "$FORK/scripts/prod/tests/test-subscriptions-keep-session.mjs" "$BUILD_HOME/src" \
+  || { rollback; fail "smoke: plugin subscriptions deletes logins from auth.json (patch missing?)"; }
 usage="$(run_as env "${BUILD_ENV[@]}" NO_COLOR=1 timeout 90 "$smoke" login usage --json 2>/dev/null || true)"
 python3 - "$usage" <<'PY' || { rollback; fail "smoke: login usage malformed"; }
 import json, sys

@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os'
 import assert from 'node:assert/strict'
 
 const mod = await import(new URL('../ahv-bot.mjs', import.meta.url).href)
-const { importCliCredentials } = mod
+const { importCliCredentials, withAccountSession } = mod
 
 let passed = 0, failed = 0
 function check(name, fn) {
@@ -94,6 +94,68 @@ check('a bare credentials blob without the wrapper key still works', () => {
     JSON.stringify({ accessToken: 'bare', refreshToken: 'rb', expiresAt: future }))
   const report = importCliCredentials({ home })
   assert.equal(report.claude?.imported, true, JSON.stringify(report.claude))
+})
+
+// A store the plugin keeps per account must keep every account through an import.
+function seedStore(home, data) {
+  const dir = join(home, '.dsh/plugins/subscriptions')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'auth.json'), JSON.stringify(data))
+  return () => JSON.parse(readFileSync(join(dir, 'auth.json'), 'utf8'))
+}
+const past = Date.now() - 3600_000
+const perAccount = () => ({
+  claude: {
+    default: 'a@claude.test',
+    accounts: {
+      'a@claude.test': { accessToken: 'aa', refreshToken: 'ra', expiresAt: past, emailAddress: 'a@claude.test' },
+      'b@claude.test': { accessToken: 'ab', refreshToken: 'rb', expiresAt: past, emailAddress: 'b@claude.test' },
+    },
+  },
+  codex: { default: 'c', accounts: { c: { accessToken: 'ac', refreshToken: 'rc', expiresAt: past, accountId: 'c' } }, aliases: { old: 'c' } },
+})
+
+check('importing into a per-account store keeps every other account', () => {
+  const home = makeHome()
+  const read = seedStore(home, perAccount())
+  writeClaude(home, { accessToken: 'new', refreshToken: 'rnew', expiresAt: future })
+  const report = importCliCredentials({ home })
+  assert.equal(report.claude?.imported, true, JSON.stringify(report.claude))
+  const store = read()
+  assert.equal(store.claude.accessToken, undefined, 'the entry became a bare session the plugin reads as one account')
+  assert.equal(store.claude.accounts['a@claude.test'].accessToken, 'aa')
+  assert.equal(store.claude.accounts['b@claude.test'].accessToken, 'ab')
+  assert.ok(Object.values(store.claude.accounts).some(account => account.accessToken === 'new'), 'the imported login is missing')
+  assert.equal(store.claude.default, 'a@claude.test')
+  assert.deepEqual(store.codex, perAccount().codex)
+})
+
+check('importing a login that already sits in an account renews that account', () => {
+  const home = makeHome()
+  const read = seedStore(home, perAccount())
+  writeClaude(home, { accessToken: 'renewed', refreshToken: 'rb', expiresAt: future })
+  importCliCredentials({ home })
+  const store = read()
+  assert.equal(store.claude.accounts['b@claude.test'].accessToken, 'renewed')
+  assert.equal(store.claude.accounts['b@claude.test'].emailAddress, 'b@claude.test')
+  assert.equal(Object.keys(store.claude.accounts).length, 2)
+})
+
+check('a newer token in the matching account is left alone', () => {
+  const home = makeHome()
+  const data = perAccount()
+  data.claude.accounts['b@claude.test'].expiresAt = future + 60_000
+  const read = seedStore(home, data)
+  writeClaude(home, { accessToken: 'older', refreshToken: 'rb', expiresAt: future })
+  const report = importCliCredentials({ home })
+  assert.equal(report.claude?.reason, 'plugin_token_newer')
+  assert.equal(read().claude.accounts['b@claude.test'].accessToken, 'ab')
+})
+
+check('putting a session back keeps the entry\'s other fields (Codex aliases)', () => {
+  const entry = withAccountSession(perAccount().codex, 'c', { accessToken: 'x', refreshToken: 'y', expiresAt: future, accountId: 'c' })
+  assert.deepEqual(entry.aliases, { old: 'c' })
+  assert.equal(entry.accounts.c.accessToken, 'x')
 })
 
 console.log(`\n  ${passed} passed, ${failed} failed`)

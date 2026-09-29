@@ -135,8 +135,9 @@ minimumReleaseAgeExclude:
 patchedDependencies:
   # AHV: keyed by name, not version, so a registry pin bump (0.9.7+) carries the
   # patch or fails `pnpm install` (ERR_PNPM_PATCH_FAILED) instead of dropping it.
-  # Keeps a dead Codex login in auth.json (refresh_token_reused on shared
-  # accounts); release-cli's smoke runs scripts/prod/tests/test-codex-keep-session.mjs.
+  # A failed refresh never deletes a login from auth.json (any provider; only a
+  # user logout does); release-cli's smoke and CI prebuilt run
+  # scripts/prod/tests/test-subscriptions-keep-session.mjs.
   dsh-plugin-subscriptions: patches/dsh-plugin-subscriptions.patch
   '@earendil-works/pi-ai@0.85.1': patches/@earendil-works__pi-ai@0.85.1.patch
   '@electron/osx-sign@1.3.3': patches/@electron__osx-sign@1.3.3.patch

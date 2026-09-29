@@ -16,7 +16,7 @@ patchedDependencies:
   '@fortune-sheet/core@1.0.4': 8791a230763dbf853fd65d627c68c31de37209992851377855e16cf08ea70532
   '@fortune-sheet/react@1.0.4': 2932e52e79afcd4ced08cfa123b5eded786c85043da32f622f3e80af6fc96c37
   '@yao-pkg/pkg@6.21.0': 75891fc22b277c145cafeab83e41baf4a70f5b8fe6dc0801c6a0b922d7ee88c7
-  dsh-plugin-subscriptions: 4b322e39c30eb897cf0fdd52959eea6fe1472de643f053abf4e0e6408db7c85d
+  dsh-plugin-subscriptions: fe2afbce7f80abfb2035db86adcec900fea4c6a1947bf397960fb20d964bbc55
   exceljs@4.4.0: c1bf8ac8f319dab382f08e3a669b715e691d46c703ac5a4163eb383fbedd1d48
   node-pty@1.2.0-beta.15: b40ae545608897914bd25fb009c97eeac478c34e8a910298ddcb01b746534bb0
 
@@ -1984,7 +1984,7 @@ importers:
         version: 15.0.0
       dsh-plugin-subscriptions:
         specifier: ^0.9.6
-        version: 0.9.6(patch_hash=4b322e39c30eb897cf0fdd52959eea6fe1472de643f053abf4e0e6408db7c85d)(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-attachment@0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-brand@0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis)))(@deepseek-ai/dsh-home-paths@0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-llm@packages+llm+llm)(@deepseek-ai/dsh-tools@0.2.0-rc.1(410a50ee2af1b9195a2818ca20f81048))(@deepseek-ai/dsh-web@0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-llm@packages+llm+llm))(@deepseek-ai/schemastery@vendor+schemastery)
+        version: 0.9.6(patch_hash=fe2afbce7f80abfb2035db86adcec900fea4c6a1947bf397960fb20d964bbc55)(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-attachment@0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-brand@0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis)))(@deepseek-ai/dsh-home-paths@0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-llm@packages+llm+llm)(@deepseek-ai/dsh-tools@0.2.0-rc.1(410a50ee2af1b9195a2818ca20f81048))(@deepseek-ai/dsh-web@0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-llm@packages+llm+llm))(@deepseek-ai/schemastery@vendor+schemastery)
       dshmarket:
         specifier: ^1.66.5
         version: 1.66.5(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-settings@0.1.0-rc.8(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-brand@0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-invariants@0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/schemastery@vendor+schemastery))(@deepseek-ai/schemastery@vendor+schemastery)
@@ -29039,7 +29039,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  dsh-plugin-subscriptions@0.9.6(patch_hash=4b322e39c30eb897cf0fdd52959eea6fe1472de643f053abf4e0e6408db7c85d)(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-attachment@0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-brand@0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis)))(@deepseek-ai/dsh-home-paths@0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-llm@packages+llm+llm)(@deepseek-ai/dsh-tools@0.2.0-rc.1(410a50ee2af1b9195a2818ca20f81048))(@deepseek-ai/dsh-web@0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-llm@packages+llm+llm))(@deepseek-ai/schemastery@vendor+schemastery):
+  dsh-plugin-subscriptions@0.9.6(patch_hash=fe2afbce7f80abfb2035db86adcec900fea4c6a1947bf397960fb20d964bbc55)(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-attachment@0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-brand@0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis)))(@deepseek-ai/dsh-home-paths@0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-llm@packages+llm+llm)(@deepseek-ai/dsh-tools@0.2.0-rc.1(410a50ee2af1b9195a2818ca20f81048))(@deepseek-ai/dsh-web@0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-llm@packages+llm+llm))(@deepseek-ai/schemastery@vendor+schemastery):
     dependencies:
       '@deepseek-ai/cordis': link:vendor/cordis
       '@deepseek-ai/dsh-attachment': 0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-brand@0.2.0-rc.1(@deepseek-ai/cordis@vendor+cordis))

@@ -617,7 +617,17 @@ function activeSession(entry) {
 export function withAccountSession(entry, key, session) {
   const { defaultKey, accounts } = storeAccounts(entry)
   if (key === '') return entry
-  return { default: defaultKey !== '' ? defaultKey : key, accounts: { ...accounts, [key]: session } }
+  return { ...entryExtras(entry), default: defaultKey !== '' ? defaultKey : key, accounts: { ...accounts, [key]: session } }
+}
+
+/**
+ * The fields of a multi-account entry besides its accounts (the plugin keeps
+ * Codex `aliases` there); a bare single-session entry has none worth keeping.
+ */
+function entryExtras(entry) {
+  if (entry === null || typeof entry !== 'object' || Array.isArray(entry) || typeof entry.accessToken === 'string') return {}
+  const { default: _default, accounts: _accounts, ...extras } = entry
+  return extras
 }
 
 /** Put a refreshed session back where it came from, leaving other accounts alone. */
@@ -625,7 +635,7 @@ function withSession(entry, session) {
   const { defaultKey, accounts } = storeAccounts(entry)
   const key = defaultKey !== '' ? defaultKey : accountKeyOf(session)
   if (key === '') return entry
-  return { default: key, accounts: { ...accounts, [key]: session } }
+  return { ...entryExtras(entry), default: key, accounts: { ...accounts, [key]: session } }
 }
 
 function writeSubscriptionsAuth(obj) {
@@ -2208,12 +2218,19 @@ export function importCliCredentials({ home = homedir(), claudeConfigDir } = {})
       continue
     }
     const existing = store[provider]
-    const existingExpiry = typeof existing?.expiresAt === 'number' ? existing.expiresAt : 0
+    // A store the plugin already keeps per account takes the login into one
+    // account: spreading the bare session over it would make the plugin read
+    // the entry as a single legacy session and drop every other account.
+    const perAccount = existing !== null && typeof existing === 'object' && typeof existing.accessToken !== 'string'
+      && existing.accounts !== null && typeof existing.accounts === 'object' && !Array.isArray(existing.accounts)
+    const key = perAccount ? importAccountKey(session, storeAccounts(existing).accounts) : ''
+    const current = perAccount ? existing.accounts[key] : existing
+    const existingExpiry = typeof current?.expiresAt === 'number' ? current.expiresAt : 0
     if (existingExpiry >= session.expiresAt) {
       report[provider] = { imported: false, reason: 'plugin_token_newer' }
       continue
     }
-    store[provider] = { ...existing, ...session }
+    store[provider] = perAccount ? withAccountSession(existing, key, { ...current, ...session }) : { ...existing, ...session }
     report[provider] = { imported: true, reason: null }
     changed = true
   }
@@ -2225,6 +2242,18 @@ export function importCliCredentials({ home = homedir(), claudeConfigDir } = {})
     chmodSync(storePath, 0o600)
   }
   return report
+}
+
+/**
+ * The account an imported CLI login belongs to: its identity when the CLI
+ * recorded one, the account already holding that refresh token, else the
+ * plugin's own key for an anonymous session (`token-` + refresh-token hash).
+ */
+function importAccountKey(session, accounts) {
+  const identity = accountKeyOf(session)
+  if (identity !== '') return identity
+  const same = Object.keys(accounts).find(key => accounts[key]?.refreshToken === session.refreshToken)
+  return same ?? `token-${refreshTokenFingerprint(session.refreshToken)}`
 }
 
 function loginImport() {
