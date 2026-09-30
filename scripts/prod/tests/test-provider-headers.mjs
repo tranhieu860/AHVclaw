@@ -16,7 +16,7 @@ const TEST_FILE = fileURLToPath(import.meta.url)
 if (process.argv.includes('--probe-child')) {
   const marker = process.env.HEADER_PROBE_MARKER
   const probeCount = () => existsSync(marker) ? readFileSync(marker, 'utf8').trim().split('\n').length : 0
-  const mod = await import(BIN.href)
+  const mod = await import(process.env.HEADER_PROBE_BIN ?? BIN.href)
   const importedProbeCount = probeCount()
   const calls = []
   let name
@@ -58,8 +58,8 @@ if (process.argv.includes('--probe-child')) {
 const temp = mkdtempSync(join(WORKSPACE, 'header-tests-'))
 process.on('exit', () => rmSync(temp, { recursive: true, force: true }))
 
-// Resolve the installed plugin when present. The approved source copies are a
-// documented gate fallback for this dependency-free checkout, not an import.
+// Prefer the installed plugin; the pinned source excerpts live in this repo
+// so the drift gate also works in a dependency-free clone (see fixture README).
 function pluginProviderSource(provider, anchors = [join(REPO, 'packages/bundle/ahv/package.json'), join(REPO, 'package.json')]) {
   for (const anchor of anchors) {
     let entry
@@ -78,8 +78,8 @@ function pluginProviderSource(provider, anchors = [join(REPO, 'packages/bundle/a
     }
     throw new Error(`resolved subscriptions plugin has no package root: ${entry}`)
   }
-  const file = join(WORKSPACE, 'inputs', `plugin096-${provider}.js`)
-  console.log(`  GATE  plugin not installed; using approved fallback: ${file}`)
+  const file = fileURLToPath(new URL(`./fixtures/plugin096/${provider}.js`, import.meta.url))
+  console.log(`  GATE  plugin not installed; using repository fixture (0.9.6): ${file}`)
   return readFileSync(file, 'utf8')
 }
 
@@ -94,14 +94,15 @@ const pluginAntigravityUserAgent = /export const ANTIGRAVITY_DEFAULT_USER_AGENT 
 assert.ok(pluginAntigravityUserAgent, 'plugin Antigravity UA must remain readable by the drift gate')
 const copiedFloor = /const CLAUDE_CLI_FALLBACK_VERSION = '([^']+)'/.exec(readFileSync(BIN, 'utf8'))?.[1]
 
-const HARNESS_USER_AGENT = 'deepseek-harness/0.2.0-rc.1 (+https://github.com/deepseek-ai/deepseek-harness)'
+const harnessVersion = JSON.parse(readFileSync(join(REPO, 'packages/llm/llm/package.json'), 'utf8')).version
+const HARNESS_USER_AGENT = `deepseek-harness/${harnessVersion} (+https://github.com/deepseek-ai/deepseek-harness)`
 let passed = 0, failed = 0
 async function check(name, fn) {
   try { await fn(); passed++; console.log(`  PASS  ${name}`) }
   catch (error) { failed++; console.log(`  FAIL  ${name}\n        ${error.message}`) }
 }
 
-function scenario(label, output, { missing = false, hang = false } = {}) {
+function scenario(label, output, { missing = false, hang = false, fork = REPO, bin = BIN.href } = {}) {
   const home = join(temp, label)
   const path = join(home, 'bin')
   const marker = join(home, 'probes.txt')
@@ -113,8 +114,8 @@ function scenario(label, output, { missing = false, hang = false } = {}) {
   const child = spawnSync(process.execPath, [TEST_FILE, '--probe-child'], {
     cwd: REPO, encoding: 'utf8', timeout: 10_000,
     env: {
-      PATH: path, HOME: home, DSH_HOME: join(home, '.dsh'), AHV_FORK: REPO,
-      HEADER_PROBE_MARKER: marker,
+      PATH: path, HOME: home, DSH_HOME: join(home, '.dsh'), AHV_FORK: fork,
+      HEADER_PROBE_MARKER: marker, HEADER_PROBE_BIN: bin,
       ANTIGRAVITY_CLIENT_ID: 'fake-client', ANTIGRAVITY_CLIENT_SECRET: 'fake-secret',
     },
   })
@@ -156,6 +157,23 @@ await check('Grok billing sends harness attribution and its CLI auth header', ()
     accept: 'application/json', 'user-agent': HARNESS_USER_AGENT,
   })
 })
+for (const layout of ['source', 'installed']) {
+  await check(`Codex and Grok attribution follows the ${layout} dsh-llm manifest version`, () => {
+    const fork = join(temp, `harness-${layout}`)
+    const packageDir = join(fork, layout === 'source' ? 'packages/llm/llm' : 'node_modules/@deepseek-ai/dsh-llm')
+    mkdirSync(packageDir, { recursive: true })
+    writeFileSync(join(packageDir, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-llm', version: '9.8.7-test', exports: { './package.json': './package.json' } }))
+    const bin = join(fork, 'scripts/prod/ahv-bot.mjs')
+    mkdirSync(dirname(bin), { recursive: true })
+    writeFileSync(bin, readFileSync(BIN))
+    for (const [label, module] of [['repo', BIN.href], ['copy', bin]]) {
+      const result = scenario(`version-${layout}-${label}`, '', { missing: true, fork, bin: module })
+      for (const name of ['codex usage', 'grok usage']) {
+        assert.equal(getCall(result, name).headers['user-agent'], 'deepseek-harness/9.8.7-test (+https://github.com/deepseek-ai/deepseek-harness)')
+      }
+    }
+  })
+}
 await check('Antigravity usage sends exactly the plugin internal API headers', () => {
   const call = getCall(missing, 'antigravity usage')
   assert.equal(call.url, 'https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary')
@@ -225,6 +243,9 @@ function assertPluginGate(claude, antigravity) {
 }
 await check('copied Claude floor and both UA forms match resolved plugin sources', () => {
   assertPluginGate(claudeSource, antigravitySource)
+})
+await check('without an installed plugin the gate reads repository fixtures', () => {
+  assertPluginGate(pluginProviderSource('claude', []), pluginProviderSource('antigravity', []))
 })
 await check('installed plugin resolution governs the gate and catches all three source drifts', () => {
   const fixture = join(temp, 'installed-gate')

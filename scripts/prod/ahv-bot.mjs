@@ -22,6 +22,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { zstdDecompressSync } from 'node:zlib'
 import { homedir } from 'node:os'
 import { createHash, randomBytes } from 'node:crypto'
+import { createRequire } from 'node:module'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const FORK = process.env.AHV_FORK ?? resolvePath(HERE, '..', 'src')
@@ -657,9 +658,24 @@ function writeSubscriptionsAuth(obj) {
 // Copied from subscriptions 0.9.6 and dsh-llm attribution: importing the
 // provider module also loads harness dependencies absent from standalone CLI.
 const CLAUDE_CLI_FALLBACK_VERSION = '2.1.283'
-const SUBSCRIPTIONS_USER_AGENT = 'deepseek-harness/0.2.0-rc.1 (+https://github.com/deepseek-ai/deepseek-harness)'
+const SUBSCRIPTIONS_USER_AGENT = `deepseek-harness/${harnessPackageVersion()} (+https://github.com/deepseek-ai/deepseek-harness)`
 const ANTIGRAVITY_USER_AGENT = 'antigravity/1.104.0 dsh-plugin-subscriptions'
 let localClaudeCliVersion
+
+/** Read dsh-llm metadata without loading the harness; standalone copies keep the pinned version. */
+function harnessPackageVersion() {
+  for (const root of [FORK, resolvePath(HERE, '../..')]) {
+    const manifest = join(root, 'packages/llm/llm/package.json')
+    if (existsSync(manifest)) return JSON.parse(readFileSync(manifest, 'utf8')).version
+    for (const anchor of [join(root, 'packages/bundle/ahv/package.json'), join(root, 'package.json')]) {
+      try { return createRequire(anchor)('@deepseek-ai/dsh-llm/package.json').version }
+      catch (error) {
+        if (error.code !== 'MODULE_NOT_FOUND') throw error
+      }
+    }
+  }
+  return '0.2.0-rc.1'
+}
 
 /** Claude's local CLI version or the plugin's floor, probed once on first use. */
 function claudeCliUserAgent() {
@@ -1428,9 +1444,10 @@ export async function loginUsageReport({ fetchFn = fetch, now = Date.now(), maxA
  *
  * Uses login usage's cache and 429 holds. Expired access tokens produce an
  * error row without a provider request, even if a cached reading exists.
+ * The provider summary uses the default row when selected, otherwise the first row.
  * @param opts - `kind`, optional account key and `maxAgeSec`; `fetchFn`, `now`
  *   and `randomFn` can be injected. maxAgeSec=0 always asks unless held by 429.
- * @returns `{checked_at, providers: {kind: {accounts, ...defaultFields}}}`.
+ * @returns `{checked_at, providers: {kind: {accounts, ...primaryFields}}}`.
  * @throws when the kind/account does not exist or maxAgeSec is invalid.
  */
 export async function loginQuotaReport({ kind, account, maxAgeSec, fetchFn = fetch, now = Date.now(), randomFn = Math.random } = {}) {
@@ -1456,7 +1473,7 @@ export async function loginQuotaReport({ kind, account, maxAgeSec, fetchFn = fet
       ? { supported: false, windows: [], error: 'access token đã hết hạn; dùng ahv login refresh để làm mới' }
       : await usageWithBook(kind, key, session, usageCache, { fetchFn, now, maxAgeMs, randomFn })),
   })))
-  const primary = rows.find(row => row.is_default)
+  const primary = rows.find(row => row.is_default) ?? rows[0]
   const provider = {
     logged_in: Boolean(primary && primary.logged_in),
     ...(primary
