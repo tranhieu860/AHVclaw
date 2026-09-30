@@ -82,7 +82,7 @@ echo "== store_floor in channels.json is not a tag to mirror"
 setup
 printf '{"stable":"v1.0.1","canary":"v1.0.1","store_floor":"v1.0.0"}\n' > "$T/ch/channels.json"
 local_x64 v1.0.1 2.28 "x64-local"
-gh_asset v1.0.0 linux-arm64 2.39 "old-arm-bytes"
+mkdir -p "$T/gh/v1.0.0"; gh_asset v1.0.0 linux-arm64 2.39 "old-arm-bytes"
 gh_asset v1.0.1 linux-arm64 2.39 "arm-bytes"
 run_mirror; rc=$?
 check "mirror exits 0 with store_floor present" '[ "$rc" = 0 ]'
