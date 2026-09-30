@@ -15,7 +15,8 @@ set -euo pipefail
 dir="${1:-/srv/ahvclaw.com/releases/ahv-cli}"
 repo="${AHV_GITHUB_REPO:-tranhieu860/AHVclaw}"
 platforms="${AHV_MIRROR_PLATFORMS:-linux-arm64 linux-x64}"
-tags="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(" ".join(sorted(set(v for v in d.values() if isinstance(v,str)))))' "$dir/channels.json" 2>/dev/null || true)"
+# Only the channels: channels.json also carries "store_floor" (the CMS's store-safe floor), which is not a tag to mirror.
+tags="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(" ".join(sorted(set(d.get(k) for k in ("stable","canary") if isinstance(d.get(k),str)))))' "$dir/channels.json" 2>/dev/null || true)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 

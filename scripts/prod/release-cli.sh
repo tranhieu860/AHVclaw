@@ -189,12 +189,18 @@ find "$RELEASE_DIR" -maxdepth 1 -type f -user "$(id -un)" -exec chmod 644 {} +
 # A new tag goes to the canary channel; stable moves only through promote.sh
 # (by hand today, after a canary soak once the rollout controller exists).
 python3 - "$RELEASE_DIR/channels.json" "$next" <<'PY' || { rollback; fail "channels.json update failed"; }
-import json, os, sys
+import json, os, re, sys
 path, tag = sys.argv[1:]
 try:
     channels = json.load(open(path, encoding="utf-8"))
 except Exception:
     channels = {}
+channels = channels if isinstance(channels, dict) else {}
+# Never point canary under the store-safe floor the CMS publishes ("store_floor"; promote.sh).
+key = lambda t: tuple(int(p) for p in t[1:].split(".")) if isinstance(t, str) and re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", t) else None
+floor = channels.get("store_floor") if key(channels.get("store_floor")) else "v0.2.56"
+if key(tag) is None or key(tag) < key(floor):
+    sys.exit(f"refusing canary {tag}: under the store-safe floor {floor}")
 channels["canary"] = tag
 channels.setdefault("stable", tag)
 tmp = path + ".tmp"

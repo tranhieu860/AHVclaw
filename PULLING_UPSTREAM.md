@@ -76,8 +76,15 @@ Commit gộp chạy lefthook (lint, third-party notices, ghép bản dịch) —
   (tag `v0.2.N`, dựng, **smoke có `ahv run` thật**, prebuilt, kênh canary, push).
 - CMS chỉ đưa canary → stable khi máy canary báo `ahv run` thật đạt trên đúng
   tag đó (cổng `run_ok`), sau thời gian ngấm.
-- Lùi: `promote.sh <tag cũ>` hoặc nút *Lùi* trên CMS; trên máy, updater lật
-  `~/.ahv/src` về `versions/<tag cũ>`. Phiên đã nâng vẫn đọc được ở bản cũ
+- **Sàn an toàn kho** (30/09): v0.2.49 và v0.2.53–v0.2.55 xoá tài khoản khỏi kho
+  khi làm mới token lỗi, nên không đường lùi nào xuống dưới sàn (mặc định
+  v0.2.56; CMS ghi `store_floor` vào `channels.json`, chỉ hạ được ở CMS → Cài
+  đặt với câu gõ xác nhận). `promote.sh` và bước kênh của `release-cli.sh` từ
+  chối tag dưới sàn (`scripts/prod/tests/test-promote-floor.sh`); updater gói
+  bot ≥ 0.0.412 cũng vậy. Bản sau này mà lại mất tài khoản kho thì đừng phát
+  hành; sửa xong mới nâng sàn lên bản đó (sàn không cao hơn `stable`).
+- Lùi: `promote.sh <tag cũ>` hoặc nút *Lùi* trên CMS (chỉ trong các bản ≥ sàn);
+  trên máy, updater lật `~/.ahv/src` về `versions/<tag cũ>`. Phiên đã nâng vẫn đọc được ở bản cũ
   (xem bước 4), nhưng các lượt chạy trên lõi mới không có ở bản cũ.
 - Tiến lại sau khi lùi: `ahv run --resume` thấy log cũ ghi sau bản đã nâng thì
   cất bản đã nâng (`session.vN….superseded-<ts>`, không xoá) và để lõi mới nâng

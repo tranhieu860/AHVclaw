@@ -78,6 +78,17 @@ check "x64 entry built on 2.28 is kept as is" '[ "$(entry v1.0.1 linux-x64 file)
 check "no x64 fetch when the local x64 already needs no newer glibc" '[ "$(fetched linux-x64)" = 0 ]'
 check "no mirror line crashes" '! grep -q Traceback "$T/out.log"'
 
+echo "== store_floor in channels.json is not a tag to mirror"
+setup
+printf '{"stable":"v1.0.1","canary":"v1.0.1","store_floor":"v1.0.0"}\n' > "$T/ch/channels.json"
+local_x64 v1.0.1 2.28 "x64-local"
+mkdir -p "$T/gh/v1.0.0"; gh_asset v1.0.0 linux-arm64 2.39 "old-arm-bytes"
+gh_asset v1.0.1 linux-arm64 2.39 "arm-bytes"
+run_mirror; rc=$?
+check "mirror exits 0 with store_floor present" '[ "$rc" = 0 ]'
+check "the floor tag is not fetched" '[ "$(fetched v1.0.0)" = 0 ] && [ ! -e "$T/ch/v1.0.0.json" ]'
+check "the channel tag still is" '[ "$(entry v1.0.1 linux-arm64 glibc)" = "2.39" ]'
+
 echo "== an archive already downloaded but never merged is merged without a refetch"
 setup
 printf '{"stable":"v1.0.0","canary":"v1.0.1"}\n' > "$T/ch/channels.json"
