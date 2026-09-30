@@ -221,7 +221,7 @@ await check('a Claude login the CLI refreshed is filed under its account, asked 
   let asked = 0
   const profile = async (url, init) => {
     asked++
-    assert.equal(init.headers.Authorization, 'Bearer b-new')
+    assert.equal(init.headers.authorization, 'Bearer b-new')
     return new Response(JSON.stringify({ account: { email: 'b@claude.test' } }), { status: 200 })
   }
   await importCliCredentials({ home, fetchFn: profile })

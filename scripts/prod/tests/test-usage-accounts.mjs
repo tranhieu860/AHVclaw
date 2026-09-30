@@ -10,7 +10,9 @@
 // here. It is driven with a stub fetch instead.
 import assert from 'node:assert/strict'
 
-// The Antigravity OAuth client is read from the plugin inside the checkout.
+// Fake OAuth client: this test runs without the installed plugin or real credentials.
+process.env.ANTIGRAVITY_CLIENT_ID = 'fake-client-id'
+process.env.ANTIGRAVITY_CLIENT_SECRET = 'fake-client-secret'
 process.env.AHV_FORK ??= new URL('../../..', import.meta.url).pathname.replace(/\/$/, '')
 
 const { collectSubscriptionUsage, withAccountSession } =

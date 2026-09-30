@@ -12,10 +12,9 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync, existsSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const home = mkdtempSync(join(tmpdir(), 'login-book-'))
+const home = mkdtempSync(new URL('../../../../login-book-', import.meta.url).pathname)
 process.on('exit', () => rmSync(home, { recursive: true, force: true }))
 process.env.HOME = home
 process.env.DSH_HOME = join(home, '.dsh')
@@ -28,7 +27,9 @@ const CACHE = join(STORE_DIR, 'usage-cache.json')
 mkdirSync(STORE_DIR, { recursive: true })
 
 const mod = await import(BIN)
-const { loginRefreshReport, loginUsageReport, USAGE_ENDPOINTS, REFRESH_ENDPOINTS } = mod
+const { loginRefreshReport, loginUsageReport: usageReport, USAGE_ENDPOINTS, REFRESH_ENDPOINTS } = mod
+// Deterministic jitter unless the check explicitly injects another sample.
+const loginUsageReport = (opts) => usageReport({ randomFn: () => 0, ...opts })
 
 let passed = 0, failed = 0
 async function acheck(name, fn) {
@@ -226,7 +227,7 @@ await acheck('every row read from the network carries read_at', async () => {
   assert.equal(row(u, 'claude', 'a@x').cached, undefined)
 })
 
-await acheck('429 Retry-After 3000: that account is not asked again until then, and shows its last reading', async () => {
+await acheck('429 Retry-After 3000: held at least one hour, with the last reading', async () => {
   twoFresh()
   const expired = { kind: 'weekly_all', percent: 77, resets_at: new Date(T0 + 90_000).toISOString() }
   let answerA = usagePct(40, [expired])
@@ -237,7 +238,7 @@ await acheck('429 Retry-After 3000: that account is not asked again until then, 
   const a1 = row(u1, 'claude', 'a@x')
   assert.match(a1.error, /^HTTP 429/, 'the error string the CMS agent matches must stay')
   assert.equal(a1.throttled, true)
-  assert.equal(a1.retry_at, new Date(T0 + MIN + 3000_000).toISOString())
+  assert.equal(a1.retry_at, new Date(T0 + MIN + HOUR).toISOString())
   assert.equal(net.usageCalls('fake-at-a'), 2)
   const u2 = await loginUsageReport({ fetchFn: net.fetchFn, now: T0 + 2 * MIN })
   assert.equal(net.usageCalls('fake-at-a'), 2, 'the throttled account was asked again')
@@ -245,47 +246,47 @@ await acheck('429 Retry-After 3000: that account is not asked again until then, 
   const a2 = row(u2, 'claude', 'a@x')
   assert.equal(a2.throttled, true)
   assert.match(a2.error, /^HTTP 429/)
-  assert.equal(a2.retry_at, new Date(T0 + MIN + 3000_000).toISOString())
+  assert.equal(a2.retry_at, new Date(T0 + MIN + HOUR).toISOString())
   assert.equal(a2.read_at, new Date(T0).toISOString(), 'the last good reading is dated')
   assert.deepEqual(a2.windows.map(w => w.used_percent), [40], 'last reading shown, minus the window already reset')
   assert.equal(u2.providers.claude.throttled, undefined)
   assert.equal(row(u2, 'claude', 'b@x').throttled, undefined)
   answerA = usagePct(55)
-  const u3 = await loginUsageReport({ fetchFn: net.fetchFn, now: T0 + MIN + 3001_000 })
+  const u3 = await loginUsageReport({ fetchFn: net.fetchFn, now: T0 + MIN + HOUR + 1000 })
   assert.equal(net.usageCalls('fake-at-a'), 3, 'asked again once Retry-After passed')
   assert.equal(row(u3, 'claude', 'a@x').throttled, undefined)
   assert.equal(row(u3, 'claude', 'a@x').windows[0].used_percent, 55)
 })
 
-await acheck('Retry-After is capped at 2 hours', async () => {
+await acheck('Retry-After is capped at 6 hours before jitter', async () => {
   twoFresh()
   const net = stubNet({ usage: { 'fake-at-a': () => fail(429, 'Rate limited', { 'retry-after': '99999' }), 'fake-at-b': usagePct(10) } })
   await loginUsageReport({ fetchFn: net.fetchFn, now: T0 })
-  await loginUsageReport({ fetchFn: net.fetchFn, now: T0 + 2 * HOUR - MIN })
+  await loginUsageReport({ fetchFn: net.fetchFn, now: T0 + 6 * HOUR - MIN })
   assert.equal(net.usageCalls('fake-at-a'), 1)
-  await loginUsageReport({ fetchFn: net.fetchFn, now: T0 + 2 * HOUR + MIN })
-  assert.equal(net.usageCalls('fake-at-a'), 2, 'held longer than 2 h')
+  await loginUsageReport({ fetchFn: net.fetchFn, now: T0 + 6 * HOUR + MIN })
+  assert.equal(net.usageCalls('fake-at-a'), 2, 'held longer than 6 h')
 })
 
-await acheck('429 without Retry-After holds 5 minutes', async () => {
+await acheck('429 without Retry-After holds at least one hour', async () => {
   twoFresh()
   const net = stubNet({ usage: { 'fake-at-a': () => fail(429, 'Rate limited'), 'fake-at-b': usagePct(10) } })
   await loginUsageReport({ fetchFn: net.fetchFn, now: T0 })
-  await loginUsageReport({ fetchFn: net.fetchFn, now: T0 + 4 * MIN })
+  await loginUsageReport({ fetchFn: net.fetchFn, now: T0 + HOUR - MIN })
   assert.equal(net.usageCalls('fake-at-a'), 1)
-  await loginUsageReport({ fetchFn: net.fetchFn, now: T0 + 6 * MIN })
+  await loginUsageReport({ fetchFn: net.fetchFn, now: T0 + HOUR + MIN })
   assert.equal(net.usageCalls('fake-at-a'), 2)
 })
 
 await acheck('Retry-After as an HTTP date', async () => {
   twoFresh()
-  const when = new Date(T0 + 10 * MIN).toUTCString()
+  const when = new Date(T0 + 90 * MIN).toUTCString()
   const net = stubNet({ usage: { 'fake-at-a': () => fail(429, 'Rate limited', { 'retry-after': when }), 'fake-at-b': usagePct(10) } })
   const u = await loginUsageReport({ fetchFn: net.fetchFn, now: T0 })
-  assert.equal(row(u, 'claude', 'a@x').retry_at, new Date(T0 + 10 * MIN).toISOString())
-  await loginUsageReport({ fetchFn: net.fetchFn, now: T0 + 9 * MIN })
+  assert.equal(row(u, 'claude', 'a@x').retry_at, new Date(T0 + 90 * MIN).toISOString())
+  await loginUsageReport({ fetchFn: net.fetchFn, now: T0 + 89 * MIN })
   assert.equal(net.usageCalls('fake-at-a'), 1)
-  await loginUsageReport({ fetchFn: net.fetchFn, now: T0 + 11 * MIN })
+  await loginUsageReport({ fetchFn: net.fetchFn, now: T0 + 91 * MIN })
   assert.equal(net.usageCalls('fake-at-a'), 2)
 })
 
@@ -359,6 +360,77 @@ await acheck('a book entry written by another command meanwhile is kept', async 
   const cache = readJson(CACHE)
   assert.ok(cache.codex?.other, 'the other command\'s entry was overwritten')
   assert.ok(cache.claude?.['a@x'] && cache.claude?.['b@x'])
+})
+
+// A3: consecutive 429s survive disk reload even without a successful reading.
+await acheck('429 sequence holds 1/2/4/6/6 hours and a 2xx resets the sequence', async () => {
+  reset(claudeStore({ 'a@x': acct('a@x', 'fake-at-a', 'fake-rt-a', T0 + 72 * HOUR) }))
+  let answer = fail(429, 'Rate limited')
+  const net = stubNet({ usage: { 'fake-at-a': () => answer } })
+  let now = T0
+  for (const [index, hours] of [1, 2, 4, 6, 6].entries()) {
+    const report = await loginUsageReport({ fetchFn: net.fetchFn, now })
+    assert.equal(Date.parse(row(report, 'claude', 'a@x').retry_at) - now, hours * HOUR)
+    assert.equal(readJson(CACHE).claude['a@x'].consecutive_429, index + 1)
+    assert.equal(net.usageCalls(), index + 1)
+    now += hours * HOUR
+    await loginUsageReport({ fetchFn: net.fetchFn, now: now - 1, maxAgeSec: 0 })
+    assert.equal(net.usageCalls(), index + 1, 'no request before hold ends')
+  }
+  answer = usagePct(12)
+  await loginUsageReport({ fetchFn: net.fetchFn, now })
+  assert.equal(readJson(CACHE).claude['a@x'].consecutive_429, 0)
+  answer = fail(429, 'Rate limited')
+  const report = await loginUsageReport({ fetchFn: net.fetchFn, now: now + 1 })
+  assert.equal(Date.parse(row(report, 'claude', 'a@x').retry_at) - (now + 1), HOUR)
+})
+
+for (const status of [200, 204]) {
+  await acheck(`HTTP ${status} with unreadable JSON resets 429 count without caching an error reading`, async () => {
+    reset(claudeStore({ 'a@x': acct('a@x', 'fake-at-a', 'fake-rt-a', T0 + 48 * HOUR) }))
+    let answer = fail(429, 'Rate limited')
+    const net = stubNet({ usage: { 'fake-at-a': () => answer } })
+    await loginUsageReport({ fetchFn: net.fetchFn, now: T0 })
+    answer = { ...ok({}), status, json: async () => { throw new SyntaxError('unreadable JSON') } }
+    const errored = await loginUsageReport({ fetchFn: net.fetchFn, now: T0 + HOUR })
+    assert.equal(row(errored, 'claude', 'a@x').error, 'unreadable JSON')
+    assert.equal(row(errored, 'claude', 'a@x').read_at, undefined, 'an unusable body is not a reading')
+    assert.equal(readJson(CACHE).claude['a@x'].consecutive_429, 0, 'every 2xx resets the hold sequence')
+    answer = fail(429, 'Rate limited')
+    const next = await loginUsageReport({ fetchFn: net.fetchFn, now: T0 + HOUR + 1 })
+    assert.equal(Date.parse(row(next, 'claude', 'a@x').retry_at) - (T0 + HOUR + 1), HOUR)
+  })
+}
+
+await acheck('jitter adds 0..10% after the six-hour cap and respects Retry-After', async () => {
+  for (const [sample, expected] of [[0, 6 * HOUR], [0.5, 6.3 * HOUR], [1, 6.6 * HOUR]]) {
+    reset(claudeStore({ 'a@x': acct('a@x', 'fake-at-a', 'fake-rt-a', T0 + 48 * HOUR) }))
+    const net = stubNet({ usage: { 'fake-at-a': fail(429, 'Rate limited', { 'retry-after': '99999' }) } })
+    const r = await loginUsageReport({ fetchFn: net.fetchFn, now: T0, randomFn: () => sample })
+    assert.equal(Date.parse(row(r, 'claude', 'a@x').retry_at) - T0, expected)
+  }
+  reset(claudeStore({ 'a@x': acct('a@x', 'fake-at-a', 'fake-rt-a', T0 + 48 * HOUR) }))
+  const net = stubNet({ usage: { 'fake-at-a': fail(429, 'Rate limited', { 'retry-after': '5400' }) } })
+  const r = await loginUsageReport({ fetchFn: net.fetchFn, now: T0, randomFn: () => 0.5 })
+  assert.equal(Date.parse(row(r, 'claude', 'a@x').retry_at) - T0, 94.5 * MIN)
+})
+
+await acheck('an old usage book without the counter still serves cache and holds, then starts at one', async () => {
+  reset(claudeStore({ 'a@x': acct('a@x', 'fake-at-a', 'fake-rt-a', T0 + 48 * HOUR) }))
+  writeFileSync(CACHE, JSON.stringify({ claude: { 'a@x': {
+    read_at: T0, supported: true, windows: [{ kind: 'session', used_percent: 35, resets_at: null }],
+    throttled_until: T0 + MIN, throttle_error: 'HTTP 429',
+  } } }))
+  const net = stubNet({ usage: { 'fake-at-a': fail(429, 'Rate limited') } })
+  const held = await loginUsageReport({ fetchFn: net.fetchFn, now: T0, maxAgeSec: 0 })
+  assert.equal(row(held, 'claude', 'a@x').throttled, true)
+  assert.equal(net.usageCalls(), 0)
+  const cached = await loginUsageReport({ fetchFn: net.fetchFn, now: T0 + MIN, maxAgeSec: 300 })
+  assert.equal(row(cached, 'claude', 'a@x').cached, true)
+  assert.equal(row(cached, 'claude', 'a@x').windows[0].used_percent, 35)
+  const r = await loginUsageReport({ fetchFn: net.fetchFn, now: T0 + MIN, maxAgeSec: 0 })
+  assert.equal(Date.parse(row(r, 'claude', 'a@x').retry_at) - (T0 + MIN), HOUR)
+  assert.equal(readJson(CACHE).claude['a@x'].consecutive_429, 1)
 })
 
 // ── the CLI itself ──────────────────────────────────────────────────────
