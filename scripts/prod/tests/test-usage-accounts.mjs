@@ -9,18 +9,96 @@
 // matters — two accounts, one of them spent — cannot be produced by logging in
 // here. It is driven with a stub fetch instead.
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
-// The Antigravity OAuth client is read from the plugin inside the checkout.
+const originalFork = process.env.AHV_FORK
 process.env.AHV_FORK ??= new URL('../../..', import.meta.url).pathname.replace(/\/$/, '')
+const originalFetch = globalThis.fetch
+globalThis.fetch = async () => { throw new Error('provider network is forbidden in this test') }
 
-const { collectSubscriptionUsage, withAccountSession } =
+const { collectSubscriptionUsage, withAccountSession, antigravityOAuthClient } =
   await import(new URL('../ahv-bot.mjs', import.meta.url).href)
 
-let passed = 0, failed = 0
+let passed = 0, failed = 0, skipped = 0
 async function acheck(name, fn) {
   try { await fn(); console.log(`  PASS  ${name}`); passed++ }
   catch (e) { console.log(`  FAIL  ${name}\n        ${e.message}`); failed++ }
 }
+
+async function withOAuthClientEnv(client, fn) {
+  const keys = ['ANTIGRAVITY_CLIENT_ID', 'ANTIGRAVITY_CLIENT_SECRET']
+  const saved = keys.map(key => process.env[key])
+  try {
+    for (const key of keys) {
+      if (client[key] === undefined) delete process.env[key]
+      else process.env[key] = client[key]
+    }
+    return await fn()
+  } finally {
+    for (const [index, key] of keys.entries()) {
+      if (saved[index] === undefined) delete process.env[key]
+      else process.env[key] = saved[index]
+    }
+  }
+}
+
+const pluginClientFile = join(process.env.AHV_FORK, 'packages/bundle/ahv/node_modules/dsh-plugin-subscriptions/lib/providers/antigravity-oauth-client.js')
+let pluginClientUrl
+try {
+  pluginClientUrl = pathToFileURL(realpathSync(pluginClientFile)).href
+} catch (error) {
+  if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error
+  console.log(`  SKIP  antigravity client is read from the installed plugin: ${error.code} at ${pluginClientFile}`)
+  skipped++
+}
+if (pluginClientUrl) await acheck('antigravity client is read from the installed plugin', async () => {
+  await withOAuthClientEnv({}, async () => {
+    const plugin = await import(pluginClientUrl)
+    const client = await antigravityOAuthClient()
+    // Boolean assertions keep installed credentials out of failure output.
+    assert.ok(typeof plugin.ANTIGRAVITY_DEFAULT_CLIENT_ID === 'string' && plugin.ANTIGRAVITY_DEFAULT_CLIENT_ID.length > 0, 'installed client id is present')
+    assert.ok(typeof plugin.ANTIGRAVITY_DEFAULT_CLIENT_SECRET === 'string' && plugin.ANTIGRAVITY_DEFAULT_CLIENT_SECRET.length > 0, 'installed client secret is present')
+    assert.ok(client.clientId === plugin.ANTIGRAVITY_DEFAULT_CLIENT_ID, 'client id matches the installed plugin')
+    assert.ok(client.clientSecret === plugin.ANTIGRAVITY_DEFAULT_CLIENT_SECRET, 'client secret matches the installed plugin')
+  })
+})
+
+await acheck('antigravity refresh reads the plugin client without env overrides', async () => {
+  const fixture = mkdtempSync(join(fileURLToPath(new URL('.', import.meta.url)), '.antigravity-client-'))
+  try {
+    const packageDir = join(fixture, 'packages/bundle/ahv/node_modules/dsh-plugin-subscriptions')
+    mkdirSync(join(packageDir, 'lib/providers'), { recursive: true })
+    writeFileSync(join(packageDir, 'package.json'), '{"type":"module"}\n')
+    writeFileSync(join(packageDir, 'lib/providers/antigravity-oauth-client.js'), "export const ANTIGRAVITY_DEFAULT_CLIENT_ID = 'fake-installed-client-id';\nexport const ANTIGRAVITY_DEFAULT_CLIENT_SECRET = 'fake-installed-client-secret';\n")
+    const env = { ...process.env, AHV_FORK: fixture, HOME: fixture }
+    delete env.ANTIGRAVITY_CLIENT_ID
+    delete env.ANTIGRAVITY_CLIENT_SECRET
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import assert from 'node:assert/strict'
+      globalThis.fetch = async () => { throw new Error('provider network is forbidden in this test') }
+      const { antigravityOAuthClient, refreshSessionIfStale } = await import(${JSON.stringify(new URL('../ahv-bot.mjs', import.meta.url).href)})
+      assert.deepEqual(await antigravityOAuthClient(), { clientId: 'fake-installed-client-id', clientSecret: 'fake-installed-client-secret' })
+      let calls = 0
+      const result = await refreshSessionIfStale('antigravity', { accessToken: 'fake-old-token', refreshToken: 'fake-refresh-token', expiresAt: 0 }, async (url, init) => {
+        calls++
+        assert.equal(url, 'https://oauth2.googleapis.com/token')
+        const form = new URLSearchParams(init.body)
+        assert.equal(form.get('client_id'), 'fake-installed-client-id')
+        assert.equal(form.get('client_secret'), 'fake-installed-client-secret')
+        return { ok: true, json: async () => ({ access_token: 'fake-new-token', expires_in: 3599 }) }
+      })
+      assert.equal(calls, 1)
+      assert.equal(result.refreshed, true)
+      assert.equal(result.session.accessToken, 'fake-new-token')
+    `], { env, encoding: 'utf8', timeout: 10_000 })
+    assert.equal(child.status, 0, child.error?.message ?? child.stderr)
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
 
 const LIVE = Date.now() + 3_600_000
 
@@ -184,7 +262,9 @@ await acheck('a malformed id token is nameless, not a crash', async () => {
   assert.equal(providers.codex.accounts[0].account, 'k1')
 })
 
-await acheck('two antigravity accounts: each refreshed and read on its own', async () => {
+await acheck('two antigravity accounts: each refreshed and read on its own', async () => withOAuthClientEnv({
+  ANTIGRAVITY_CLIENT_ID: 'fake-client-id', ANTIGRAVITY_CLIENT_SECRET: 'fake-client-secret',
+}, async () => {
   const store = { antigravity: { default: 'a@gmail.com', accounts: {
     'a@gmail.com': { accessToken: 'ya-a', refreshToken: '1//a', expiresAt: 0, projectId: 'p-a', account: 'a@gmail.com' },
     'b@gmail.com': { accessToken: 'ya-b', refreshToken: '1//b', expiresAt: LIVE, projectId: 'p-b', account: 'b@gmail.com' },
@@ -205,7 +285,10 @@ await acheck('two antigravity accounts: each refreshed and read on its own', asy
   const by = Object.fromEntries(providers.antigravity.accounts.map(r => [r.account, [r.is_default, r.windows[0].used_percent]]))
   assert.deepEqual(by, { 'a@gmail.com': [true, 20], 'b@gmail.com': [false, 90] })
   assert.equal(providers.antigravity.windows[0].scope, 'Gemini')
-})
+}))
 
-console.log(`\n  ${passed} passed, ${failed} failed`)
+globalThis.fetch = originalFetch
+if (originalFork === undefined) delete process.env.AHV_FORK
+else process.env.AHV_FORK = originalFork
+console.log(`\n  ${passed} passed, ${failed} failed, ${skipped} skipped`)
 process.exit(failed === 0 ? 0 : 1)

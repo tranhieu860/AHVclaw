@@ -94,6 +94,9 @@ await acheck('antigravity client can be overridden like the plugin', async () =>
 })
 
 await acheck('antigravity refresh is a Google form post that keeps the refresh token', async () => {
+  // Fake client keeps the request test independent of node_modules.
+  process.env.ANTIGRAVITY_CLIENT_ID = 'fake.apps.googleusercontent.com'
+  process.env.ANTIGRAVITY_CLIENT_SECRET = 'fake-client-secret'
   let seen
   const now = 1_000_000
   const out = await refreshSessionIfStale('antigravity', {

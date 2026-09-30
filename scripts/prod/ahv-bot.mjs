@@ -15,13 +15,14 @@
 //   2 = recoverable (rate_limit, network_transient, model_unavailable)
 //   124 = timeout / cancelled
 
-import { spawn } from 'node:child_process'
+import { spawn, execFileSync } from 'node:child_process'
 import { renameSync, readFileSync, existsSync, statSync, readdirSync, writeFileSync, chmodSync, mkdirSync, realpathSync } from 'node:fs'
 import { resolve as resolvePath, dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { zstdDecompressSync } from 'node:zlib'
 import { homedir } from 'node:os'
 import { createHash, randomBytes } from 'node:crypto'
+import { createRequire } from 'node:module'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const FORK = process.env.AHV_FORK ?? resolvePath(HERE, '..', 'src')
@@ -654,6 +655,48 @@ function writeSubscriptionsAuth(obj) {
   writeFileAtomic600(SUBSCRIPTIONS_AUTH_FILE, JSON.stringify(obj, null, 2))
 }
 
+// Copied from subscriptions 0.9.6 and dsh-llm attribution: importing the
+// provider module also loads harness dependencies absent from standalone CLI.
+const CLAUDE_CLI_FALLBACK_VERSION = '2.1.283'
+const SUBSCRIPTIONS_USER_AGENT = `deepseek-harness/${harnessPackageVersion()} (+https://github.com/deepseek-ai/deepseek-harness)`
+const ANTIGRAVITY_USER_AGENT = 'antigravity/1.104.0 dsh-plugin-subscriptions'
+let localClaudeCliVersion
+
+/** Read dsh-llm metadata without loading the harness; standalone copies keep the pinned version. */
+function harnessPackageVersion() {
+  for (const root of [FORK, resolvePath(HERE, '../..')]) {
+    const manifest = join(root, 'packages/llm/llm/package.json')
+    if (existsSync(manifest)) return JSON.parse(readFileSync(manifest, 'utf8')).version
+    for (const anchor of [join(root, 'packages/bundle/ahv/package.json'), join(root, 'package.json')]) {
+      try { return createRequire(anchor)('@deepseek-ai/dsh-llm/package.json').version }
+      catch (error) {
+        if (error.code !== 'MODULE_NOT_FOUND') throw error
+      }
+    }
+  }
+  return '0.2.0-rc.1'
+}
+
+/** Claude's local CLI version or the plugin's floor, probed once on first use. */
+function claudeCliUserAgent() {
+  if (localClaudeCliVersion === undefined) {
+    let local = CLAUDE_CLI_FALLBACK_VERSION
+    try {
+      const raw = execFileSync('claude', ['--version'], {
+        timeout: 2000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+      })
+      local = raw.match(/(\d+\.\d+\.\d+)/)?.[1] ?? local
+    } catch (error) {
+      // Missing, unreadable or timed out CLI: the offline floor remains usable.
+    }
+    const detected = local.split('.').map(Number)
+    const floor = CLAUDE_CLI_FALLBACK_VERSION.split('.').map(Number)
+    const difference = detected.map((part, index) => part - floor[index]).find(part => part !== 0) ?? 0
+    localClaudeCliVersion = difference > 0 ? local : CLAUDE_CLI_FALLBACK_VERSION
+  }
+  return `claude-cli/${localClaudeCliVersion} (external, cli)`
+}
+
 /**
  * Where each provider reports the quota left on the logged-in account.
  *
@@ -669,6 +712,7 @@ export const USAGE_ENDPOINTS = {
     headers: (s) => ({
       authorization: `Bearer ${s.accessToken}`,
       'anthropic-beta': 'oauth-2025-04-20',
+      'user-agent': claudeCliUserAgent(),
       accept: 'application/json',
     }),
   },
@@ -676,9 +720,10 @@ export const USAGE_ENDPOINTS = {
     url: 'https://chatgpt.com/backend-api/wham/usage',
     headers: (s) => ({
       authorization: `Bearer ${s.accessToken}`,
-      ...(s.accountId ? { 'chatgpt-account-id': s.accountId } : {}),
+      'chatgpt-account-id': s.accountId,
       originator: 'codex_cli_rs',
       accept: 'application/json',
+      'user-agent': SUBSCRIPTIONS_USER_AGENT,
     }),
   },
   // Antigravity answers a POST, not a GET: the same v1internal method agy's own
@@ -690,8 +735,7 @@ export const USAGE_ENDPOINTS = {
     headers: (s) => ({
       authorization: `Bearer ${s.accessToken}`,
       'content-type': 'application/json',
-      'user-agent': 'antigravity/1.104.0 dsh-plugin-subscriptions',
-      accept: 'application/json',
+      'user-agent': ANTIGRAVITY_USER_AGENT,
     }),
   },
   grok: {
@@ -700,6 +744,7 @@ export const USAGE_ENDPOINTS = {
       authorization: `Bearer ${s.accessToken}`,
       'x-xai-token-auth': 'xai-grok-cli',
       accept: 'application/json',
+      'user-agent': SUBSCRIPTIONS_USER_AGENT,
     }),
   },
 }
@@ -1029,7 +1074,12 @@ async function readProviderUsage(kind, session, fetchFn) {
         result: { supported: false, windows: [], error: `HTTP ${response.status}${detail ? `: ${detail}` : ''}` },
       }
     }
-    return { status: response.status, retryAfter: null, result: normaliseUsagePayload(kind, await response.json()) }
+    try {
+      return { status: response.status, retryAfter: null, result: normaliseUsagePayload(kind, await response.json()) }
+    } catch (error) {
+      // A 2xx still resets the 429 sequence when its body cannot be read.
+      return { status: response.status, retryAfter: null, result: { supported: false, windows: [], error: error instanceof Error ? error.message : String(error) } }
+    }
   } catch (error) {
     return { status: null, retryAfter: null, result: { supported: false, windows: [], error: error instanceof Error ? error.message : String(error) } }
   }
@@ -1050,9 +1100,9 @@ export const REFRESH_DEAD_HOLD_MS = 6 * 60 * 60_000
 export const REFRESH_HTTP_HOLD_MS = 30 * 60_000
 /** Hold after the refresh call never got an answer. */
 export const REFRESH_NETWORK_HOLD_MS = 10 * 60_000
-/** Longest Retry-After honoured on the usage call; a longer one is clipped. */
-export const USAGE_RETRY_AFTER_CAP_MS = 2 * 60 * 60_000
-/** Hold after a usage 429 that names no Retry-After. */
+/** Longest usage hold before adding 0–10% jitter. */
+export const USAGE_RETRY_AFTER_CAP_MS = 6 * 60 * 60_000
+/** Retry-After fallback before applying the exponential usage hold. */
 export const USAGE_RETRY_DEFAULT_MS = 5 * 60_000
 /** Oldest last reading offered in place of a throttled account's figures. */
 export const USAGE_STALE_READING_MS = 24 * 60 * 60_000
@@ -1212,12 +1262,12 @@ function liveWindows(windows, now) {
  * @param key - the account key.
  * @param session - the session to ask with.
  * @param cache - the usage book (see bookOf).
- * @param opts - fetchFn, now (epoch ms), maxAgeMs (null: always ask).
+ * @param opts - fetchFn, now (epoch ms), maxAgeMs (null: always ask), randomFn.
  * @returns the fields fetchProviderUsage returns, plus `read_at` for a real
  *   reading, `cached` for one served from the book, and `throttled` with
  *   `retry_at` while a 429 holds the account.
  */
-async function usageWithBook(kind, key, session, cache, { fetchFn, now, maxAgeMs }) {
+async function usageWithBook(kind, key, session, cache, { fetchFn, now, maxAgeMs, randomFn = Math.random }) {
   const memo = cache.get(kind, key)
   const reading = memo && typeof memo.read_at === 'number' ? memo : undefined
   const recent = (limit) => reading && now - reading.read_at <= limit
@@ -1238,12 +1288,21 @@ async function usageWithBook(kind, key, session, cache, { fetchFn, now, maxAgeMs
   }
   const { result, status, retryAfter } = await readProviderUsage(kind, session, fetchFn)
   if (status === 429) {
-    const until = now + retryAfterMs(retryAfter, now)
-    cache.set(kind, key, { ...(reading ?? {}), throttled_until: until, throttle_error: result.error })
+    const previous = Number.isSafeInteger(memo?.consecutive_429) && memo.consecutive_429 > 0 ? memo.consecutive_429 : 0
+    const consecutive = previous + 1
+    const base = Math.min(USAGE_RETRY_AFTER_CAP_MS,
+      Math.max(retryAfterMs(retryAfter, now), 60 * 60_000 * 2 ** Math.min(consecutive - 1, 3)))
+    const until = now + Math.round(base * (1 + randomFn() * 0.1))
+    cache.set(kind, key, { ...(memo ?? {}), consecutive_429: consecutive, throttled_until: until, throttle_error: result.error })
     return throttled(until, result.error)
   }
   if (status !== null && status >= 200 && status < 300) {
-    cache.set(kind, key, { read_at: now, supported: result.supported, windows: result.windows })
+    if (result.error) {
+      const { throttled_until: _until, throttle_error: _error, ...previous } = memo ?? {}
+      cache.set(kind, key, { ...previous, consecutive_429: 0 })
+      return result
+    }
+    cache.set(kind, key, { read_at: now, supported: result.supported, windows: result.windows, consecutive_429: 0 })
     return { ...result, read_at: new Date(now).toISOString() }
   }
   return result
@@ -1261,7 +1320,7 @@ async function usageWithBook(kind, key, session, cache, { fetchFn, now, maxAgeMs
  * @param fetchFn - injected for tests.
  * @param opts - `now` (epoch ms), `refreshBook` and `usageCache` (bookOf; an
  *   empty in-memory book when omitted, so nothing is read or written here), and
- *   `maxAgeSec` (serve readings this young from the usage book).
+ *   `maxAgeSec` (serve readings this young from the usage book), `randomFn`.
  * @returns providers keyed by id, and the sessions whose tokens were renewed.
  */
 export async function collectSubscriptionUsage(auth, fetchFn = fetch, opts = {}) {
@@ -1283,7 +1342,7 @@ export async function collectSubscriptionUsage(auth, fetchFn = fetch, opts = {})
         account: accountLabel(session, key),
         is_default: key === defaultKey,
         logged_in: Boolean(session && session.accessToken),
-        ...(await usageWithBook(kind, key, fresh.session, usageCache, { fetchFn, now, maxAgeMs })),
+        ...(await usageWithBook(kind, key, fresh.session, usageCache, { fetchFn, now, maxAgeMs, randomFn: opts.randomFn })),
         ...(fresh.refreshed ? { refreshed: true } : {}),
         ...(fresh.error ? { refresh_error: fresh.error } : {}),
         ...(held ? { refresh_skipped: fresh.skipped } : {}),
@@ -1315,7 +1374,7 @@ export async function collectSubscriptionUsage(auth, fetchFn = fetch, opts = {})
  * Every account is refreshed on the way past, so the accounts kept in reserve
  * stay usable instead of quietly expiring while they wait — except a refresh
  * token the refresh book holds. An account under a usage 429 is not asked
- * again until its Retry-After passes; `--max-age SEC` answers accounts read at
+ * again until its exponential hold plus jitter passes; `--max-age SEC` answers accounts read at
  * most SEC seconds ago from the usage book.
  */
 async function loginUsage(args) {
@@ -1331,6 +1390,31 @@ async function loginUsage(args) {
   printJson(await loginUsageReport({ maxAgeSec }), 0)
 }
 
+/** Parse the targeted quota command before any provider request can run. */
+async function loginQuota(args) {
+  const options = {}
+  const flags = { '--kind': 'kind', '--account': 'account', '--max-age': 'maxAgeSec' }
+  try {
+    for (let i = 0; i < args.length; i++) {
+      const flag = args[i]
+      if (flag === '--json') continue
+      const name = Object.hasOwn(flags, flag) ? flags[flag] : undefined
+      if (!name || Object.hasOwn(options, name)) throw new Error(`login quota: cờ không hợp lệ hoặc lặp: ${flag}`)
+      const value = args[++i]
+      if (!value || value.startsWith('--')) throw new Error(`login quota: ${flag} cần giá trị`)
+      if (name === 'maxAgeSec') {
+        if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))) {
+          throw new Error('login quota: --max-age cần số giây (số nguyên >= 0)')
+        }
+        options[name] = Number(value)
+      } else options[name] = value
+    }
+    printJson(await loginQuotaReport(options), 0)
+  } catch (error) {
+    errJson('internal_error', error.message, true, 0, 1)
+  }
+}
+
 /** Where the refresh book and the usage book live: beside the store. */
 const REFRESH_BOOK_FILE = join(dirname(SUBSCRIPTIONS_AUTH_FILE), 'refresh-state.json')
 const USAGE_BOOK_FILE = join(dirname(SUBSCRIPTIONS_AUTH_FILE), 'usage-cache.json')
@@ -1339,19 +1423,66 @@ const USAGE_BOOK_FILE = join(dirname(SUBSCRIPTIONS_AUTH_FILE), 'usage-cache.json
  * What `ahv login usage` prints, with the store and both books updated.
  *
  * @param opts - `fetchFn` and `now` (injected for tests); `maxAgeSec` answers
- *   accounts read at most that long ago from the usage book.
+ *   accounts read at most that long ago from the usage book; `randomFn` supplies
+ *   the usage 429 jitter sample (0–1).
  * @returns `{checked_at, providers}` as collectSubscriptionUsage builds it.
  */
-export async function loginUsageReport({ fetchFn = fetch, now = Date.now(), maxAgeSec } = {}) {
+export async function loginUsageReport({ fetchFn = fetch, now = Date.now(), maxAgeSec, randomFn = Math.random } = {}) {
   const refreshBook = bookOf(readBookFile(REFRESH_BOOK_FILE))
   const usageCache = bookOf(readBookFile(USAGE_BOOK_FILE))
   const { providers, refreshed } = await collectSubscriptionUsage(readSubscriptionsAuth(), fetchFn, {
-    now, refreshBook, usageCache, maxAgeSec,
+    now, refreshBook, usageCache, maxAgeSec, randomFn,
   })
   persistRefreshed(refreshed)
   writeBookFile(REFRESH_BOOK_FILE, refreshBook)
   writeBookFile(USAGE_BOOK_FILE, usageCache)
   return { checked_at: new Date(now).toISOString(), providers }
+}
+
+/**
+ * Read selected accounts' quota without refreshing tokens or writing auth.
+ *
+ * Uses login usage's cache and 429 holds. Expired access tokens produce an
+ * error row without a provider request, even if a cached reading exists.
+ * The provider summary uses the default row when selected, otherwise the first row.
+ * @param opts - `kind`, optional account key and `maxAgeSec`; `fetchFn`, `now`
+ *   and `randomFn` can be injected. maxAgeSec=0 always asks unless held by 429.
+ * @returns `{checked_at, providers: {kind: {accounts, ...primaryFields}}}`.
+ * @throws when the kind/account does not exist or maxAgeSec is invalid.
+ */
+export async function loginQuotaReport({ kind, account, maxAgeSec, fetchFn = fetch, now = Date.now(), randomFn = Math.random } = {}) {
+  if (!SUPPORTED_LOGIN_PROVIDERS.includes(kind)) throw new Error(`login quota: kind "${kind ?? ''}" không hỗ trợ`)
+  if (maxAgeSec !== undefined && (!Number.isSafeInteger(maxAgeSec) || maxAgeSec < 0)) {
+    throw new Error('login quota: --max-age cần số giây (số nguyên >= 0)')
+  }
+  const auth = readSubscriptionsAuth()
+  const { defaultKey, accounts } = storeAccounts(auth[kind])
+  if (Object.keys(accounts).length === 0) throw new Error(`login quota: kind "${kind}" không có tài khoản`)
+  if (account !== undefined && !Object.hasOwn(accounts, account)) {
+    throw new Error(`login quota: account "${account}" không có trong kind "${kind}"`)
+  }
+  const selected = account === undefined ? Object.entries(accounts) : [[account, accounts[account]]]
+  const usageCache = bookOf(readBookFile(USAGE_BOOK_FILE))
+  const maxAgeMs = maxAgeSec === undefined || maxAgeSec === 0 ? null : maxAgeSec * 1000
+  const rows = await Promise.all(selected.map(async ([key, session]) => ({
+    key,
+    account: accountLabel(session, key),
+    is_default: key === defaultKey,
+    logged_in: Boolean(session && session.accessToken),
+    ...(typeof session?.expiresAt === 'number' && session.expiresAt <= now
+      ? { supported: false, windows: [], error: 'access token đã hết hạn; dùng ahv login refresh để làm mới' }
+      : await usageWithBook(kind, key, session, usageCache, { fetchFn, now, maxAgeMs, randomFn })),
+  })))
+  const primary = rows.find(row => row.is_default) ?? rows[0]
+  const provider = {
+    logged_in: Boolean(primary && primary.logged_in),
+    ...(primary
+      ? { supported: primary.supported, windows: primary.windows, ...(primary.error ? { error: primary.error } : {}) }
+      : await fetchProviderUsage(kind, undefined, fetchFn)),
+    accounts: rows,
+  }
+  writeBookFile(USAGE_BOOK_FILE, usageCache)
+  return { checked_at: new Date(now).toISOString(), providers: { [kind]: provider } }
 }
 
 /**
@@ -2284,7 +2415,7 @@ export async function importCliCredentials({ home = homedir(), claudeConfigDir, 
 async function claudeProfileEmail(accessToken, fetchFn) {
   try {
     const res = await fetchFn('https://api.anthropic.com/api/oauth/profile', {
-      headers: { Authorization: `Bearer ${accessToken}`, 'anthropic-beta': 'oauth-2025-04-20', Accept: 'application/json' },
+      headers: { authorization: `Bearer ${accessToken}` },
       signal: AbortSignal.timeout(10_000),
     })
     if (!res.ok) return ''
@@ -2364,6 +2495,7 @@ function usage() {
   ahv login logout PROVIDER --json             (remove stored token)
   ahv login import --json                      (import codex/grok CLI login vao AHV)
   ahv login usage --json [--max-age SEC]       (han muc con lai that tu grok/codex/claude)
+  ahv login quota --json --kind K [--account KEY] [--max-age SEC] (chi hoi han muc, khong lam moi token)
   ahv login refresh --json                     (chi lam moi phien sap het han, khong hoi han muc)
   ahv models list --json
   ahv models show MODEL_ID --json
@@ -2417,6 +2549,7 @@ if (subcommand === 'version') {
   else if (action === 'logout') loginLogout(rest[1])
   else if (action === 'import') void loginImport()
   else if (action === 'usage') void loginUsage(rest.slice(1))
+  else if (action === 'quota') void loginQuota(rest.slice(1))
   else if (action === 'refresh') void loginRefresh()
   else usage()
 } else if (subcommand === 'models') {

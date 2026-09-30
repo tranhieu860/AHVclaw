@@ -72,6 +72,8 @@ ahv "reply just OK" --model grok-4.6
 
 Model của subscription auto-mount vào harness sau login, `ahv models list --json` cover full 15+ model từ mọi provider.
 
+`ahv login usage --json [--max-age SEC]` xem hạn mức mọi tài khoản và giữ hành vi làm mới token sắp hết hạn. `ahv login quota --json --kind K [--account KEY] [--max-age SEC]` chỉ hỏi tài khoản của `claude`, `codex`, `grok` hoặc `antigravity` được chọn, không làm mới token; token hết hạn trả hàng lỗi. Các trường mức provider của `quota` lấy từ hàng mặc định nếu được chọn, nếu không từ hàng đầu tiên được chọn. Hai lệnh dùng chung cache và thời gian giữ sau HTTP 429; `quota --max-age 0` hỏi lại nếu tài khoản không đang bị giữ. Kind hoặc account không tồn tại trả JSON lỗi, mã thoát khác 0 và không gửi request.
+
 ## 🤖 Cho bot / automation
 
 Pin git tag → JSONL contract stable, bot integrate như engine thứ 4 ngang Claude Code / Codex / Grok:
