@@ -138,6 +138,16 @@ await acheck('quota provider summary prefers the default account when it is sele
   assert.equal(row(report, 'b@x').is_default, true)
 })
 
+await acheck('quota provider summary prefers the default account when it sits between other accounts', async () => {
+  reset(claudeStore({ 'a@x': account('a@x'), 'b@x': account('b@x'), 'c@x': account('c@x') }, 'b@x'))
+  const pct = { 'fake-at-a@x': 11, 'fake-at-b@x': 63, 'fake-at-c@x': 29 }
+  const net = stubNet(call => response(usagePct(pct[call.token])))
+  const report = await quota({ fetchFn: net.fetchFn })
+  assert.equal(net.calls.length, 3)
+  assert.equal(report.providers.claude.windows[0].used_percent, 63)
+  assert.equal(row(report, 'b@x').is_default, true)
+})
+
 await acheck('quota provider summary reports the selected nondefault expired token without a request', async () => {
   reset(claudeStore({ 'a@x': account('a@x'), 'b@x': account('b@x', T0) }, 'a@x'))
   const net = stubNet()
