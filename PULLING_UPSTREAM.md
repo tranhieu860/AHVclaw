@@ -5,8 +5,22 @@ Lõi được nâng **bằng tay, theo tag phát hành của upstream**, không 
 CMS `ahvclaw.com/admin` → *AHV CLI* chỉ báo "lõi dsh X — upstream mới nhất Y
 (tụt N ngày)" và cảnh báo khi tụt quá 14 ngày; không có gì tự merge.
 
-Lần gần nhất: `dsh-v0.1.1-rc.1` → `dsh-v0.2.0-rc.1` (29/09/2026, nhánh
-`upgrade-dsh-0.2`, 7.171 commit, 24 xung đột).
+Lần gần nhất: `dsh-v0.2.0-rc.1` → `dsh-v0.2.0-rc.2` (04/10/2026, nhánh
+`upgrade-dsh-0.2.0-rc.2`, 187 commit, 6 xung đột; dựng + test trên máy làm
+việc #48, không dựng từ đầu trên #20). Lần trước: `dsh-v0.1.1-rc.1` →
+`dsh-v0.2.0-rc.1` (29/09/2026, nhánh `upgrade-dsh-0.2`, 7.171 commit, 24 xung đột).
+
+### Ghi chú phát hành lõi 0.2.0-rc.2 (AHV CLI v0.2.59)
+
+- Lõi dsh lên 0.2.0-rc.2. Phần lớn thay đổi của upstream là ứng dụng Desktop/Windows
+  và giao diện web (ô tìm model, câu hỏi có hẹn giờ, mở thư mục từ cây tệp).
+- Lớp gọi model `pi-ai` lên 0.87.1 (đường router AHV đi qua lớp này).
+- Định dạng phiên không đổi (vẫn `session.v4`): phiên cũ của bot mở tiếp được,
+  lùi về v0.2.58 vẫn đọc được phiên.
+- Giữ nguyên: tắt gửi dữ liệu về DeepSeek, kho tài khoản không bị xoá khi làm mới
+  lỗi, thương hiệu AHV, hợp đồng `ahv run` của bot.
+- Plugin có `peerDependencies` đòi lõi ≥ 0.2.0-rc.2 (vd `@anweat/dsh-browser` 0.2.0)
+  từ bản này mới nâng được — registry đang giữ dsh-browser < 0.2.0, gỡ giữ là việc riêng.
 
 ## Vì sao phải nâng lõi đúng hạn
 
@@ -37,7 +51,7 @@ Commit gộp chạy lefthook (lint, third-party notices, ghép bản dịch) —
 | Tệp | Bản vá AHV | Khi xung đột |
 |---|---|---|
 | `apps/cli/package.json` | bin `ahv`; phụ thuộc `@ahvclaw/dsh-bundle-ahv` | giữ cả hai (0.2 chỉ phân giải plugin trong bao đóng phụ thuộc của bản cài — thiếu dòng này là bot-runner không nạp, `ahv run` treo) |
-| `apps/cli/src/bin.ts` | `withAhvDefaultProfile()` | lấy bản upstream, cấy lại hàm |
+| `apps/cli/src/bin.ts` | `withAhvDefaultProfile()` | lấy bản upstream, cấy lại hàm quanh `process.argv.slice(2)` trong `parseDshArgs(...)` (rc.2: thêm tham số thứ 3 `manageDesktopProfile`) |
 | `packages/boot/app-boot/src/profile.ts` | profile `ahv`, `ahv-web` | thêm vào `PROFILE_TEMPLATES` theo định dạng mới |
 | `packages/bundle/ahv/**` | bundle AHV (router, persona, plugin, bot-runner) | của AHV; soát id dòng base/headless còn tồn tại, khoá cấu hình đổi tên (0.2: `persona` → `personaPrefix`), dòng upstream đã đưa vào base (0.2: storage, projection-cache) |
 | `packages/session/session-list-metadata` | projection cho `ahv run` | đồng bộ với `sessionListMetadata` của session-controller |
@@ -56,10 +70,16 @@ Commit gộp chạy lefthook (lint, third-party notices, ghép bản dịch) —
 2. Test liên quan: `npx vitest run packages/client/connection/tests packages/session/session-format-v0-to-v1/tests packages/bundle packages/boot/app-boot/tests apps/cli/tests packages/client/ui-sidebar/tests`
    và `for t in scripts/prod/tests/*.mjs; do node $t; done` (+ `bash scripts/prod/tests/test-*.sh`).
    `release-cli.sh` tự chạy `smoke-run.sh` (một `ahv run` thật), `test-browser-playwright.sh` và `test-subscriptions-keep-session.mjs` trên bản dựng.
+   Trên #48, `packages/client/connection/tests/binary-rpc.host.spec.ts` (gzip/none qua HTTP bridge)
+   hết giờ 5 s do môi trường máy đó; cùng tệp chạy xanh trên #20 (04/10).
 3. Chạy thật từ cây vừa dựng trong một HOME tạm (không đụng `~/.ahv` thật):
    `ahv --version`, `ahv doctor`, `ahv run --prompt-file … --output jsonl`
    (ra `assistant_final` + `turn_end completed`), `ahv models list --json`,
    `ahv login usage --json`, `ahv sessions list --json`, `ahv web` (Playwright).
+   Model của router AHV không gọi công cụ (rc.1 lẫn rc.2), nên lượt có gọi công cụ
+   chỉ kiểm được bằng tài khoản thật (cổng kênh thử #20: mỗi nhà một câu + một lượt công cụ).
+   Chạy `--resume` phiên thật bằng đúng user bot (`sudo -u ahvproxy`, HOME tạm) — dưới
+   user khác lượt chạy sẽ lỗi `EACCES … AHV-ahvclaw/.git` dù phiên đã khôi phục được.
 4. **Phiên cũ phải tiếp tục được**: chép kho phiên thật (`~ahvproxy/.dsh/sessions`)
    vào thư mục tạm và cho khôi phục thử qua catalog của lõi mới — 0 phiên chính
    bị từ chối. Lõi mới để nguyên tệp phiên cũ (tạo `session.vN.jsonl.zstd`
