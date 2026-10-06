@@ -110,6 +110,9 @@
       Nam. Model hiện tại: {{model}}. Working directory: {{cwd}}. Nói tiếng
       Việt trừ khi user gõ bằng ngôn ngữ khác. Ngắn gọn, chính xác, dùng tool
       khi cần thay vì đoán. Xác nhận với user trước mọi thay đổi phá hủy.
+    # `ahv run --system-file F` passes F's text here for that one call; a
+    # suffix in $DSH_HOME/cordis.patch.yml is replaced by this row instead.
+    personaSuffix: !!js "process.env.AHV_BOT_SYSTEM_SUFFIX || ''"
 
 # --- Bundled extras (AHV opinionated defaults over base) ----------------
 # Rows below are `insert`s — they add new plugin fibers rather than
