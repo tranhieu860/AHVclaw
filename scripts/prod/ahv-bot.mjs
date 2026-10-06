@@ -2133,19 +2133,21 @@ export const SYSTEM_FILE_MAX_BYTES = 64 * 1024
 
 /**
  * Strip `--system-file PATH` from the `ahv run` arguments and carry the file's
- * text to dsh as AHV_BOT_SYSTEM_SUFFIX, which the bundle's system-prompt row
- * reads as personaSuffix. Without the flag the variable is removed, so a run
+ * text to dsh as AHV_BOT_SYSTEM_SUFFIX, which the bot patch passes to bot-runner
+ * as systemSuffix (appended verbatim). Without the flag the variable is removed, so a run
  * started from inside a bot turn does not inherit that turn's instructions.
  * @param {string[]} argv - arguments after `run`.
  * @param {Record<string, string | undefined>} env - environment for dsh; not mutated.
  * @returns {{ argv: string[], env: Record<string, string | undefined> }} arguments for dsh and its environment.
- * @throws {Error} message starting `system_file_invalid` when the path is missing, unreadable, over 64 KiB, or not UTF-8.
+ * @throws {Error} message starting `system_file_invalid` when the path is missing, unreadable, over 64 KiB, or not UTF-8, or the flag is repeated or written `--system-file=PATH`.
  */
 export function prepareBotEnv(argv, env) {
   const out = { ...env }
   delete out.AHV_BOT_SYSTEM_SUFFIX
+  if (argv.some(a => a.startsWith('--system-file='))) throw new Error('system_file_invalid: dùng --system-file PATH, không dùng dạng --system-file=PATH')
   const at = argv.indexOf('--system-file')
   if (at < 0) return { argv, env: out }
+  if (argv.indexOf('--system-file', at + 2) >= 0) throw new Error('system_file_invalid: --system-file chỉ được dùng một lần')
   const path = argv[at + 1]
   if (path === undefined || path === '') throw new Error('system_file_invalid: --system-file cần đường dẫn tệp')
   let bytes
@@ -2160,7 +2162,7 @@ export function prepareBotEnv(argv, env) {
 function runBot(rawArgv) {
   // dsh prints the headless app's own help after this line.
   if (rawArgv.includes('--help') || rawArgv.includes('-h')) {
-    process.stdout.write(`ahv run: --system-file PATH   lời dặn thêm vào system prompt cho lần gọi này (personaSuffix, UTF-8, ≤ ${SYSTEM_FILE_MAX_BYTES} byte)\n`)
+    process.stdout.write(`ahv run: --system-file PATH   lời dặn thêm vào cuối system prompt cho lần gọi này (nguyên văn, không nội suy {{…}}, UTF-8, ≤ ${SYSTEM_FILE_MAX_BYTES} byte)\n`)
   }
   // Contract #3: fail-fast credential check TRƯỚC khi spawn dsh. Nếu thiếu
   // key, emit JSONL error taxonomy đúng chuẩn để bot phân loại terminal,

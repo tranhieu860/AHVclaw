@@ -24,6 +24,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-cmdline'
+import type {} from '@deepseek-ai/dsh-system-prompt'
 
 /** Stable Cordis plugin name. */
 export const name = 'bot-runner'
@@ -31,7 +32,7 @@ export const name = 'bot-runner'
 /** Core services required before the bot turn can start. */
 // `llm` is required so a bare `--model` id can be placed on its owning
 // provider without the caller having to know which one that is.
-export const inject = ['agentDefaultModel', 'agents', 'sessions', 'botStartup', 'llm']
+export const inject = ['agentDefaultModel', 'agents', 'sessions', 'botStartup', 'llm', 'systemPrompt']
 
 /** Runner config: everything the bot-startup provider resolved. */
 export interface Config {
@@ -43,6 +44,8 @@ export interface Config {
   readonly output: 'jsonl' | 'text'
   readonly noColor: boolean
   readonly noBanner: boolean
+  /** Caller instructions from `ahv run --system-file`, appended to the system prompt verbatim; `''` adds nothing. */
+  readonly systemSuffix: string
 }
 
 export const Config: z<Config> = z.object({
@@ -54,6 +57,7 @@ export const Config: z<Config> = z.object({
   output: z.union([z.const('jsonl' as const), z.const('text' as const)]).default('jsonl'),
   noColor: z.boolean().default(true),
   noBanner: z.boolean().default(true),
+  systemSuffix: z.string().default(''),
 })
 
 /** Bot public JSONL event taxonomy. */
@@ -438,6 +442,17 @@ export function apply(ctx: Context, config: Config): void {
     throw new Error('bot-runner: the launcher must provide ctx.appExit before the tree mounts')
   }
   const io: BotIo = { stdout: internals.stdout, stderr: internals.stderr, exit }
+
+  // The caller's file is data, not a template: the core persona suffix would
+  // substitute `{{model}}` and throw on any other `{{…}}` group at every step.
+  if (config.systemSuffix !== '') {
+    ctx.systemPrompt.section({
+      name: 'ahv:system-file',
+      order: ctx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_SUFFIX'),
+      interpolate: false,
+      text: config.systemSuffix,
+    })
+  }
 
   const abortHandler = () => io.exit(124)
   process.once('SIGTERM', abortHandler)
