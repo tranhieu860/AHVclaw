@@ -2129,13 +2129,45 @@ export function runnerLoadWatcher(onFailure) {
 }
 
 // ── run (spawn dsh headless + ahv patch + bot patch) ───────────────────
+export const SYSTEM_FILE_MAX_BYTES = 64 * 1024
+
+/**
+ * Strip `--system-file PATH` from the `ahv run` arguments and carry the file's
+ * text to dsh as AHV_BOT_SYSTEM_SUFFIX, which the bot patch passes to bot-runner
+ * as systemSuffix (appended verbatim). Without the flag the variable is removed, so a run
+ * started from inside a bot turn does not inherit that turn's instructions.
+ * @param {string[]} argv - arguments after `run`.
+ * @param {Record<string, string | undefined>} env - environment for dsh; not mutated.
+ * @returns {{ argv: string[], env: Record<string, string | undefined> }} arguments for dsh and its environment.
+ * @throws {Error} message starting `system_file_invalid` when the path is missing, unreadable, over 64 KiB, or not UTF-8, or the flag is repeated or written `--system-file=PATH`.
+ */
+export function prepareBotEnv(argv, env) {
+  const out = { ...env }
+  delete out.AHV_BOT_SYSTEM_SUFFIX
+  if (argv.some(a => a.startsWith('--system-file='))) throw new Error('system_file_invalid: dùng --system-file PATH, không dùng dạng --system-file=PATH')
+  const at = argv.indexOf('--system-file')
+  if (at < 0) return { argv, env: out }
+  if (argv.indexOf('--system-file', at + 2) >= 0) throw new Error('system_file_invalid: --system-file chỉ được dùng một lần')
+  const path = argv[at + 1]
+  if (path === undefined || path === '') throw new Error('system_file_invalid: --system-file cần đường dẫn tệp')
+  let bytes
+  try { bytes = readFileSync(path) } catch (e) { throw new Error(`system_file_invalid: không đọc được ${path}: ${e.code ?? e.message}`) }
+  if (bytes.length > SYSTEM_FILE_MAX_BYTES) throw new Error(`system_file_invalid: ${path} ${bytes.length} byte, quá ${SYSTEM_FILE_MAX_BYTES}`)
+  try { out.AHV_BOT_SYSTEM_SUFFIX = new TextDecoder('utf-8', { fatal: true }).decode(bytes) } catch { throw new Error(`system_file_invalid: ${path} không phải UTF-8`) }
+  return { argv: [...argv.slice(0, at), ...argv.slice(at + 2)], env: out }
+}
+
 // Reuse the working ahv-profile module-resolution: cwd=FORK so pnpm's hoisted
 // @deepseek-ai/* deps resolve, and --patch layers apply on top of headless.
-function runBot(argv) {
+function runBot(rawArgv) {
+  // dsh prints the headless app's own help after this line.
+  if (rawArgv.includes('--help') || rawArgv.includes('-h')) {
+    process.stdout.write(`ahv run: --system-file PATH   lời dặn thêm vào cuối system prompt cho lần gọi này (nguyên văn, không nội suy {{…}}, UTF-8, ≤ ${SYSTEM_FILE_MAX_BYTES} byte)\n`)
+  }
   // Contract #3: fail-fast credential check TRƯỚC khi spawn dsh. Nếu thiếu
   // key, emit JSONL error taxonomy đúng chuẩn để bot phân loại terminal,
   // không lãng phí boot dsh cả tree chỉ để router silent-fail.
-  const outputMode = argv.includes('--output') ? argv[argv.indexOf('--output') + 1] : 'jsonl'
+  const outputMode = rawArgv.includes('--output') ? rawArgv[rawArgv.indexOf('--output') + 1] : 'jsonl'
   if (!process.env.AHV_API_KEY) {
     if (outputMode === 'jsonl') {
       process.stdout.write(JSON.stringify({
@@ -2149,6 +2181,12 @@ function runBot(argv) {
       process.stderr.write('ahv run: missing_credential (AHV_API_KEY chưa set)\n')
     }
     process.exit(1)
+  }
+  let argv, env
+  try {
+    ({ argv, env } = prepareBotEnv(rawArgv, { ...process.env, NO_COLOR: '1' }))
+  } catch (e) {
+    errJson('system_file_invalid', e.message, true, 0, 2)
   }
   const resumeAt = argv.indexOf('--resume')
   const resumeId = resumeAt >= 0 ? argv[resumeAt + 1] : undefined
@@ -2178,7 +2216,6 @@ function runBot(argv) {
     '--',
     ...argv,
   ]
-  const env = { ...process.env, NO_COLOR: '1' }
   const proc = spawn(process.execPath, dshArgs, {
     // stderr is relayed, not inherited: dsh 0.2 only warns when a plugin row
     // fails to load, so a bot-runner that cannot mount leaves the process
@@ -2502,7 +2539,7 @@ function usage() {
   ahv sessions list --json
   ahv sessions show SESSION_ID --json
   ahv sessions latest --json
-  ahv run --prompt-file PATH --cwd DIR [--session-id ID | --resume ID] --output jsonl --no-color --no-banner
+  ahv run --prompt-file PATH --cwd DIR [--session-id ID | --resume ID] [--system-file PATH] --output jsonl --no-color --no-banner
   ahv version
 `)
   process.exit(2)

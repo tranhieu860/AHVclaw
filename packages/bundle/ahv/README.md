@@ -23,7 +23,7 @@ Cần env var `AHV_API_KEY` cho router `auto.ahvchat.com/v1`.
   `Grok-SuperHeavy`.
 - **Web search**: tắt (DeepSeek search cần key riêng ta không có; sẽ
   mount Brave/Tavily/AHV-native trong bản sau).
-- **System prompt**: persona tiếng Việt ngắn gọn.
+- **System prompt**: persona tiếng Việt ngắn gọn. Với `ahv run --system-file F`, bot-runner thêm section `ahv:system-file` (chỗ persona suffix) chứa nguyên văn F, không nội suy `{{…}}`.
 
 ## Plugin thêm so với base
 

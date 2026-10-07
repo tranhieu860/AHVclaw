@@ -33,3 +33,6 @@
         output: !!js ctx.botStartup.output
         noColor: !!js ctx.botStartup.noColor
         noBanner: !!js ctx.botStartup.noBanner
+        # `ahv run --system-file F` passes F's text for that one call; bot-runner
+        # appends it after the AHV persona without `{{…}}` interpolation.
+        systemSuffix: !!js "process.env.AHV_BOT_SYSTEM_SUFFIX || ''"
