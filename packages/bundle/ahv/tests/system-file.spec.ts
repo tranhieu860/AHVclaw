@@ -39,7 +39,7 @@ function mountRunner(ctx: Context, systemSuffix: string) {
   const saved = { stdout: internals.stdout, stderr: internals.stderr }
   internals.stdout = sink; internals.stderr = sink
   try {
-    apply(stub, Config({ prompt: 'hi', cwd: '/tmp/x', systemSuffix }))
+    apply(stub, Config({ prompt: 'hi', cwd: '/tmp/x', output: 'jsonl', noColor: true, noBanner: true, systemSuffix }))
   } finally {
     Object.assign(internals, saved)
   }
