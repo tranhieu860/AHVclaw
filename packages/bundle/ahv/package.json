@@ -65,7 +65,7 @@
     "@deepseek-ai/cordis-plugin-loader": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^",
     "commander": "^15.0.0",
-    "dshmarket": "^1.66.14",
+    "dshmarket": "^1.66.15",
     "superpowers-dsh": "^0.2.0",
     "@linxin666/dsh-web-ui-all": "^0.2.7",
     "dsh-plugin-subscriptions": "^0.9.7",
