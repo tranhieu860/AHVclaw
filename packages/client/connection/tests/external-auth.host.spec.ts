@@ -17,8 +17,8 @@ const foreign = { method: 'GET', url: '/api/x', headers: { host: 'evil.example:3
 describe('external browser authentication', () => {
   it('admits a trusted request without a session cookie', async () => {
     const { connection } = await service(undefined)
-    const service = connection()
-    expect(service.admit(loopback as never)).toEqual({ peer: service.browserPeer })
+    const host = connection()
+    expect(host.admit(loopback as never)).toEqual({ peer: host.browserPeer })
   })
 
   it('still applies the Host/Origin fence', async () => {
