@@ -16,7 +16,6 @@
     { "path": "../../llm/llm" },
     { "path": "../../core/session" },
     { "path": "../../core/system-prompt" },
-    { "path": "../../runtime-diagnostics/invariants" },
     { "path": "../../boot/cmdline" }
   ]
 }
