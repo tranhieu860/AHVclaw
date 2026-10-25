@@ -25,6 +25,7 @@ import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-cmdline'
 import type {} from '@deepseek-ai/dsh-system-prompt'
+import type {} from '@deepseek-ai/dsh-subagent'
 
 /** Stable Cordis plugin name. */
 export const name = 'bot-runner'
@@ -344,6 +345,8 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
   // Streaming text arrives on the live Assistant frame feed, not the durable
   // log. The bot only uses these rows as a "writing the answer" signal.
   let disposeStream: (() => void) | undefined
+  let disposeErrors: (() => void) | undefined
+  let disposeTerminals: (() => void) | undefined
 
   try {
     const setup = (agentCtx: Context) => {
@@ -379,13 +382,33 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
         resumed,
       })
     }
+    // A live Agent failure fails the run unless a later turn/end records a
+    // terminal for it (the same rule as the upstream headless runner).
+    let failure: { error: unknown; atSeq: number } | undefined
+    disposeErrors = ctx.on('agent/error', ({ agent: subject, error }) => {
+      if (subject === agent) failure = { error, atSeq: agent.session.seq }
+    })
+    disposeTerminals = ctx.on('session/event', (session, event) => {
+      if (session === agent.session && event.type === 'turn/end'
+        && failure !== undefined && event.seq >= failure.atSeq) failure = undefined
+    })
     await agent.whenIdle()
     agent.followup(createUserMessage({
       content: [{ type: 'text', text: config.prompt }],
       source: { kind: 'user' },
     }))
-    await agent.whenIdle()
+    // A delegated subagent answers through a later completion notice that
+    // starts another parent turn, so idle is final only once no child runs.
+    const subagents = ctx.get('subagents')
+    while (true) {
+      await agent.whenIdle()
+      const idleSeq = agent.session.seq
+      // Child settlement can wake the parent before the child wait observes it.
+      if (!await subagents?.waitForChildren(agent)
+        && agent.status === 'idle' && agent.session.seq === idleSeq) break
+    }
     await sessions.flush(agent.session)
+    if (failure !== undefined) throw failure.error
 
     // Text mode: also print the last assistant text for backwards compat.
     if (config.output === 'text') io.stdout.write(turnState.lastAssistantText + '\n')
@@ -427,6 +450,8 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
     io.exit(0)
   } finally {
     disposeStream?.()
+    disposeErrors?.()
+    disposeTerminals?.()
     dispose()
   }
 }
