@@ -349,8 +349,12 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
   let disposeTerminals: (() => void) | undefined
 
   try {
+    // The selection routes every request of this Agent (installModelSelection
+    // overrides the request config), so it must carry the chosen model; the
+    // default's reasoning effort applies only when the default was chosen.
+    const sameAsDefault = chosen.provider === selection.provider && chosen.model === selection.model
     const setup = (agentCtx: Context) => {
-      const selected: ModelSelectionRef = { current: selection, assembled: undefined }
+      const selected: ModelSelectionRef = { current: sameAsDefault ? selection : chosen, assembled: undefined }
       installModelSelection(agentCtx, selected)
     }
     const { agent } = resumed
