@@ -47,6 +47,11 @@
 - id: web-search-deepseek
   disabled: true
 
+# dsh 0.2.1 adds the DeepSeek Search and Fetch APIs (api.deepseek.com) under
+# the same DEEPSEEK_API_KEY; nothing may reach DeepSeek from an AHV machine.
+- id: web-deepseek-api
+  disabled: true
+
 # dsh 0.2 base also mounts the native DeepSeek model routes (API key and
 # DeepSeek account). AHV users hold neither, so those models would only show
 # up in the model menu and fail when picked.
