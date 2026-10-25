@@ -24,6 +24,7 @@ Cần env var `AHV_API_KEY` cho router `auto.ahvchat.com/v1`.
 - **Web search**: tắt (DeepSeek search cần key riêng ta không có; sẽ
   mount Brave/Tavily/AHV-native trong bản sau).
 - **System prompt**: persona tiếng Việt ngắn gọn, chỉ dùng biến `{{model}}`/`{{provider}}` (từ lõi 0.2.1 thư mục làm việc do dịch vụ working-directory gửi, không còn `{{cwd}}`). Với `ahv run --system-file F`, bot-runner thêm section `ahv:system-file` (chỗ persona suffix) chứa nguyên văn F, không nội suy `{{…}}`.
+- **`ahv run --resume`** mà thư mục làm việc của phiên đã mất (vd thư mục `/tmp` bị dọn): bot-runner chuyển phiên sang `--cwd` của lần gọi (nếu tồn tại) qua dịch vụ working-directory, model nhận thông báo đổi thư mục. Lõi 0.2.1 tự nó chỉ khôi phục về thư mục gốc, không có thì mọi lượt lỗi.
 - **`ahv run` kết thúc** khi agent rảnh và không còn subagent con chạy: từ lõi 0.2.1, câu trả lời của subagent về bằng thông báo hoàn tất mở thêm một lượt của agent cha. Lỗi `agent/error` không có `turn/end` sau đó làm lượt chạy thất bại (như runner headless của upstream).
 
 ## Plugin thêm so với base

@@ -14,6 +14,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { statSync } from 'node:fs'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
@@ -26,6 +27,8 @@ import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-cmdline'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-subagent'
+import type {} from '@deepseek-ai/dsh-working-directory'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 
 /** Stable Cordis plugin name. */
 export const name = 'bot-runner'
@@ -371,6 +374,7 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
       })
 
     emitLock.session = agent.session
+    if (resumed) await relocateMissingDirectory(ctx, agent, config.cwd)
     disposeStream = ctx.on('agent/assistant-stream', ({ agent: subject, frame }) => {
       if (subject !== agent || frame.type !== 'chunk' || config.output !== 'jsonl') return
       if (frame.chunk.type === 'text-delta' && frame.chunk.text !== '') {
@@ -458,6 +462,33 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
     disposeTerminals?.()
     dispose()
   }
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    // Missing or unreadable: the caller treats both as "cannot run here".
+    return false
+  }
+}
+
+/**
+ * Move a resumed Session whose directory vanished to the caller's `--cwd`.
+ * dsh 0.2.1 restores a missing directory only to the original project and
+ * otherwise fails every turn; the bot reuses a session for days, so its
+ * directory (a `/tmp` workdir, a removed project) can disappear between turns.
+ * The service records the change and tells the model about it.
+ * @param ctx - runner context, with the optional working-directory service.
+ * @param agent - the resumed Agent.
+ * @param cwd - the directory this invocation was given.
+ * @returns once any change is committed.
+ */
+export async function relocateMissingDirectory(ctx: Context, agent: Agent, cwd: string): Promise<void> {
+  const workingDirectory = ctx.get('workingDirectory')
+  if (workingDirectory === undefined || cwd === '') return
+  if (isDirectory(workingDirectory.get(agent.session)) || !isDirectory(cwd)) return
+  await workingDirectory.set(agent, cwd)
 }
 
 /**
