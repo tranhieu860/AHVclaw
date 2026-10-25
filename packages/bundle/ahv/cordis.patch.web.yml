@@ -107,7 +107,7 @@
 # expression from web-app is repeated here.
 - id: connection
   config:
-    trustedHosts: !!js ctx.webRuntime.trustedHosts
+    trustedHosts: !!js ctx.webStartup.trustedHosts
     browserAuth: !!js "process.env.AHV_WEB_AUTH === 'external' ? 'external' : 'token'"
 
 # --- Extras web-app doesn't ship ---------------------------------------
