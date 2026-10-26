@@ -28,8 +28,8 @@ print("absent" if not m else ("disabled" if "disabled: true" in m.group(1) else 
     if [ "$state" = disabled ]; then echo "  PASS  $label: $row disabled"; else echo "  FAIL  $label: $row is $state (renamed upstream? re-check what now sends data out)"; fail=1; fi
   done
 }
-check_profile web session-telemetry-otel otel session-log-deepseek deepseek-account ui-settings-account account-controller -- \
+check_profile web session-telemetry-otel otel session-log-deepseek deepseek-account ui-settings-account account-controller web-search-deepseek web-deepseek-api -- \
   --profile web --patch packages/bundle/ahv/cordis.patch.web.yml
-check_profile bot session-telemetry-otel otel session-log-deepseek deepseek-account -- \
+check_profile bot session-telemetry-otel otel session-log-deepseek deepseek-account web-search-deepseek web-deepseek-api -- \
   --profile headless --patch packages/bundle/ahv/cordis.patch.yml --patch packages/bundle/ahv/cordis.patch.bot.yml
 exit $fail

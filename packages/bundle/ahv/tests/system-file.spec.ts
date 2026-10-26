@@ -22,7 +22,6 @@ async function promptContext() {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt, { personaPrefix: 'Model {{model}}.' })
   ctx.systemPrompt.variable('model', () => 'ahv-qwen38')
-  ctx.systemPrompt.variable('cwd', () => '/tmp/x')
   return ctx
 }
 

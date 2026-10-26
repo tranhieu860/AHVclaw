@@ -3,7 +3,8 @@
 #
 # Four things have to be true, and an update can undo any of them, so this
 # script asserts all four and is safe to re-run:
-#   1. @linxin666/dsh-client-ui-skin-center is a dependency of the web profile
+#   1. @linxin666/dsh-client-ui-skin-center is a dependency of the web profile,
+#      at the version the install closure pins
 #   2. the skin assets live inside that package as skins/ahv/  (pnpm regenerates
 #      the store on install and drops them)
 #   3. the profile's patch layer loads the plugin — installing the package alone
@@ -25,21 +26,32 @@ if [ ! -d "$SKIN_SRC" ]; then
   exit 1
 fi
 
-# 1. The plugin package. Pin to whatever version the web UI bundle declares so
-# the hooks contract matches the running app; fall back to latest if the bundle
-# isn't installed.
-if [ -d "$PROFILE" ] && [ ! -d "$PROFILE/node_modules/$PKG" ]; then
-  WANT=$(node -e '
-    const fs = require("fs")
-    const p = process.argv[1] + "/node_modules/@linxin666/dsh-web-ui-all/package.json"
-    try { console.log(JSON.parse(fs.readFileSync(p, "utf8")).dependencies[process.argv[2]] || "latest") }
-    catch { console.log("latest") }
-  ' "$(dirname "$PROFILE")" "$PKG" 2>/dev/null || echo latest)
-  echo "[ahv-skin] cài $PKG@$WANT vào profile web..."
-  (cd "$PROFILE" && PNPM_CONFIG_MINIMUM_RELEASE_AGE=0 pnpm add "$PKG@$WANT") \
-    || echo "[ahv-skin] pnpm add fail — skin sẽ không nạp được"
+# 1. The plugin package, at exactly the version this install's own closure
+# carries (the one @linxin666/dsh-web-ui-all depends on, which the AHV skin is
+# tested against). Never "latest": skin-center 0.4 ships its own default skin,
+# does not load "ahv", and once dsh 0.2.1 satisfies its peer it paints that
+# skin over the AHV brand. A profile holding any other version — an earlier
+# run of this script installed "latest" — is moved back to the pinned one.
+WANT=$(node -e '
+  const { createRequire } = require("module")
+  try {
+    const bundle = createRequire(process.argv[1] + "/package.json")
+    const webUi = createRequire(bundle.resolve("@linxin666/dsh-web-ui-all/package.json"))
+    console.log(webUi(process.argv[2] + "/package.json").version)
+  } catch { console.log("") }
+' "$FORK/packages/bundle/ahv" "$PKG" 2>/dev/null || true)
+if [ -z "$WANT" ]; then
+  echo "[ahv-skin] không thấy $PKG trong cây cài — không đổi profile web"
+elif [ -d "$PROFILE" ]; then
+  HAVE=$(node -e '
+    try { console.log(require(process.argv[1] + "/package.json").version) } catch { console.log("") }
+  ' "$PROFILE/node_modules/$PKG" 2>/dev/null || true)
+  if [ "$HAVE" != "$WANT" ]; then
+    echo "[ahv-skin] cài $PKG@$WANT vào profile web${HAVE:+ (đang $HAVE)}..."
+    (cd "$PROFILE" && PNPM_CONFIG_MINIMUM_RELEASE_AGE=0 pnpm add --save-exact "$PKG@$WANT") \
+      || echo "[ahv-skin] pnpm add fail — skin sẽ không nạp được"
+  fi
 fi
-
 # 2. Skin assets, into every copy of the package that resolution can reach.
 # Plain globs, not `ls`: a glob that matches nothing expands to itself and is
 # filtered out by the -d test, whereas `ls` exits non-zero and set -e kills the

@@ -23,7 +23,9 @@ Cần env var `AHV_API_KEY` cho router `auto.ahvchat.com/v1`.
   `Grok-SuperHeavy`.
 - **Web search**: tắt (DeepSeek search cần key riêng ta không có; sẽ
   mount Brave/Tavily/AHV-native trong bản sau).
-- **System prompt**: persona tiếng Việt ngắn gọn. Với `ahv run --system-file F`, bot-runner thêm section `ahv:system-file` (chỗ persona suffix) chứa nguyên văn F, không nội suy `{{…}}`.
+- **System prompt**: persona tiếng Việt ngắn gọn, chỉ dùng biến `{{model}}`/`{{provider}}` (từ lõi 0.2.1 thư mục làm việc do dịch vụ working-directory gửi, không còn `{{cwd}}`). Với `ahv run --system-file F`, bot-runner thêm section `ahv:system-file` (chỗ persona suffix) chứa nguyên văn F, không nội suy `{{…}}`.
+- **`ahv run --resume`** mà thư mục gốc của phiên (header `cwd`) đã mất (vd thư mục `/tmp` hay `~/.ahv/versions/*` bị dọn): bot-runner không chạy lượt, in `{"type":"error","code":"internal_error","terminal":true,"reason":"session_dir_missing","message":"Session \"…\" not found at its project directory …"}` và thoát 1; gói bot coi đây là phiên mất ("session" + "not found") và mở phiên mới ở thư mục dự án. Lõi 0.2.1 gắn sandbox và quyền ghi vào thư mục gốc này, nên chuyển phiên sang `--cwd` không làm lệnh chạy được. Thư mục hiện tại (sau `cd`) mất mà thư mục gốc còn thì dịch vụ working-directory tự khôi phục về thư mục gốc.
+- **`ahv run` kết thúc** khi agent rảnh và không còn subagent con chạy: từ lõi 0.2.1, câu trả lời của subagent về bằng thông báo hoàn tất mở thêm một lượt của agent cha. Lỗi `agent/error` không có `turn/end` sau đó làm lượt chạy thất bại (như runner headless của upstream).
 
 ## Plugin thêm so với base
 

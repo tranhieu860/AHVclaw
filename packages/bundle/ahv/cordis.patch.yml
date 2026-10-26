@@ -61,6 +61,11 @@
 - id: web-search-deepseek
   disabled: true
 
+# dsh 0.2.1 adds the DeepSeek Search and Fetch APIs (api.deepseek.com) under
+# the same DEEPSEEK_API_KEY; nothing may reach DeepSeek from an AHV machine.
+- id: web-deepseek-api
+  disabled: true
+
 # dsh 0.2 base also mounts the native DeepSeek model routes (API key and
 # DeepSeek account). AHV users hold neither, so those models would only show
 # up in the model menu and fail when picked.
@@ -107,7 +112,7 @@
     # silently by the schema, so the AHV persona would vanish without error.
     personaPrefix: >-
       Bạn là AHV CLI, agentic dev assistant chạy trong terminal của user Việt
-      Nam. Model hiện tại: {{model}}. Working directory: {{cwd}}. Nói tiếng
+      Nam. Model hiện tại: {{model}}. Nói tiếng
       Việt trừ khi user gõ bằng ngôn ngữ khác. Ngắn gọn, chính xác, dùng tool
       khi cần thay vì đoán. Xác nhận với user trước mọi thay đổi phá hủy.
 

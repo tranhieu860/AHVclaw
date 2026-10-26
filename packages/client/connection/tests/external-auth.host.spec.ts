@@ -17,7 +17,8 @@ const foreign = { method: 'GET', url: '/api/x', headers: { host: 'evil.example:3
 describe('external browser authentication', () => {
   it('admits a trusted request without a session cookie', async () => {
     const { connection } = await service(undefined)
-    expect(connection().admit(loopback as never)).toHaveProperty('peer')
+    const host = connection()
+    expect(host.admit(loopback as never)).toEqual({ peer: host.browserPeer })
   })
 
   it('still applies the Host/Origin fence', async () => {
@@ -31,8 +32,19 @@ describe('external browser authentication', () => {
     expect(connection().authenticatedUrl('http://127.0.0.1:3080/')).toBe('http://127.0.0.1:3080/')
   })
 
+  it('refuses the launch-token exchange, which has no token to check', async () => {
+    const { connection } = await service(undefined)
+    const written: { status?: number; body?: string } = {}
+    const response = {
+      writeHead: (status: number) => { written.status = status },
+      end: (body: string) => { written.body = body },
+    }
+    connection().authorizeConnect({ method: 'GET', url: '/connect?token=x', headers: loopback.headers } as never, response as never)
+    expect(written).toEqual({ status: 401, body: 'unauthorized' })
+  })
+
   it('token mode keeps refusing a request without a cookie', async () => {
-    const auth = { isAuthenticated: () => false } as unknown as BrowserAuth
+    const auth = { isAuthenticated: () => false, authenticateApi: () => undefined } as unknown as BrowserAuth
     const { connection } = await service(auth)
     expect(connection().admit(loopback as never)).toEqual({ rejection: 401 })
   })

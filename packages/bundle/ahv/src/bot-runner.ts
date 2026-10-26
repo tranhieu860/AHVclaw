@@ -14,6 +14,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { statSync } from 'node:fs'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
@@ -25,6 +26,7 @@ import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-cmdline'
 import type {} from '@deepseek-ai/dsh-system-prompt'
+import type {} from '@deepseek-ai/dsh-subagent'
 
 /** Stable Cordis plugin name. */
 export const name = 'bot-runner'
@@ -67,7 +69,7 @@ type BotEvent =
   | { type: 'tool_status'; name: string; status: 'running' | 'ok' | 'error'; summary: string }
   | { type: 'assistant_final'; text: string }
   | { type: 'turn_end'; reason: 'completed' | 'stopped' | 'error'; usage: { input_tokens: number; output_tokens: number } }
-  | { type: 'error'; code: BotErrorCode; terminal: boolean; retry_after_sec: number; message: string }
+  | { type: 'error'; code: BotErrorCode; terminal: boolean; retry_after_sec: number; message: string; reason?: 'session_dir_missing' }
 
 /** Machine-parseable error codes bot dispatchers rely on. */
 type BotErrorCode =
@@ -344,10 +346,16 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
   // Streaming text arrives on the live Assistant frame feed, not the durable
   // log. The bot only uses these rows as a "writing the answer" signal.
   let disposeStream: (() => void) | undefined
+  let disposeErrors: (() => void) | undefined
+  let disposeTerminals: (() => void) | undefined
 
   try {
+    // The selection routes every request of this Agent (installModelSelection
+    // overrides the request config), so it must carry the chosen model; the
+    // default's reasoning effort applies only when the default was chosen.
+    const sameAsDefault = chosen.provider === selection.provider && chosen.model === selection.model
     const setup = (agentCtx: Context) => {
-      const selected: ModelSelectionRef = { current: selection, assembled: undefined }
+      const selected: ModelSelectionRef = { current: sameAsDefault ? selection : chosen, assembled: undefined }
       installModelSelection(agentCtx, selected)
     }
     const { agent } = resumed
@@ -364,6 +372,11 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
       })
 
     emitLock.session = agent.session
+    const missingDirectory = resumed ? missingSessionDirectory(agent.session) : undefined
+    if (missingDirectory !== undefined) {
+      reportMissingSessionDirectory(io, agent.session.header.id, missingDirectory, config.output)
+      return
+    }
     disposeStream = ctx.on('agent/assistant-stream', ({ agent: subject, frame }) => {
       if (subject !== agent || frame.type !== 'chunk' || config.output !== 'jsonl') return
       if (frame.chunk.type === 'text-delta' && frame.chunk.text !== '') {
@@ -379,13 +392,33 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
         resumed,
       })
     }
+    // A live Agent failure fails the run unless a later turn/end records a
+    // terminal for it (the same rule as the upstream headless runner).
+    let failure: { error: unknown; atSeq: number } | undefined
+    disposeErrors = ctx.on('agent/error', ({ agent: subject, error }) => {
+      if (subject === agent) failure = { error, atSeq: agent.session.seq }
+    })
+    disposeTerminals = ctx.on('session/event', (session, event) => {
+      if (session === agent.session && event.type === 'turn/end'
+        && failure !== undefined && event.seq >= failure.atSeq) failure = undefined
+    })
     await agent.whenIdle()
     agent.followup(createUserMessage({
       content: [{ type: 'text', text: config.prompt }],
       source: { kind: 'user' },
     }))
-    await agent.whenIdle()
+    // A delegated subagent answers through a later completion notice that
+    // starts another parent turn, so idle is final only once no child runs.
+    const subagents = ctx.get('subagents')
+    while (true) {
+      await agent.whenIdle()
+      const idleSeq = agent.session.seq
+      // Child settlement can wake the parent before the child wait observes it.
+      if (!await subagents?.waitForChildren(agent)
+        && agent.status === 'idle' && agent.session.seq === idleSeq) break
+    }
     await sessions.flush(agent.session)
+    if (failure !== undefined) throw failure.error
 
     // Text mode: also print the last assistant text for backwards compat.
     if (config.output === 'text') io.stdout.write(turnState.lastAssistantText + '\n')
@@ -427,8 +460,55 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
     io.exit(0)
   } finally {
     disposeStream?.()
+    disposeErrors?.()
+    disposeTerminals?.()
     dispose()
   }
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    // Missing or unreadable: the caller treats both as "cannot run here".
+    return false
+  }
+}
+
+/**
+ * Find the project directory a resumed Session can no longer run in.
+ * dsh 0.2.1 confines tools to the Session header `cwd`, and its
+ * working-directory service restores a vanished directory only to that header
+ * `cwd`; once the header directory is gone, every tool fails inside the sandbox
+ * (`bwrap: Can't find source path`), and moving the Session elsewhere keeps the
+ * write permission on the missing path.
+ * @param session - the resumed Session.
+ * @returns the missing header directory, or undefined when the Session has none or it exists.
+ */
+export function missingSessionDirectory(session: Session): string | undefined {
+  const root = session.header.cwd
+  return root === undefined || isDirectory(root) ? undefined : root
+}
+
+/**
+ * Fail a resume whose Session project directory is gone, without starting a turn.
+ * The row is the bot's "session not found" error: `code: internal_error`,
+ * `terminal: true`, and a message containing "session" and "not found", so the
+ * bot forgets the id and opens a fresh Session in its project directory;
+ * `reason: session_dir_missing` names the cause. The Session log is left as is.
+ * @param io - process-facing effects.
+ * @param sessionId - the resumed Session id.
+ * @param directory - the missing header directory.
+ * @param output - the requested output mode.
+ */
+function reportMissingSessionDirectory(io: BotIo, sessionId: string, directory: string, output: 'jsonl' | 'text'): void {
+  const message = `Session "${sessionId}" not found at its project directory ${JSON.stringify(directory)}; start a new session`
+  if (output === 'jsonl') {
+    emit(io, { type: 'error', code: 'internal_error', terminal: true, retry_after_sec: 0, message, reason: 'session_dir_missing' })
+  } else {
+    io.stderr.write(`ahv-bot: internal_error: ${message}\n`)
+  }
+  io.exit(1)
 }
 
 /**

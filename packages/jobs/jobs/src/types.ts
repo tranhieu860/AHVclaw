@@ -137,7 +137,7 @@ export interface JobAppendOptions {
  * throwing, so a producer's trailing flush cannot break its own teardown path.
  */
 export interface JobHandle {
-  /** The registry-issued id (`<kind>-N`). */
+  /** The registry-issued id (`<kind>-<short-uuid>`). */
   readonly id: JobId
   /**
    * Append one chunk to the output ring. Offsets advance by the chunk's UTF-8
@@ -177,7 +177,7 @@ export interface JobHooks {
  * the output ring.
  */
 export interface JobSpec {
-  /** Producer kind — also the id prefix (`bash`, `subagent`, …). */
+  /** Producer kind — also the id prefix (`bash`, …). */
   kind: JobKind
   /** One-line model-facing label (the command; the delegation description). */
   label: string
@@ -188,6 +188,8 @@ export interface JobSpec {
    * caller until service disposal.
    */
   owner?: SessionId
+  /** Creating tool invocation, retained in the durable lifecycle records. */
+  toolCall?: JobToolCall
   /**
    * Optional UTF-8 byte cap for each complete model-facing completion notice or
    * output read, including controller status metadata. Independent of ring
