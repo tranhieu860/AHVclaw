@@ -115,6 +115,22 @@ describe('subagent catalog projection', () => {
     ])
   })
 
+  it('omits external executions recorded by catalog payload version 2', () => {
+    const events: SessionEvent[] = [
+      fact(0, 'local', 1, { mode: 'one-shot' }),
+      { type: 'subagent/catalog', seq: SessionSeq(1), time: 0,
+        data: { version: 2, childId: SessionId('external'), childCreatedAt: 2, mode: 'external', label: 'codex' } },
+      { type: 'subagent/catalog', seq: SessionSeq(2), time: 0,
+        data: { version: 2, childId: SessionId('unlabeled'), childCreatedAt: 3, mode: 'external' } },
+    ]
+    const state = fold(events)
+
+    expect(state).toEqual(fold(events.slice(0, 1)))
+    expect(subagentCatalogProjectionDefinition.wire.view(state)).toEqual([
+      { id: SessionId('local'), createdAt: 1, mode: 'one-shot' },
+    ])
+  })
+
   it('validates recursive chunk state and materializes every label variant in event order', () => {
     const events: SessionEvent[] = [
       fact(0, 'child-b', 1, { mode: 'one-shot' }),
@@ -160,6 +176,9 @@ describe('subagent catalog projection', () => {
     { version: 9, childId: 'child', childCreatedAt: 0, mode: 'one-shot' },
     { version: 0, childId: 'child', childCreatedAt: 0, mode: 'continuable' },
     { version: 0, childId: 'child', childCreatedAt: -1, mode: 'one-shot' },
+    { version: 2, childId: 'child', childCreatedAt: 0, mode: 'one-shot' },
+    { version: 2, childId: 'child', childCreatedAt: 0, mode: 'external', label: 1 },
+    { version: 1, childId: 'child', childCreatedAt: 0, mode: 'external' },
   ])('refuses to restore a catalog containing an invalid fact: %j', async (data) => {
     const ctx = new Context()
     try {
