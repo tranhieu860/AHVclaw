@@ -31,10 +31,13 @@ export type {
   JobOutputRead,
   JobOutputSource,
   JobRead,
+  JobRegisteredData,
+  JobSettledData,
   JobSettleCause,
   JobSourceRead,
   JobSpec,
   JobStatus,
+  JobToolCall,
   JobView,
 } from './types.ts'
 

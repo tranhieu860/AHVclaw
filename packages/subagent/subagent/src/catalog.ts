@@ -24,15 +24,26 @@ type KnownCatalogMode =
   | { readonly mode: 'one-shot'; readonly label?: string }
   | { readonly mode: 'continuable'; readonly label: string }
 
-/** Parent catalog v0 records known modes; v1 also retains children with unknown mode. */
+type CatalogChildIdentity = {
+  readonly childId: SessionId
+  readonly childCreatedAt: number
+}
+
+/** Catalog facts naming a local child Session: v0 records known modes; v1 also retains children with unknown mode. */
+type LocalSubagentCatalogEvent = CatalogChildIdentity & (
+  | ({ readonly version: 0 } & KnownCatalogMode)
+  | ({ readonly version: 1 } & (KnownCatalogMode | { readonly mode: 'unknown'; readonly label?: string }))
+)
+
+/**
+ * Parent catalog v0 records local modes, v1 adds unknown children, and v2
+ * records external executions. Only dsh 0.2.1 and later write v2; this build
+ * reads it and omits the execution from the catalog because it has no local
+ * child Session.
+ */
 export type SubagentCatalogEvent =
-  & {
-    readonly childId: SessionId
-    readonly childCreatedAt: number
-  } & (
-    | ({ readonly version: 0 } & KnownCatalogMode)
-    | ({ readonly version: 1 } & (KnownCatalogMode | { readonly mode: 'unknown'; readonly label?: string }))
-  )
+  | LocalSubagentCatalogEvent
+  | (CatalogChildIdentity & { readonly version: 2; readonly mode: 'external'; readonly label?: string })
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
@@ -47,7 +58,7 @@ declare module '@deepseek-ai/dsh-session/types' {
 /** Host fold state for one parent catalog. */
 export interface SubagentCatalogState {
   readonly inheritedEventCount: SessionLogOffset
-  readonly head?: ChunkedList<SubagentCatalogEvent> | undefined
+  readonly head?: ChunkedList<LocalSubagentCatalogEvent> | undefined
 }
 
 const sessionIdSchema = z.string() as unknown as z.ZodType<SessionId>
@@ -66,11 +77,19 @@ const continuableCatalogSchema = z.object({
   label: z.string(),
 }).strict()
 const unknownCatalogSchema = oneShotCatalogSchema.extend({ version: z.literal(1), mode: z.literal('unknown') })
-const eventDataSchema = z.union([
+const localEventDataSchema = z.union([
   oneShotCatalogSchema,
   continuableCatalogSchema,
   unknownCatalogSchema,
-]) as z.ZodType<SubagentCatalogEvent>
+]) as z.ZodType<LocalSubagentCatalogEvent>
+const externalCatalogSchema = z.object({
+  version: z.literal(2),
+  childId: sessionIdSchema,
+  childCreatedAt: z.number().int().nonnegative(),
+  mode: z.literal('external'),
+  label: z.string().optional(),
+}).strict()
+const eventDataSchema = z.union([localEventDataSchema, externalCatalogSchema]) as z.ZodType<SubagentCatalogEvent>
 const viewSchema = z.array(z.union([
   oneShotCatalogSchema.omit({ version: true, childId: true, childCreatedAt: true }).extend({
     id: sessionIdSchema,
@@ -87,7 +106,7 @@ const viewSchema = z.array(z.union([
 ])) as z.ZodType<SubagentCatalogEntry[]>
 const stateSchema: z.ZodType<SubagentCatalogState> = z.object({
   inheritedEventCount: z.number().int().nonnegative() as unknown as z.ZodType<SessionLogOffset>,
-  head: chunkedListSchema(eventDataSchema).optional(),
+  head: chunkedListSchema(localEventDataSchema).optional(),
 }).strict()
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
@@ -128,7 +147,9 @@ export const subagentCatalogProjectionDefinition = {
   init: (_header: SessionHeader, inheritedEventCount: SessionLogOffset) => ({ inheritedEventCount }),
   apply: (state, event: SessionEvent) => {
     if (event.type !== 'subagent/catalog' || event.seq < state.inheritedEventCount) return state
-    return { ...state, head: appendChunkedList(state.head, eventDataSchema.parse(event.data)) }
+    const data = eventDataSchema.parse(event.data)
+    if (data.version === 2) return state
+    return { ...state, head: appendChunkedList(state.head, data) }
   },
   stateVersion: 3,
   wire: { viewSchema, view: subagentCatalogEntries },

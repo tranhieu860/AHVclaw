@@ -171,6 +171,17 @@ interface SessionEventMap {
    * so tolerating concurrent writers needs a signal beyond the log.
    */
   'session/end-seed': { inherited?: true }
+  /**
+   * Effective working directory recorded by dsh 0.2.1 and later; the immutable
+   * Session header retains the original project. This build never appends it
+   * and does not apply it: tools here keep resolving from the Session
+   * header's `cwd`. The model-visible notice of the change is a separate
+   * `user/message`, so replay is unchanged.
+   */
+  'working-directory/change': {
+    /** Absolute directory used by subsequent directory-based operations. */
+    cwd: string
+  }
 }
 ```
 
