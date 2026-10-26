@@ -13,6 +13,9 @@ type Listener = (...args: never[]) => void
 interface Harness {
   readonly agent: object
   emitTurn(text: string): void
+  /** Append a turn/end; `seq` defaults to the next sequence number. */
+  emitEnd(reason: object, seq?: number): void
+  setSeq(seq: number): void
   emit(name: string, ...args: unknown[]): void
 }
 
@@ -34,6 +37,11 @@ async function runBot(script: {
     emit(name, ...args) {
       for (const listener of listeners.get(name) ?? []) (listener as (...a: unknown[]) => void)(...args)
     },
+    emitEnd(reason, seq) {
+      if (seq === undefined) session.seq += 1
+      harness.emit('session/event', session, { type: 'turn/end', seq: seq ?? session.seq, data: { reason } })
+    },
+    setSeq(seq) { session.seq = seq },
     emitTurn(text) {
       session.seq += 1
       harness.emit('session/event', session, { type: 'assistant/message', seq: session.seq, data: { message: { content: [{ type: 'text', text }] } } })
@@ -105,5 +113,31 @@ describe('bot-runner with subagent activations', () => {
     })
     expect(failed.code).toBe(1)
     expect(failed.stdout).toContain('provider exploded')
+  })
+
+  it('reports the turn/end error after an agent error instead of the error itself', async () => {
+    const { code, stdout } = await runBot({
+      followup: (h) => {
+        h.emit('agent/error', { agent: h.agent, error: new Error('provider exploded') })
+        h.emitEnd({ kind: 'error', error: { message: 'tool crashed' } })
+      },
+    })
+    expect(code).toBe(2)
+    const rows = stdout.split('\n').filter(Boolean).map(line => JSON.parse(line) as { type: string; code?: string; message?: string })
+    expect(rows.filter(row => row.type === 'error')).toEqual([
+      { type: 'error', code: 'tool_error', terminal: false, retry_after_sec: 5, message: 'Turn failed: tool crashed' },
+    ])
+  })
+
+  it('keeps an agent error that only an older turn/end precedes', async () => {
+    const { code, stdout } = await runBot({
+      followup: (h) => {
+        h.setSeq(5)
+        h.emit('agent/error', { agent: h.agent, error: new Error('provider exploded') })
+        h.emitEnd({ kind: 'completed' }, 4)
+      },
+    })
+    expect(code).toBe(1)
+    expect(stdout).toContain('provider exploded')
   })
 })

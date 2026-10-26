@@ -24,8 +24,12 @@ Upstream ghi mọi thay đổi cần sửa cấu hình/mã ở `docs/upgrade-gui
   `session_meta` báo X.
 - Giao việc cho subagent: lõi mới trả lời của subagent về sau bằng một lượt nữa;
   `ahv run` chờ tới khi không còn subagent chạy rồi mới thoát.
-- Phiên mà thư mục làm việc đã bị xoá: lõi mới lỗi mọi lượt; `ahv run --resume`
-  chuyển phiên sang `--cwd` của lần gọi và báo model.
+- Phiên mà thư mục gốc (header `cwd`, vd `~/.ahv/versions/v0.2.60` đã dọn) bị
+  xoá: lõi mới gắn sandbox và quyền ghi vào thư mục đó nên mọi lệnh hỏng;
+  `ahv run --resume` không chạy lượt mà báo lỗi `internal_error` "Session … not
+  found" (`reason: session_dir_missing`), gói bot hiện tại mở phiên mới ở thư
+  mục dự án (mất ngữ cảnh phiên cũ, lệnh chạy được). v0.2.79 cũng hỏng lệnh
+  trong phiên như vậy (`spawn bwrap ENOENT`).
 - Giữ nguyên: tắt gửi dữ liệu về DeepSeek (thêm tắt tìm kiếm/fetch qua
   api.deepseek.com mới của lõi), kho tài khoản không bị xoá khi làm mới lỗi,
   thương hiệu AHV trên web, hợp đồng `ahv run` của bot.
@@ -82,7 +86,7 @@ Commit gộp chạy lefthook (lint, third-party notices, ghép bản dịch) —
 | `apps/cli/src/bin.ts` | `withAhvDefaultProfile()` | lấy bản upstream, cấy lại hàm quanh `process.argv.slice(2)` trong `parseDshArgs(...)` (rc.2: thêm tham số thứ 3 `manageDesktopProfile`; 0.2.1 không đổi) |
 | `packages/boot/app-boot/src/profile.ts` | profile `ahv`, `ahv-web` | thêm vào `PROFILE_TEMPLATES` theo định dạng mới |
 | `packages/bundle/ahv/**` | bundle AHV (router, persona, plugin, bot-runner) | của AHV; soát id dòng base/headless còn tồn tại, khoá cấu hình đổi tên (0.2: `persona` → `personaPrefix`), dòng upstream đã đưa vào base (0.2: storage, projection-cache) |
-| `packages/bundle/ahv/src/bot-runner.ts` | `ahv run`: JSONL cho bot, `--model` (lựa chọn gắn vào Agent là model đã chọn), `--system-file` (section `ahv:system-file`, không nội suy), chờ subagent con + `agent/error` như runner headless upstream, `--resume` phiên mất thư mục → `--cwd` | mỗi lần gộp so với `packages/bundle/headless/src/index.ts` của upstream và cấy lại thay đổi của vòng chờ; test `packages/bundle/ahv/tests/*.spec.ts` |
+| `packages/bundle/ahv/src/bot-runner.ts` | `ahv run`: JSONL cho bot, `--model` (lựa chọn gắn vào Agent là model đã chọn), `--system-file` (section `ahv:system-file`, không nội suy), chờ subagent con + `agent/error` như runner headless upstream, `--resume` phiên mất thư mục gốc → lỗi `session_dir_missing` để bot mở phiên mới | mỗi lần gộp so với `packages/bundle/headless/src/index.ts` của upstream và cấy lại thay đổi của vòng chờ; test `packages/bundle/ahv/tests/*.spec.ts` |
 | `packages/bundle/ahv/package.json` | ngoài plugin, khai các gói lõi mà plugin AHV đòi làm peer (`workspace:^`: client-*, settings, tools, commands, attachment, home-paths, host-webserver, web) | thiếu thì lõi mới không thoả khoảng peer cũ của plugin, `pnpm install` đi tìm bản 0.1/0.2.0 trên npm và hỏng (`ERR_PNPM_NO_MATCHING_VERSION`); peer mới của plugin thì thêm vào đây |
 | `packages/session/session-list-metadata` | projection cho `ahv run` | đồng bộ với `sessionListMetadata` của session-controller |
 | `packages/session/session-format-v0-to-v1/src/ahv-fork-legacy.ts` | chuẩn hoá phiên do lõi 0.1.1-rc.1 ghi | giữ; thiếu là mọi hội thoại bot cũ bị từ chối |

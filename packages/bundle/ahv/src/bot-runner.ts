@@ -27,8 +27,6 @@ import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-cmdline'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-subagent'
-import type {} from '@deepseek-ai/dsh-working-directory'
-import type { Agent } from '@deepseek-ai/dsh-agent'
 
 /** Stable Cordis plugin name. */
 export const name = 'bot-runner'
@@ -71,7 +69,7 @@ type BotEvent =
   | { type: 'tool_status'; name: string; status: 'running' | 'ok' | 'error'; summary: string }
   | { type: 'assistant_final'; text: string }
   | { type: 'turn_end'; reason: 'completed' | 'stopped' | 'error'; usage: { input_tokens: number; output_tokens: number } }
-  | { type: 'error'; code: BotErrorCode; terminal: boolean; retry_after_sec: number; message: string }
+  | { type: 'error'; code: BotErrorCode; terminal: boolean; retry_after_sec: number; message: string; reason?: 'session_dir_missing' }
 
 /** Machine-parseable error codes bot dispatchers rely on. */
 type BotErrorCode =
@@ -374,7 +372,11 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
       })
 
     emitLock.session = agent.session
-    if (resumed) await relocateMissingDirectory(ctx, agent, config.cwd)
+    const missingDirectory = resumed ? missingSessionDirectory(agent.session) : undefined
+    if (missingDirectory !== undefined) {
+      reportMissingSessionDirectory(io, agent.session.header.id, missingDirectory, config.output)
+      return
+    }
     disposeStream = ctx.on('agent/assistant-stream', ({ agent: subject, frame }) => {
       if (subject !== agent || frame.type !== 'chunk' || config.output !== 'jsonl') return
       if (frame.chunk.type === 'text-delta' && frame.chunk.text !== '') {
@@ -474,21 +476,39 @@ function isDirectory(path: string): boolean {
 }
 
 /**
- * Move a resumed Session whose directory vanished to the caller's `--cwd`.
- * dsh 0.2.1 restores a missing directory only to the original project and
- * otherwise fails every turn; the bot reuses a session for days, so its
- * directory (a `/tmp` workdir, a removed project) can disappear between turns.
- * The service records the change and tells the model about it.
- * @param ctx - runner context, with the optional working-directory service.
- * @param agent - the resumed Agent.
- * @param cwd - the directory this invocation was given.
- * @returns once any change is committed.
+ * Find the project directory a resumed Session can no longer run in.
+ * dsh 0.2.1 confines tools to the Session header `cwd`, and its
+ * working-directory service restores a vanished directory only to that header
+ * `cwd`; once the header directory is gone, every tool fails inside the sandbox
+ * (`bwrap: Can't find source path`), and moving the Session elsewhere keeps the
+ * write permission on the missing path.
+ * @param session - the resumed Session.
+ * @returns the missing header directory, or undefined when the Session has none or it exists.
  */
-export async function relocateMissingDirectory(ctx: Context, agent: Agent, cwd: string): Promise<void> {
-  const workingDirectory = ctx.get('workingDirectory')
-  if (workingDirectory === undefined || cwd === '') return
-  if (isDirectory(workingDirectory.get(agent.session)) || !isDirectory(cwd)) return
-  await workingDirectory.set(agent, cwd)
+export function missingSessionDirectory(session: Session): string | undefined {
+  const root = session.header.cwd
+  return root === undefined || isDirectory(root) ? undefined : root
+}
+
+/**
+ * Fail a resume whose Session project directory is gone, without starting a turn.
+ * The row is the bot's "session not found" error: `code: internal_error`,
+ * `terminal: true`, and a message containing "session" and "not found", so the
+ * bot forgets the id and opens a fresh Session in its project directory;
+ * `reason: session_dir_missing` names the cause. The Session log is left as is.
+ * @param io - process-facing effects.
+ * @param sessionId - the resumed Session id.
+ * @param directory - the missing header directory.
+ * @param output - the requested output mode.
+ */
+function reportMissingSessionDirectory(io: BotIo, sessionId: string, directory: string, output: 'jsonl' | 'text'): void {
+  const message = `Session "${sessionId}" not found at its project directory ${JSON.stringify(directory)}; start a new session`
+  if (output === 'jsonl') {
+    emit(io, { type: 'error', code: 'internal_error', terminal: true, retry_after_sec: 0, message, reason: 'session_dir_missing' })
+  } else {
+    io.stderr.write(`ahv-bot: internal_error: ${message}\n`)
+  }
+  io.exit(1)
 }
 
 /**

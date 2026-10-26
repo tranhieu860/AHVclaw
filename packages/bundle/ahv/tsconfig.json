@@ -17,7 +17,6 @@
     { "path": "../../core/session" },
     { "path": "../../core/system-prompt" },
     { "path": "../../boot/cmdline" },
-    { "path": "../../subagent/subagent" },
-    { "path": "../../session/working-directory" }
+    { "path": "../../subagent/subagent" }
   ]
 }
