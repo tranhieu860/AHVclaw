@@ -18,7 +18,7 @@ function check(name, fn) {
 
 const live = [
   { id: 'grok-4.6', provider: 'grok', provider_name: 'Grok (Subscription)' },
-  { id: 'ahv-qwen38', provider: 'ahv-router', provider_name: 'AHV Router' },
+  { id: 'AHV-Holding', provider: 'ahv-router', provider_name: 'AHV Router' },
 ]
 const cache = {
   models: [

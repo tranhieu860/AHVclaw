@@ -100,7 +100,14 @@ export function grantShippedPlugins(fork, dshHome, profile) {
 }
 
 /** The AHV default when the user never chose one. */
-export const AHV_DEFAULT_MODEL = Object.freeze({ provider: 'ahv-router', model: 'ahv-qwen38', reasoningEffort: '' })
+export const AHV_DEFAULT_MODEL = Object.freeze({ provider: 'ahv-router', model: 'AHV-Holding', reasoningEffort: '' })
+
+/**
+ * Models AHV no longer serves, and what a saved choice of one runs on instead.
+ * ahv-qwen38 existed only behind the old router on #1; AHV AI answers it with
+ * model_not_found, so a settings file still naming it would fail every turn (#976).
+ */
+export const RETIRED_MODELS = Object.freeze({ 'ahv-qwen38': 'AHV-Holding' })
 const SAFE_VALUE = /^[A-Za-z0-9._:/@+-]{1,128}$/
 
 function unquote(value) {
@@ -114,7 +121,9 @@ function pickSelection(fields) {
   const model = unquote(fields.model ?? '')
   const effort = unquote(fields.reasoningEffort ?? '')
   if (!SAFE_VALUE.test(provider) || !SAFE_VALUE.test(model)) return undefined
-  return { provider, model, reasoningEffort: SAFE_VALUE.test(effort) ? effort : '' }
+  const reasoningEffort = SAFE_VALUE.test(effort) ? effort : ''
+  if (Object.hasOwn(RETIRED_MODELS, model)) return { provider: AHV_DEFAULT_MODEL.provider, model: RETIRED_MODELS[model], reasoningEffort }
+  return { provider, model, reasoningEffort }
 }
 
 /**

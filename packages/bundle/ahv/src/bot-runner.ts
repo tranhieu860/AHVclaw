@@ -20,6 +20,7 @@ import z from '@deepseek-ai/schemastery'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type { ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
+import { AHV_ROUTE, retiredReplacement } from './retired-models.ts'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
@@ -203,6 +204,20 @@ function fail(io: BotIo, error: unknown, output: 'jsonl' | 'text'): void {
 }
 
 /**
+ * Map a `--model` value naming a retired model, bare or as `ahv-router/<id>`,
+ * to its replacement on the AHV route; anything else is returned unchanged.
+ * The registry no longer lists the retired id, so it has to be mapped before
+ * {@link resolveModelSelection} would reject it.
+ * @param requested - the `--model` value.
+ * @returns the value to resolve.
+ */
+export function replaceRetiredModel(requested: string): string {
+  const bare = requested.startsWith(`${AHV_ROUTE}/`) ? requested.slice(AHV_ROUTE.length + 1) : requested
+  const replacement = retiredReplacement(AHV_ROUTE, bare)
+  return replacement === undefined ? requested : `${AHV_ROUTE}/${replacement}`
+}
+
+/**
  * Resolve a requested model to a provider/model pair.
  *
  * A request the registry can disprove is rejected rather than quietly served by
@@ -305,7 +320,7 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
   // `--model` overrides the default for this turn. A bare id is resolved
   // against the mounted providers so the caller does not have to know which
   // provider owns it; `provider/model` pins both without a lookup.
-  const requested = config.model != null && config.model !== '' ? config.model : undefined
+  const requested = config.model != null && config.model !== '' ? replaceRetiredModel(config.model) : undefined
   const chosen = requested === undefined
     ? { provider: selection.provider, model: selection.model }
     : await resolveModelSelection(ctx, requested, selection)

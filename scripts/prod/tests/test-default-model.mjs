@@ -4,7 +4,7 @@
 // every run, the Telegram bot's included. 0.2 renames it to settings.yaml.imported,
 // does not carry agent-default-model over, and the AHV patch layer would
 // override a profile row anyway — on #20 the bot silently went from the chosen
-// Grok 4.6 (xhigh) to ahv-qwen38.
+// Grok 4.6 (xhigh) to ahv-qwen38 (the router default before #976).
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -44,6 +44,20 @@ check('precedence: web row > headless row > settings.yaml > settings.yaml.import
   assert.equal(m.chosenDefaultModel(home({ 'settings.yaml.imported': LEGACY })).model, 'grok-4.6')
   assert.equal(m.chosenDefaultModel(home({ 'settings.yaml': LEGACY.replace('grok-4.6', 'grok-4.7') , 'settings.yaml.imported': LEGACY })).model, 'grok-4.7')
   assert.deepEqual(m.chosenDefaultModel(home({})), { ...m.AHV_DEFAULT_MODEL })
+})
+
+// #976: ahv-qwen38 lived only behind the old router; AHV AI answers it with
+// model_not_found, so every saved choice of it must come out as AHV-Holding.
+check('the AHV default is AHV-Holding', () => {
+  assert.deepEqual({ ...m.AHV_DEFAULT_MODEL }, { provider: 'ahv-router', model: 'AHV-Holding', reasoningEffort: '' })
+})
+check('a saved ahv-qwen38 choice (settings.yaml or web row) becomes AHV-Holding', () => {
+  const legacyQwen = 'agent-default-model:\n  provider: ahv-router\n  model: ahv-qwen38\n  reasoningEffort: high\n'
+  const webQwen = '- id: agent-default-model\n  config:\n    provider: ahv-router\n    model: "ahv-qwen38"\n'
+  assert.deepEqual(m.defaultModelFromLegacySettings(legacyQwen), { ...m.AHV_DEFAULT_MODEL, reasoningEffort: 'high' })
+  assert.deepEqual(m.defaultModelFromPatch(webQwen), { ...m.AHV_DEFAULT_MODEL })
+  assert.deepEqual(m.chosenDefaultModel(home({ 'settings.yaml.imported': legacyQwen })), { ...m.AHV_DEFAULT_MODEL, reasoningEffort: 'high' })
+  assert.deepEqual(m.chosenDefaultModel(home({ 'profiles/web/cordis.patch.yml': webQwen, 'settings.yaml': LEGACY })), { ...m.AHV_DEFAULT_MODEL })
 })
 
 console.log(`\n  ${passed} passed, ${failed} failed`)

@@ -51,7 +51,7 @@ describe('bot-runner resume', () => {
       const services: Record<string, unknown> = {
         appExit: resolve,
         agents: { create: () => Promise.resolve({ agent: turnAgent }), resume: () => Promise.resolve({ agent: turnAgent }) },
-        agentDefaultModel: { currentSelection: () => ({ provider: 'ahv-router', model: 'ahv-qwen38' }) },
+        agentDefaultModel: { currentSelection: () => ({ provider: 'ahv-router', model: 'AHV-Holding' }) },
         sessions: { flush: () => Promise.resolve() },
       }
       const ctx = { get: (name: string) => services[name], on: () => () => {} } as never
