@@ -11,7 +11,7 @@ import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
  * dsh 0.2.1 dropped the loop's `{{cwd}}` (the working-directory service sends
  * the directory as user context), leaving `provider` and `model`.
  */
-const CORE_VARIABLES = { provider: 'ahv-router', model: 'ahv-qwen38' }
+const CORE_VARIABLES = { provider: 'ahv-router', model: 'AHV-Holding' }
 
 /** `!!js` values are Loader expressions; this test reads them as plain text. */
 const LOADER_SCHEMA = yaml.DEFAULT_SCHEMA.extend([
@@ -35,7 +35,7 @@ describe('AHV persona', () => {
       for (const [name, value] of Object.entries(CORE_VARIABLES)) ctx.systemPrompt.variable(name, () => value)
       const prompt = renderPrompt(await ctx.systemPrompt.assemble({}))
       expect(prompt).toContain('Bạn là AHV CLI')
-      expect(prompt).toContain('Model hiện tại: ahv-qwen38.')
+      expect(prompt).toContain('Model hiện tại: AHV-Holding.')
     })
   }
 })

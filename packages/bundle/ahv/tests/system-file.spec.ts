@@ -21,7 +21,7 @@ const SAMPLES = [
 async function promptContext() {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt, { personaPrefix: 'Model {{model}}.' })
-  ctx.systemPrompt.variable('model', () => 'ahv-qwen38')
+  ctx.systemPrompt.variable('model', () => 'AHV-Holding')
   return ctx
 }
 
@@ -52,7 +52,7 @@ describe('bot-runner systemSuffix', () => {
       const prompt = renderPrompt(await ctx.systemPrompt.assemble({}))
       expect(prompt.endsWith(`\n\n${text}`)).toBe(true)
       // The deployment persona keeps interpolating.
-      expect(prompt).toContain('Model ahv-qwen38.')
+      expect(prompt).toContain('Model AHV-Holding.')
     })
   }
 

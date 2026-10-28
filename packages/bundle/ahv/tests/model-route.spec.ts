@@ -10,7 +10,7 @@ import { apply, Config, internals } from '../src/bot-runner.ts'
 
 type Listener = (...args: never[]) => unknown
 
-const DEFAULT = { provider: 'ahv-router', model: 'ahv-qwen38', reasoningEffort: 'high' }
+const DEFAULT = { provider: 'ahv-router', model: 'AHV-Holding', reasoningEffort: 'high' }
 
 /** Run one turn over fakes and return the request config the Agent would send. */
 async function requestConfig(model: string | undefined): Promise<Record<string, unknown>> {
@@ -44,7 +44,7 @@ async function requestConfig(model: string | undefined): Promise<Record<string, 
       sessions: { flush: () => Promise.resolve() },
       llm: {
         listProviders: () => [{ id: 'ahv-router' }, { id: 'claude' }],
-        listModels: (id: string) => Promise.resolve(id === 'claude' ? [{ id: 'claude-haiku-5-5' }] : [{ id: 'ahv-qwen38' }]),
+        listModels: (id: string) => Promise.resolve(id === 'claude' ? [{ id: 'claude-haiku-5-5' }] : [{ id: 'AHV-Holding' }]),
       },
     }
     const ctx = { get: (name: string) => services[name], on: () => () => {} } as never
@@ -64,5 +64,12 @@ describe('bot-runner model routing', () => {
 
   it('keeps the default route and its effort without --model', async () => {
     expect(await requestConfig(undefined)).toMatchObject(DEFAULT)
+  })
+
+  it('runs a saved choice of the retired ahv-qwen38 on AHV-Holding (#976)', async () => {
+    // AHV AI answers ahv-qwen38 with model_not_found; bots still pass it from
+    // choices saved while the router served it.
+    expect(await requestConfig('ahv-qwen38')).toMatchObject(DEFAULT)
+    expect(await requestConfig('ahv-router/ahv-qwen38')).toMatchObject(DEFAULT)
   })
 })

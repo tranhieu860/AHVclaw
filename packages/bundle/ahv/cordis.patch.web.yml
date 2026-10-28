@@ -9,9 +9,11 @@
 - id: agent-default-model
   config:
     # The user's own choice when there is one (the wrapper resolves it from the
-    # web setting or the 0.1 settings.yaml into AHV_DEFAULT_*), else the router.
+    # web setting or the 0.1 settings.yaml into AHV_DEFAULT_*), else AHV-Holding.
     provider: !!js "process.env.AHV_DEFAULT_PROVIDER || 'ahv-router'"
-    model: !!js "process.env.AHV_DEFAULT_MODEL || 'ahv-qwen38'"
+    # ahv-qwen38 lived only on the old router (#976); a choice still naming it
+    # runs on AHV-Holding instead of failing with model_not_found.
+    model: !!js "process.env.AHV_DEFAULT_MODEL && process.env.AHV_DEFAULT_MODEL !== 'ahv-qwen38' ? process.env.AHV_DEFAULT_MODEL : 'AHV-Holding'"
     reasoningEffort: !!js "process.env.AHV_DEFAULT_REASONING || undefined"
 
 - id: llm-pi-ai
@@ -21,14 +23,13 @@
         displayName: AHV Router
         apiKeyEnv: AHV_API_KEY
         api: openai-completions
-        baseURL: http://15.235.200.66:2022/v1
+        # Straight to AHV AI with this machine's own AHV_API_KEY. The router on
+        # #1 (15.235.200.66:2022) ignored the caller's key and spent its own,
+        # so one revoked key stopped every machine at once (#976).
+        baseURL: https://auto.ahvchat.com/v1
         models:
-          - id: ahv-qwen38
-            name: ahv-qwen38 (default — Qwen3-8B, vision + structured tool_calls)
-            contextWindow: 128000
-            maxTokens: 64000
           - id: AHV-Holding
-            name: AHV-Holding (legacy alias)
+            name: AHV-Holding (default)
             contextWindow: 128000
             maxTokens: 64000
           - id: AHV-Holding-TroLy

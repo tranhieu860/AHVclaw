@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveModelSelection } from '../src/bot-runner.ts'
+import { replaceRetiredModel, resolveModelSelection } from '../src/bot-runner.ts'
 
 /**
  * A registry stub: providers that list, and providers whose listing fails.
@@ -21,7 +21,7 @@ function contextWith(llm: unknown) {
   return { get: (name: string) => (name === 'llm' ? llm : undefined) } as never
 }
 
-const fallback = { provider: 'ahv-router', model: 'ahv-qwen38' }
+const fallback = { provider: 'ahv-router', model: 'AHV-Holding' }
 
 describe('resolveModelSelection', () => {
   it('places a bare id on the provider that actually offers it', async () => {
@@ -74,5 +74,18 @@ describe('resolveModelSelection', () => {
     const ctx = contextWith(undefined)
     await expect(resolveModelSelection(ctx, 'anything/at-all', fallback))
       .resolves.toEqual({ provider: 'anything', model: 'at-all' })
+  })
+})
+
+describe('replaceRetiredModel', () => {
+  it('moves ahv-qwen38, bare or on the AHV route, to AHV-Holding (#976)', () => {
+    expect(replaceRetiredModel('ahv-qwen38')).toBe('ahv-router/AHV-Holding')
+    expect(replaceRetiredModel('ahv-router/ahv-qwen38')).toBe('ahv-router/AHV-Holding')
+  })
+
+  it('leaves every other request as it was', () => {
+    for (const id of ['AHV-Holding', 'ahv-router/AHV-Holding-TroLy', 'grok-4.7', 'claude/claude-haiku-5-5', 'other/ahv-qwen38', 'ahv-qwen38-x', 'toString']) {
+      expect(replaceRetiredModel(id)).toBe(id)
+    }
   })
 })

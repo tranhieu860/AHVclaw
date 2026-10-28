@@ -203,6 +203,25 @@ function fail(io: BotIo, error: unknown, output: 'jsonl' | 'text'): void {
 }
 
 /**
+ * Models AHV no longer serves, keyed by id, and the model a request for one
+ * runs on instead. ahv-qwen38 existed only behind the old router on #1; AHV AI
+ * answers it with model_not_found, and bots still pass it from saved choices
+ * (#976).
+ */
+export const RETIRED_MODELS: Readonly<Record<string, string>> = Object.freeze({ 'ahv-qwen38': 'AHV-Holding' })
+
+/**
+ * Map a `--model` value naming a retired model, bare or as `ahv-router/<id>`,
+ * to its replacement on the AHV route; anything else is returned unchanged.
+ * @param requested - the `--model` value.
+ * @returns the value to resolve.
+ */
+export function replaceRetiredModel(requested: string): string {
+  const bare = requested.startsWith('ahv-router/') ? requested.slice('ahv-router/'.length) : requested
+  return Object.hasOwn(RETIRED_MODELS, bare) ? `ahv-router/${RETIRED_MODELS[bare]}` : requested
+}
+
+/**
  * Resolve a requested model to a provider/model pair.
  *
  * A request the registry can disprove is rejected rather than quietly served by
@@ -305,7 +324,7 @@ async function run(ctx: Context, config: Config, io: BotIo): Promise<void> {
   // `--model` overrides the default for this turn. A bare id is resolved
   // against the mounted providers so the caller does not have to know which
   // provider owns it; `provider/model` pins both without a lookup.
-  const requested = config.model != null && config.model !== '' ? config.model : undefined
+  const requested = config.model != null && config.model !== '' ? replaceRetiredModel(config.model) : undefined
   const chosen = requested === undefined
     ? { provider: selection.provider, model: selection.model }
     : await resolveModelSelection(ctx, requested, selection)

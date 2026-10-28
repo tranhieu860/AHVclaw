@@ -55,7 +55,7 @@ async function runBot(script: {
     const services: Record<string, unknown> = {
       appExit: resolve,
       agents: { create: () => Promise.resolve({ agent }) },
-      agentDefaultModel: { currentSelection: () => ({ provider: 'ahv-router', model: 'ahv-qwen38' }) },
+      agentDefaultModel: { currentSelection: () => ({ provider: 'ahv-router', model: 'AHV-Holding' }) },
       sessions: { flush: () => Promise.resolve() },
       subagents: script.waitForChildren === undefined
         ? undefined

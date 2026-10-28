@@ -37,7 +37,8 @@ if [ -f "$DEFAULT_AGENTS_MD" ] && [ ! -f "$INSTALL_MARKER" ]; then
 fi
 
 print_banner() {
-  local model="${AHV_MODEL:-ahv-qwen38}"
+  local model="${AHV_MODEL:-AHV-Holding}"
+  if [ "$model" = ahv-qwen38 ]; then model=AHV-Holding; fi
   local version
   version=$(node -p "require('$FORK/apps/cli/package.json').version" 2>/dev/null || echo "?")
   cat >&2 <<EOF
