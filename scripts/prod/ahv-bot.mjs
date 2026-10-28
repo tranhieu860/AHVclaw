@@ -30,7 +30,7 @@ const DSH_HOME = process.env.DSH_HOME ?? join(homedir(), '.dsh')
 const SESSIONS_ROOT = join(DSH_HOME, 'sessions')
 const AHV_ENV_FILE = join(homedir(), '.ahv', 'env')
 // ahv-qwen38 lived only on the old router; AHV AI does not serve it (#976).
-const DEFAULT_MODEL = process.env.AHV_MODEL && process.env.AHV_MODEL !== 'ahv-qwen38' ? process.env.AHV_MODEL : 'AHV-Holding'
+const DEFAULT_MODEL = ['', 'ahv-qwen38', 'ahv-router/ahv-qwen38'].includes(process.env.AHV_MODEL ?? '') ? 'AHV-Holding' : process.env.AHV_MODEL
 // Must match the ahv-router baseURL in packages/bundle/ahv/cordis.patch.yml.
 const DEFAULT_BASE_URL = 'https://auto.ahvchat.com/v1'
 

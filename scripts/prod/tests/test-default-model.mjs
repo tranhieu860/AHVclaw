@@ -54,9 +54,9 @@ check('the AHV default is AHV-Holding', () => {
 check('a saved ahv-qwen38 choice (settings.yaml or web row) becomes AHV-Holding', () => {
   const legacyQwen = 'agent-default-model:\n  provider: ahv-router\n  model: ahv-qwen38\n  reasoningEffort: high\n'
   const webQwen = '- id: agent-default-model\n  config:\n    provider: ahv-router\n    model: "ahv-qwen38"\n'
-  assert.deepEqual(m.defaultModelFromLegacySettings(legacyQwen), { ...m.AHV_DEFAULT_MODEL })
+  assert.deepEqual(m.defaultModelFromLegacySettings(legacyQwen), { ...m.AHV_DEFAULT_MODEL, reasoningEffort: 'high' })
   assert.deepEqual(m.defaultModelFromPatch(webQwen), { ...m.AHV_DEFAULT_MODEL })
-  assert.deepEqual(m.chosenDefaultModel(home({ 'settings.yaml.imported': legacyQwen })), { ...m.AHV_DEFAULT_MODEL })
+  assert.deepEqual(m.chosenDefaultModel(home({ 'settings.yaml.imported': legacyQwen })), { ...m.AHV_DEFAULT_MODEL, reasoningEffort: 'high' })
   assert.deepEqual(m.chosenDefaultModel(home({ 'profiles/web/cordis.patch.yml': webQwen, 'settings.yaml': LEGACY })), { ...m.AHV_DEFAULT_MODEL })
 })
 

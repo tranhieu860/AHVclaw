@@ -20,6 +20,7 @@ import z from '@deepseek-ai/schemastery'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type { ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
+import { AHV_ROUTE, retiredReplacement } from './retired-models.ts'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
@@ -203,22 +204,17 @@ function fail(io: BotIo, error: unknown, output: 'jsonl' | 'text'): void {
 }
 
 /**
- * Models AHV no longer serves, keyed by id, and the model a request for one
- * runs on instead. ahv-qwen38 existed only behind the old router on #1; AHV AI
- * answers it with model_not_found, and bots still pass it from saved choices
- * (#976).
- */
-export const RETIRED_MODELS: Readonly<Record<string, string>> = Object.freeze({ 'ahv-qwen38': 'AHV-Holding' })
-
-/**
  * Map a `--model` value naming a retired model, bare or as `ahv-router/<id>`,
  * to its replacement on the AHV route; anything else is returned unchanged.
+ * The registry no longer lists the retired id, so it has to be mapped before
+ * {@link resolveModelSelection} would reject it.
  * @param requested - the `--model` value.
  * @returns the value to resolve.
  */
 export function replaceRetiredModel(requested: string): string {
-  const bare = requested.startsWith('ahv-router/') ? requested.slice('ahv-router/'.length) : requested
-  return Object.hasOwn(RETIRED_MODELS, bare) ? `ahv-router/${RETIRED_MODELS[bare]}` : requested
+  const bare = requested.startsWith(`${AHV_ROUTE}/`) ? requested.slice(AHV_ROUTE.length + 1) : requested
+  const replacement = retiredReplacement(AHV_ROUTE, bare)
+  return replacement === undefined ? requested : `${AHV_ROUTE}/${replacement}`
 }
 
 /**

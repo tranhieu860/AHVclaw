@@ -146,6 +146,11 @@
     - id: tool-cordis
       name: '@deepseek-ai/dsh-tool-cordis'
 
+    # A request still naming a retired AHV model (ahv-qwen38, #976) runs on its
+    # replacement; resumed conversations restore the model they last used.
+    - id: ahv-retired-models
+      name: '@ahvclaw/dsh-bundle-ahv/retired-models'
+
     # Plugin Market (dsh-market/dsh-market, npm: dshmarket). Community
     # plugin catalog — browse, search, one-click install/uninstall,
     # backup/restore, hot-reload — surfaced under Settings → Plugin Market

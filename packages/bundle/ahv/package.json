@@ -23,6 +23,10 @@
       "types": "./lib/types/bot-list-models.d.ts",
       "default": "./lib/bot-list-models.js"
     },
+    "./retired-models": {
+      "types": "./lib/types/retired-models.d.ts",
+      "default": "./lib/retired-models.js"
+    },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./cordis.patch.web.yml": "./cordis.patch.web.yml",
     "./cordis.patch.bot.yml": "./cordis.patch.bot.yml",
@@ -34,6 +38,7 @@
     "lib/bot-runner.js",
     "lib/bot-startup.js",
     "lib/bot-list-models.js",
+    "lib/retired-models.js",
     "cordis.patch.yml",
     "cordis.patch.web.yml",
     "cordis.patch.bot.yml",

@@ -121,8 +121,9 @@ function pickSelection(fields) {
   const model = unquote(fields.model ?? '')
   const effort = unquote(fields.reasoningEffort ?? '')
   if (!SAFE_VALUE.test(provider) || !SAFE_VALUE.test(model)) return undefined
-  if (Object.hasOwn(RETIRED_MODELS, model)) return { ...AHV_DEFAULT_MODEL, model: RETIRED_MODELS[model] }
-  return { provider, model, reasoningEffort: SAFE_VALUE.test(effort) ? effort : '' }
+  const reasoningEffort = SAFE_VALUE.test(effort) ? effort : ''
+  if (Object.hasOwn(RETIRED_MODELS, model)) return { provider: AHV_DEFAULT_MODEL.provider, model: RETIRED_MODELS[model], reasoningEffort }
+  return { provider, model, reasoningEffort }
 }
 
 /**

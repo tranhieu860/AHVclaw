@@ -13,7 +13,7 @@ const LOADER_SCHEMA = yaml.DEFAULT_SCHEMA.extend([
   new yaml.Type('tag:yaml.org,2002:js', { kind: 'scalar', construct: (text: string) => ({ js: text }) }),
 ])
 
-interface Row { id?: string; config?: Record<string, unknown> }
+interface Row { id?: string; name?: string; config?: Record<string, unknown>; insert?: Row[] }
 interface Provider { apiKeyEnv?: string; baseURL?: string; models?: { id: string }[] }
 
 const PATCHES = ['../cordis.patch.yml', '../cordis.patch.web.yml']
@@ -39,6 +39,11 @@ describe.each(PATCHES)('%s', (path) => {
 
   it('lists the AHV models without the retired ahv-qwen38', () => {
     expect(provider.models?.map(m => m.id)).toEqual(['AHV-Holding', 'AHV-Holding-TroLy', 'AHV-Holding-DEV', 'Grok-SuperHeavy'])
+  })
+
+  it('mounts the listener that moves restored retired-model requests', () => {
+    const inserted = patch.flatMap(row => row.insert ?? [])
+    expect(inserted).toContainEqual({ id: 'ahv-retired-models', name: '@ahvclaw/dsh-bundle-ahv/retired-models' })
   })
 
   it('defaults to AHV-Holding and moves a retired choice there', () => {

@@ -38,7 +38,7 @@ fi
 
 print_banner() {
   local model="${AHV_MODEL:-AHV-Holding}"
-  if [ "$model" = ahv-qwen38 ]; then model=AHV-Holding; fi
+  case "$model" in ahv-qwen38|ahv-router/ahv-qwen38) model=AHV-Holding ;; esac
   local version
   version=$(node -p "require('$FORK/apps/cli/package.json').version" 2>/dev/null || echo "?")
   cat >&2 <<EOF

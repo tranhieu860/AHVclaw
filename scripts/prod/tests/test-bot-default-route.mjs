@@ -37,6 +37,7 @@ check('defaults to AHV-Holding', () => {
 })
 check('a bot still exporting AHV_MODEL=ahv-qwen38 sees AHV-Holding', () => {
   assert.equal(authStatus({ AHV_MODEL: 'ahv-qwen38', AHV_API_KEY: 'k' }).model, 'AHV-Holding')
+  assert.equal(authStatus({ AHV_MODEL: 'ahv-router/ahv-qwen38' }).model, 'AHV-Holding')
 })
 check('any other AHV_MODEL is reported as set', () => {
   assert.equal(authStatus({ AHV_MODEL: 'AHV-Holding-TroLy' }).model, 'AHV-Holding-TroLy')

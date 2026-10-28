@@ -114,6 +114,11 @@
 # --- Extras web-app doesn't ship ---------------------------------------
 
 - insert:
+    # A request still naming a retired AHV model (ahv-qwen38, #976) runs on its
+    # replacement; resumed conversations restore the model they last used.
+    - id: ahv-retired-models
+      name: '@ahvclaw/dsh-bundle-ahv/retired-models'
+
     - id: dsh-market
       name: 'dshmarket'
     - id: superpowers-dsh
