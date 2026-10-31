@@ -70,7 +70,7 @@
     "@deepseek-ai/cordis-plugin-loader": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^",
     "commander": "^15.0.0",
-    "dshmarket": "^1.73.5",
+    "dshmarket": "^1.73.6",
     "superpowers-dsh": "^0.4.0",
     "@linxin666/dsh-web-ui-all": "^0.2.7",
     "dsh-plugin-subscriptions": "^0.9.12",
