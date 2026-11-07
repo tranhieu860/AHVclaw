@@ -1,8 +1,39 @@
 diff --git a/lib/index.js b/lib/index.js
-index 14f62df..3c7624a 100644
 --- a/lib/index.js
 +++ b/lib/index.js
-@@ -1301,8 +1301,62 @@ function isValidSessionShape(value) {
+@@ -788,6 +788,7 @@
+ 		accessToken: data.accessToken,
+ 		refreshToken: data.refreshToken,
+ 		expiresAt: Math.trunc(data.expiresAt),
++		...typeof data.refreshTokenExpiresAt === "number" && Number.isFinite(data.refreshTokenExpiresAt) ? { refreshTokenExpiresAt: data.refreshTokenExpiresAt } : {},
+ 		scopes,
+ 		...typeof data.emailAddress === "string" ? { emailAddress: data.emailAddress } : {},
+ 		...typeof data.subscriptionType === "string" ? { subscriptionType: data.subscriptionType } : {}
+@@ -877,6 +878,7 @@
+ 	target.accessToken = next.accessToken;
+ 	target.refreshToken = next.refreshToken;
+ 	target.expiresAt = next.expiresAt;
++	if (next.refreshTokenExpiresAt !== void 0) target.refreshTokenExpiresAt = next.refreshTokenExpiresAt;
+ 	return JSON.stringify(parsed);
+ }
+ /**
+@@ -1212,13 +1214,14 @@
+ * @param path - store file path; defaults to {@link authFilePath}.
+ * @returns the parsed session map.
+ */
+-async function loadStore(path = authFilePath()) {
++async function loadStore(path = authFilePath(), locked = false) {
+ 	let text;
+ 	try {
+ 		text = await readFile(path, "utf8");
+ 	} catch (error) {
+ 		if (error.code !== "ENOENT") throw error;
+ 		if (path !== authFilePath()) return {};
++		if (!locked) return serialize(path, () => loadStore(path, true));
+ 		try {
+ 			text = await readFile(legacyAuthFilePath(), "utf8");
+ 		} catch (legacyError) {
+@@ -1301,8 +1304,62 @@
  	const entry = value;
  	return typeof entry.accessToken === "string" && entry.accessToken.length > 0 && typeof entry.refreshToken === "string" && entry.refreshToken.length > 0 && typeof entry.expiresAt === "number" && Number.isFinite(entry.expiresAt);
  }
@@ -65,7 +96,103 @@ index 14f62df..3c7624a 100644
  	await mkdir(dirname(path), { recursive: true });
  	const tmp = `${path}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`;
  	try {
-@@ -2489,6 +2543,15 @@ async function oauthEndpointError(response, label) {
+@@ -1315,6 +1372,33 @@
+ 	}
+ }
+ /**
++* Cooperating processes hold an atomic directory lock until the action settles.
++* A busy lock fails closed after 30 seconds; only its owner removes it.
++* @param path - lock directory, next to the protected auth store.
++* @param action - work requiring exclusive ownership.
++* @returns the action's result.
++*/
++async function withAuthLock(path, action) {
++	await mkdir(dirname(path), { recursive: true });
++	const deadline = Date.now() + 3e4;
++	for (;;) {
++		try {
++			await mkdir(path, { mode: 448 });
++			break;
++		} catch (error) {
++			if (error.code !== "EEXIST") throw error;
++			if (Date.now() >= deadline) throw new Error(`subscriptions auth lock busy: ${path}; inspect owner.json before removing an abandoned lock`);
++			await new Promise((resolve) => setTimeout(resolve, 25));
++		}
++	}
++	try {
++		await writeFile(join(path, "owner.json"), JSON.stringify({ pid: process.pid }), { mode: 384 });
++		return await action();
++	} finally {
++		await rm(path, { recursive: true, force: true });
++	}
++}
++/**
+ * One write chain per store path. Every mutation is a read-modify-write of a
+ * single JSON file, and the plugin has several independent writers — a login,
+ * a logout, and one token refresh per provider account, each on its own
+@@ -1333,7 +1417,8 @@
+ * @returns whatever `action` returns.
+ */
+ async function serialize(path, action) {
+-	const next = (writeChains.get(path) ?? Promise.resolve()).then(action, action);
++	const locked = () => withAuthLock(`${path}.lock`, action);
++	const next = (writeChains.get(path) ?? Promise.resolve()).then(locked, locked);
+ 	const tail = next.then(() => void 0, () => void 0);
+ 	writeChains.set(path, tail);
+ 	try {
+@@ -1383,17 +1468,19 @@
+ * @param account - the account key (see {@link accountKeyOf}).
+ * @param session - the fresh session from a login or refresh.
+ * @param path - store file path; defaults to {@link authFilePath}.
++* @param expected - prior tokens for refresh; absent means an explicit login.
++* @returns the saved session, or the current session when a refresh was superseded.
+ * @throws when the session is missing accessToken/refreshToken/expiresAt.
+ */
+-async function saveAccountSession(provider, account, session, path = authFilePath()) {
++async function saveAccountSession(provider, account, session, path = authFilePath(), expected) {
+ 	assertSessionShape(provider, account, session);
+ 	return serialize(path, async () => {
+-		const store = await loadStore(path);
++		const store = await loadStore(path, true);
+ 		const entry = store[provider];
+-		if (entry !== void 0) {
+-			account = resolveAccount(entry, account);
+-			if (provider === "codex") account = reconcileCodexIdentity(entry, session) ?? accountKeyOf("codex", session);
+-		}
++		if (entry !== void 0) account = resolveAccount(entry, account);
++		const previous = entry?.accounts[account];
++		if (expected !== void 0 && (previous === void 0 || previous.accessToken !== expected.accessToken || previous.refreshToken !== expected.refreshToken)) return previous;
++		if (entry !== void 0 && provider === "codex") account = reconcileCodexIdentity(entry, session) ?? accountKeyOf("codex", session);
+ 		store[provider] = {
+ 			...entry,
+ 			default: entry?.default ?? account,
+@@ -1403,6 +1490,7 @@
+ 			}
+ 		};
+ 		await writeStore(store, path);
++		return session;
+ 	});
+ }
+ /**
+@@ -1414,7 +1502,7 @@
+ */
+ async function deleteAccountSession(provider, account, path = authFilePath()) {
+ 	return serialize(path, async () => {
+-		const store = await loadStore(path);
++		const store = await loadStore(path, true);
+ 		const entry = store[provider];
+ 		if (entry === void 0) return;
+ 		account = resolveAccount(entry, account);
+@@ -1438,7 +1526,7 @@
+ */
+ async function setDefaultAccount(provider, account, path = authFilePath()) {
+ 	return serialize(path, async () => {
+-		const store = await loadStore(path);
++		const store = await loadStore(path, true);
+ 		const entry = store[provider];
+ 		if (entry !== void 0) account = resolveAccount(entry, account);
+ 		if (entry === void 0 || !Object.hasOwn(entry.accounts, account)) throw new Error(`no ${provider} account "${account}" is logged in`);
+@@ -2491,6 +2579,15 @@
  * coalesces concurrent refreshes behind one in-flight promise. Permanent
  * refresh failures delete the stored session and surface INVALID_CREDENTIAL
  * with a re-login hint; transient failures fall back to a still-valid token.
@@ -81,7 +208,7 @@ index 14f62df..3c7624a 100644
  */
  var TokenManager = class {
  	inflight;
-@@ -2523,6 +2586,16 @@ var TokenManager = class {
+@@ -2525,6 +2622,16 @@
  	async session(forceRefresh = false) {
  		const session = await this.options.load();
  		if (session === void 0) throw new LlmError(`dsh-plugin-subscriptions: not logged in to ${this.options.displayName}; log in via Settings → Subscriptions in the dsh web app`, "MISSING_CREDENTIAL");
@@ -98,20 +225,107 @@ index 14f62df..3c7624a 100644
  		if (!forceRefresh && session.expiresAt - Date.now() > this.options.preemptMs) return session;
  		this.inflight ??= this.doRefresh(session).finally(() => {
  			this.inflight = void 0;
-@@ -2534,8 +2607,10 @@ var TokenManager = class {
+@@ -2532,26 +2639,39 @@
+ 		try {
+ 			return await this.inflight;
+ 		} catch (error) {
++			const stored = await this.options.load();
++			if (stored === void 0) throw new LlmError(`${this.options.displayName} was logged out during refresh`, "MISSING_CREDENTIAL", { cause: error });
++			if (error instanceof LlmError && error.code === "MISSING_CREDENTIAL") throw error;
+ 			if (this.options.isPermanent(error)) {
  				const attempted = this.attempted;
- 				const stored = await this.options.load();
- 				if (stored !== void 0 && attempted !== void 0 && stored.refreshToken !== attempted.refreshToken) return stored;
+-				const stored = await this.options.load();
+-				if (stored !== void 0 && attempted !== void 0 && stored.refreshToken !== attempted.refreshToken) return stored;
 -				await this.options.remove();
 -				this.options.onRemoved?.();
++				if (attempted !== void 0 && (stored.refreshToken !== attempted.refreshToken || stored.accessToken !== attempted.accessToken)) return stored;
 +				this.deadRefreshToken = (attempted ?? session).refreshToken;
 +				this.deadAccessToken = (attempted ?? session).accessToken;
 +				this.deadError = error;
-+				if (!forceRefresh && session.expiresAt > Date.now()) return session;
++				if (!forceRefresh && stored.expiresAt > Date.now()) return stored;
  				throw new LlmError(`${this.options.displayName} login expired or was revoked; log in again via Settings → Subscriptions`, "INVALID_CREDENTIAL", { cause: error });
  			}
- 			if (!forceRefresh && session.expiresAt > Date.now()) return session;
-@@ -5139,6 +5214,7 @@ const PERMANENT_REFRESH_CODES = new Set([
+-			if (!forceRefresh && session.expiresAt > Date.now()) return session;
++			if (!forceRefresh && stored.expiresAt > Date.now()) return stored;
+ 			throw error instanceof LlmError ? error : new LlmError(`${this.options.displayName} token refresh failed`, "AUTH", { cause: error });
+ 		}
+ 	}
+ 	async doRefresh(session) {
++		return withAuthLock(this.options.refreshLockPath, () => this.refreshLocked(session));
++	}
++	async refreshLocked(session) {
+ 		const current$2 = await this.options.load();
++		if (current$2 === void 0) throw new LlmError(`${this.options.displayName} was logged out during refresh`, "MISSING_CREDENTIAL");
+ 		if (current$2 !== void 0 && current$2.accessToken !== session.accessToken && current$2.expiresAt - Date.now() > this.options.preemptMs) return current$2;
+ 		const attempted = current$2 ?? session;
+ 		this.attempted = attempted;
+-		const next = await this.options.refresh(attempted);
+-		await this.options.save(next);
+-		return next;
++		const refreshed = await this.options.refresh(attempted);
++		const next = {
++			...refreshed,
++			...refreshed.refreshTokenExpiresAt === void 0 && attempted.refreshTokenExpiresAt !== void 0 ? { refreshTokenExpiresAt: attempted.refreshTokenExpiresAt } : {}
++		};
++		const saved = await this.options.save(next, attempted);
++		if (saved === void 0) throw new LlmError(`${this.options.displayName} was logged out during refresh`, "MISSING_CREDENTIAL");
++		return saved;
+ 	}
+ };
+ /** Bound on one account catalog fetch or usage poll — a hang must not block the picker. */
+@@ -2906,7 +3026,7 @@
+ 		this.io = options.io ?? {
+ 			list: () => listAccounts(provider),
+ 			get: (account) => getAccountSession(provider, account),
+-			save: (account, session) => saveAccountSession(provider, account, session),
++			save: (account, session, expected) => saveAccountSession(provider, account, session, authFilePath(), expected),
+ 			remove: (account) => deleteAccountSession(provider, account),
+ 			resolve: (account) => resolveAccountKey(provider, account)
+ 		};
+@@ -2954,15 +3074,18 @@
+ 			manager = new TokenManager({
+ 				displayName: this.options.displayName,
+ 				...this.options.makeOptions(account),
++				refreshLockPath: `${authFilePath()}.refresh-${this.options.provider}.lock`,
+ 				load: () => io.get(boundAccount),
+-				save: async (session) => {
+-					await io.save(boundAccount, session);
++				save: async (session, expected) => {
++					const saved = await io.save(boundAccount, session, expected);
++					if (saved === void 0) return;
+ 					const canonical = await this.resolveAccount(boundAccount);
+ 					if (canonical !== boundAccount) {
+ 						this.managers.set(canonical, manager);
+ 						if (this.managers.get(boundAccount) === manager) this.managers.delete(boundAccount);
+ 						boundAccount = canonical;
+ 					}
++					return saved;
+ 				},
+ 				remove: () => io.remove(boundAccount),
+ 				onRemoved: () => {
+@@ -4199,6 +4322,13 @@
+ 		return {};
+ 	}
+ }
++/** Issuer-supplied refresh lifetime, in seconds; absent means unknown. */
++function refreshTokenExpiry(tokens) {
++	const seconds = tokens.refresh_token_expires_in;
++	if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) return {};
++	const expiresAt = Date.now() + seconds * 1e3;
++	return Number.isFinite(expiresAt) ? { refreshTokenExpiresAt: expiresAt } : {};
++}
+ /** Build a session from a token response. */
+ async function claudeSession(tokens, fallbackRefreshToken, withProfile) {
+ 	if (typeof tokens.access_token !== "string" || tokens.access_token.length === 0) throw new Error("claude token endpoint returned no access token");
+@@ -4209,6 +4339,7 @@
+ 	return {
+ 		accessToken: tokens.access_token,
+ 		refreshToken,
++		...refreshTokenExpiry(tokens),
+ 		expiresAt: Date.now() + tokens.expires_in * 1e3,
+ 		scopes: tokens.scope ?? CLAUDE_SCOPE,
+ 		...profile
+@@ -5141,6 +5272,7 @@
  	"refresh_token_expired",
  	"refresh_token_reused",
  	"refresh_token_invalidated",
@@ -119,3 +333,158 @@ index 14f62df..3c7624a 100644
  	"invalid_grant"
  ]);
  const CODEX_EFFORTS = [
+@@ -5248,6 +5380,7 @@
+ 	return {
+ 		accessToken: tokens.access_token,
+ 		refreshToken,
++		...refreshTokenExpiry(tokens),
+ 		expiresAt,
+ 		accountId: tokens.id_token === void 0 && fallback !== void 0 ? fallback.accountId : accountIdOf(tokens.id_token),
+ 		...idToken === void 0 ? {} : { idToken },
+@@ -7379,6 +7512,7 @@
+ 	return {
+ 		accessToken: tokens.access_token,
+ 		refreshToken,
++		...refreshTokenExpiry(tokens),
+ 		expiresAt: Date.now() + tokens.expires_in * 1e3,
+ 		tokenEndpoint,
+ 		...typeof tokens.scope === "string" ? { scopes: tokens.scope } : {},
+@@ -9736,6 +9870,7 @@
+ 	return {
+ 		accessToken: tokens.access_token,
+ 		refreshToken,
++		...refreshTokenExpiry(tokens),
+ 		expiresAt: Date.now() + tokens.expires_in * 1e3,
+ 		projectId: account.projectId,
+ 		...tokens.scope === void 0 ? {} : { scopes: tokens.scope },
+diff --git a/lib/auth/store.d.ts b/lib/auth/store.d.ts
+--- a/lib/auth/store.d.ts
++++ b/lib/auth/store.d.ts
+@@ -22,6 +22,8 @@
+     refreshToken: string;
+     /** Epoch milliseconds at which the access token expires. */
+     expiresAt: number;
++    /** Refresh-token expiry in epoch milliseconds, when supplied by the issuer or credential source. */
++    refreshTokenExpiresAt?: number;
+     /** `chatgpt_account_id` claim from the id token; sent as the `chatgpt-account-id` header. */
+     accountId: string;
+     idToken?: string;
+@@ -36,6 +38,8 @@
+     refreshToken: string;
+     /** Epoch milliseconds at which the access token expires. */
+     expiresAt: number;
++    /** Refresh-token expiry in epoch milliseconds, when supplied by the issuer or credential source. */
++    refreshTokenExpiresAt?: number;
+     /** Scope string the tokens were issued with; echoed on refresh. */
+     scopes: string;
+     emailAddress?: string;
+@@ -52,6 +56,8 @@
+     refreshToken: string;
+     /** Epoch milliseconds at which the access token expires. */
+     expiresAt: number;
++    /** Refresh-token expiry in epoch milliseconds, when supplied by the issuer or credential source. */
++    refreshTokenExpiresAt?: number;
+     /** Token endpoint from OIDC discovery; retained for refreshes. */
+     tokenEndpoint: string;
+     scopes?: string;
+@@ -72,6 +78,8 @@
+     refreshToken: string;
+     /** Epoch milliseconds at which the Copilot API token expires. */
+     expiresAt: number;
++    /** Refresh-token expiry in epoch milliseconds, when supplied by the issuer or credential source. */
++    refreshTokenExpiresAt?: number;
+     /** GitHub login name, for the status display. */
+     account?: string;
+ }
+@@ -81,6 +89,8 @@
+     refreshToken: string;
+     /** Epoch milliseconds at which the Google access token expires. */
+     expiresAt: number;
++    /** Refresh-token expiry in epoch milliseconds, when supplied by the issuer or credential source. */
++    refreshTokenExpiresAt?: number;
+     /** Cloud AI Companion project required by Antigravity request envelopes. */
+     projectId: string;
+     /** Google account email, for the status display. */
+@@ -176,9 +186,11 @@
+  * @param account - the account key (see {@link accountKeyOf}).
+  * @param session - the fresh session from a login or refresh.
+  * @param path - store file path; defaults to {@link authFilePath}.
++ * @param expected - prior tokens for refresh; absent means an explicit login.
++ * @returns the saved session, or the current session when a refresh was superseded.
+  * @throws when the session is missing accessToken/refreshToken/expiresAt.
+  */
+-export declare function saveAccountSession<K extends ProviderId>(provider: K, account: string, session: SessionOf<K>, path?: string): Promise<void>;
++export declare function saveAccountSession<K extends ProviderId>(provider: K, account: string, session: SessionOf<K>, path?: string, expected?: SessionOf<K>): Promise<SessionOf<K> | undefined>;
+ /**
+  * Delete one account's session (logout). Deleting the default moves the badge
+  * to the next remaining account.
+diff --git a/lib/providers/common.d.ts b/lib/providers/common.d.ts
+--- a/lib/providers/common.d.ts
++++ b/lib/providers/common.d.ts
+@@ -123,6 +123,7 @@
+     accessToken: string;
+     refreshToken: string;
+     expiresAt: number;
++    refreshTokenExpiresAt?: number;
+ }
+ /** Provider hooks the token manager needs. */
+ export interface TokenManagerOptions<S extends TimedSession> {
+@@ -131,13 +132,16 @@
+     /** Refresh this long before `expiresAt`. */
+     preemptMs: number;
+     load(): Promise<S | undefined>;
+-    save(session: S): Promise<void>;
++    /** Stable provider lock directory shared with other processes. */
++    refreshLockPath: string;
++    /** Compare prior tokens before persisting; returns current or absent after supersession. */
++    save(session: S, expected?: S): Promise<S | undefined>;
+     remove(): Promise<void>;
+     /** Perform the provider's refresh-token grant. */
+     refresh(session: S): Promise<S>;
+     /** Whether a refresh failure is permanent (re-login required). */
+     isPermanent(error: unknown): boolean;
+-    /** Called after a permanent refresh failure deleted the stored session. */
++    /** Called when a previously failed login is replaced, to clear account state. */
+     onRemoved?(): void;
+ }
+ /**
+@@ -173,6 +177,7 @@
+      */
+     session(forceRefresh?: boolean): Promise<S>;
+     private doRefresh;
++    private refreshLocked;
+ }
+ /** Fetch signature adapters accept for discovery calls (injectable for tests). */
+ export type FetchFn = typeof fetch;
+diff --git a/lib/providers/accounts.d.ts b/lib/providers/accounts.d.ts
+--- a/lib/providers/accounts.d.ts
++++ b/lib/providers/accounts.d.ts
+@@ -19,6 +19,7 @@
+     accessToken: string;
+     refreshToken: string;
+     expiresAt: number;
++    refreshTokenExpiresAt?: number;
+ }
+ /** An adapter that can stream through a named account (the pool's seam). */
+ export interface AccountAwareAdapter extends LlmAdapter {
+@@ -66,7 +67,8 @@
+ export interface AccountStoreIo<S> {
+     list(): Promise<AccountEntry<S>[]>;
+     get(account?: string): Promise<S | undefined>;
+-    save(account: string, session: S): Promise<void>;
++    /** Compare prior tokens before persisting a refresh; returns the current account. */
++    save(account: string, session: S, expected?: S): Promise<S | undefined>;
+     remove(account: string): Promise<void>;
+     /** Resolve a legacy alias to the canonical account key. */
+     resolve?(account: string): Promise<string>;
+@@ -76,8 +78,8 @@
+     /** Human-readable provider name for error messages. */
+     displayName: string;
+     /** Provider hooks shared by every account (load/save/remove are bound per account). */
+-    makeOptions: (account: string) => Omit<TokenManagerOptions<S>, 'load' | 'save' | 'remove' | 'onRemoved' | 'displayName'>;
+-    /** Called after a permanent refresh failure deleted one account's session. */
++    makeOptions: (account: string) => Omit<TokenManagerOptions<S>, 'load' | 'save' | 'remove' | 'onRemoved' | 'displayName' | 'refreshLockPath'>;
++    /** Called when a previously failed account is replaced, to clear account state. */
+     onAccountRemoved?: (account: string) => void;
+     /** Store backend; defaults to the durable auth store. */
+     io?: AccountStoreIo<S>;

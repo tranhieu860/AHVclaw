@@ -16,13 +16,14 @@
 //   124 = timeout / cancelled
 
 import { spawn, execFileSync } from 'node:child_process'
-import { renameSync, readFileSync, existsSync, statSync, readdirSync, writeFileSync, chmodSync, mkdirSync, realpathSync } from 'node:fs'
+import { renameSync, readFileSync, existsSync, statSync, readdirSync, writeFileSync, chmodSync, mkdirSync, realpathSync, rmSync } from 'node:fs'
 import { resolve as resolvePath, dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { zstdDecompressSync } from 'node:zlib'
 import { homedir } from 'node:os'
 import { createHash, randomBytes } from 'node:crypto'
 import { createRequire } from 'node:module'
+import { setTimeout as waitForAuthLock } from 'node:timers/promises'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const FORK = process.env.AHV_FORK ?? resolvePath(HERE, '..', 'src')
@@ -535,9 +536,9 @@ function readSubscriptionsAuth() {
  * exists and cannot be read throws. Treating it as empty would write back only
  * the change and erase every other account.
  */
-function readSubscriptionsAuthForWrite() {
-  if (!existsSync(SUBSCRIPTIONS_AUTH_FILE)) return {}
-  const data = JSON.parse(readFileSync(SUBSCRIPTIONS_AUTH_FILE, 'utf8'))
+function readSubscriptionsAuthForWrite(path = SUBSCRIPTIONS_AUTH_FILE) {
+  if (!existsSync(path)) return {}
+  const data = JSON.parse(readFileSync(path, 'utf8'))
   if (data === null || typeof data !== 'object' || Array.isArray(data)) throw new Error('not a JSON object')
   return data
 }
@@ -653,8 +654,54 @@ function withSession(entry, session) {
   return { ...entryExtras(entry), default: key, accounts: { ...accounts, [key]: session } }
 }
 
-function writeSubscriptionsAuth(obj) {
-  writeFileAtomic600(SUBSCRIPTIONS_AUTH_FILE, JSON.stringify(obj, null, 2))
+function writeSubscriptionsAuth(obj, path = SUBSCRIPTIONS_AUTH_FILE) {
+  writeFileAtomic600(path, JSON.stringify(obj, null, 2))
+}
+
+/** Share the plugin's mkdir lock; abandoned locks require explicit operator recovery. */
+async function withAuthLock(path, callback) {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
+  const deadline = Date.now() + 30_000
+  for (;;) {
+    try {
+      mkdirSync(path, { mode: 0o700 })
+      break
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error
+      if (Date.now() >= deadline) throw new Error(`auth store lock timed out: ${path}`)
+      await waitForAuthLock(25)
+    }
+  }
+  try {
+    writeFileSync(join(path, 'owner.json'), JSON.stringify({ pid: process.pid }), { mode: 0o600 })
+    return await callback()
+  } finally {
+    rmSync(path, { recursive: true, force: true })
+  }
+}
+
+/** Follow account aliases written by the plugin before comparing or updating tokens. */
+function storedAccount(entry, key) {
+  const { accounts } = storeAccounts(entry)
+  const seen = new Set()
+  while (!Object.hasOwn(accounts, key) && typeof entry?.aliases?.[key] === 'string' && !seen.has(key)) {
+    seen.add(key)
+    key = entry.aliases[key]
+  }
+  return { key, session: accounts[key] }
+}
+
+/** Expiry alone cannot distinguish a refreshed session from a replacement login. */
+function sameAuthTokens(left, right) {
+  return left?.accessToken === right?.accessToken && left?.refreshToken === right?.refreshToken
+}
+
+/** Drain every scheduled auth operation before an error can terminate the CLI. */
+async function completeAuthWork(tasks) {
+  const results = await Promise.allSettled(tasks)
+  const failure = results.find(result => result.status === 'rejected')
+  if (failure) throw failure.reason
+  return results.map(result => result.value)
 }
 
 // Copied from subscriptions 0.9.6 and dsh-llm attribution: importing the
@@ -861,6 +908,7 @@ export async function refreshSessionIfStale(kind, session, fetchFn = fetch, now 
       || typeof tokens?.expires_in !== 'number' || !(tokens.expires_in > 0)) {
       return { session, refreshed: false, failure: 'http', error: 'refresh returned no usable token' }
     }
+    const refreshDeadline = now + tokens.refresh_token_expires_in * 1000
     return {
       refreshed: true,
       session: {
@@ -869,6 +917,8 @@ export async function refreshSessionIfStale(kind, session, fetchFn = fetch, now 
         refreshToken: typeof tokens.refresh_token === 'string' && tokens.refresh_token !== ''
           ? tokens.refresh_token : session.refreshToken,
         expiresAt: now + tokens.expires_in * 1000,
+        ...(typeof tokens.refresh_token_expires_in === 'number' && Number.isFinite(tokens.refresh_token_expires_in) && tokens.refresh_token_expires_in >= 0 && Number.isFinite(refreshDeadline)
+          ? { refreshTokenExpiresAt: refreshDeadline } : {}),
         ...(typeof tokens.scope === 'string' && tokens.scope !== '' ? { scopes: tokens.scope } : {}),
       },
     }
@@ -1216,11 +1266,33 @@ function writeFileAtomic600(file, text) {
  * @param book - the refresh book (see bookOf).
  * @param fetchFn - injected for tests.
  * @param now - epoch ms.
+ * @param authPath - when supplied, lock and reread the stored account, then
+ *   persist a token-matched refresh before releasing the provider lock; when
+ *   omitted, operate only on the supplied session and in-memory book.
  * @returns refreshSessionIfStale's result plus `skipped` ('unsupported',
  *   'fresh', 'dead-refresh' or 'backoff') when no request was sent; a held
  *   account carries the error that put it on hold.
  */
-async function refreshWithBook(kind, key, session, book, fetchFn, now) {
+async function refreshWithBook(kind, key, session, book, fetchFn, now, authPath) {
+  if (authPath !== undefined) {
+    return withAuthLock(`${authPath}.refresh-${kind}.lock`, async () => {
+      const current = storedAccount(readSubscriptionsAuthForWrite(authPath)[kind], key)
+      if (!current.session) return { session: undefined, refreshed: false, skipped: 'removed' }
+      const fresh = await refreshWithBook(kind, current.key, current.session, book, fetchFn, now)
+      return withAuthLock(`${authPath}.lock`, async () => {
+        const auth = readSubscriptionsAuthForWrite(authPath)
+        const existing = storedAccount(auth[kind], current.key)
+        if (!existing.session || !sameAuthTokens(existing.session, current.session)) {
+          return { session: existing.session, refreshed: false, skipped: 'changed' }
+        }
+        if (!fresh.refreshed) return fresh
+        const updated = { ...existing.session, ...fresh.session }
+        auth[kind] = withAccountSession(auth[kind], existing.key, updated)
+        writeSubscriptionsAuth(auth, authPath)
+        return { ...fresh, session: updated }
+      })
+    })
+  }
   const need = refreshNeed(kind, session, now)
   if (need !== 'stale') return { session, refreshed: false, skipped: need }
   const fp = refreshTokenFingerprint(session.refreshToken)
@@ -1323,6 +1395,8 @@ async function usageWithBook(kind, key, session, cache, { fetchFn, now, maxAgeMs
  * @param opts - `now` (epoch ms), `refreshBook` and `usageCache` (bookOf; an
  *   empty in-memory book when omitted, so nothing is read or written here), and
  *   `maxAgeSec` (serve readings this young from the usage book), `randomFn`.
+ *   `authPath`, when present, coordinates refresh and persistence with the
+ *   plugin's shared store; when absent, the supplied auth remains in memory.
  * @returns providers keyed by id, and the sessions whose tokens were renewed.
  */
 export async function collectSubscriptionUsage(auth, fetchFn = fetch, opts = {}) {
@@ -1332,18 +1406,18 @@ export async function collectSubscriptionUsage(auth, fetchFn = fetch, opts = {})
   const maxAgeMs = typeof opts.maxAgeSec === 'number' ? opts.maxAgeSec * 1000 : null
   const providers = {}
   const refreshed = []
-  await Promise.all(SUPPORTED_LOGIN_PROVIDERS.map(async (kind) => {
+  await completeAuthWork(SUPPORTED_LOGIN_PROVIDERS.map(async (kind) => {
     const stored = auth?.[kind]
     const { defaultKey, accounts } = storeAccounts(stored && typeof stored === 'object' ? stored : undefined)
-    const rows = await Promise.all(Object.entries(accounts).map(async ([key, session]) => {
-      const fresh = await refreshWithBook(kind, key, session, refreshBook, fetchFn, now)
+    const rows = await completeAuthWork(Object.entries(accounts).map(async ([key, session]) => {
+      const fresh = await refreshWithBook(kind, key, session, refreshBook, fetchFn, now, opts.authPath)
       if (fresh.refreshed) refreshed.push({ kind, key, session: fresh.session })
       const held = fresh.skipped === 'dead-refresh' || fresh.skipped === 'backoff'
       return {
         key,
         account: accountLabel(session, key),
         is_default: key === defaultKey,
-        logged_in: Boolean(session && session.accessToken),
+        logged_in: Boolean(fresh.session && fresh.session.accessToken),
         ...(await usageWithBook(kind, key, fresh.session, usageCache, { fetchFn, now, maxAgeMs, randomFn: opts.randomFn })),
         ...(fresh.refreshed ? { refreshed: true } : {}),
         ...(fresh.error ? { refresh_error: fresh.error } : {}),
@@ -1432,10 +1506,9 @@ const USAGE_BOOK_FILE = join(dirname(SUBSCRIPTIONS_AUTH_FILE), 'usage-cache.json
 export async function loginUsageReport({ fetchFn = fetch, now = Date.now(), maxAgeSec, randomFn = Math.random } = {}) {
   const refreshBook = bookOf(readBookFile(REFRESH_BOOK_FILE))
   const usageCache = bookOf(readBookFile(USAGE_BOOK_FILE))
-  const { providers, refreshed } = await collectSubscriptionUsage(readSubscriptionsAuth(), fetchFn, {
-    now, refreshBook, usageCache, maxAgeSec, randomFn,
+  const { providers } = await collectSubscriptionUsage(readSubscriptionsAuth(), fetchFn, {
+    now, refreshBook, usageCache, maxAgeSec, randomFn, authPath: SUBSCRIPTIONS_AUTH_FILE,
   })
-  persistRefreshed(refreshed)
   writeBookFile(REFRESH_BOOK_FILE, refreshBook)
   writeBookFile(USAGE_BOOK_FILE, usageCache)
   return { checked_at: new Date(now).toISOString(), providers }
@@ -1488,36 +1561,6 @@ export async function loginQuotaReport({ kind, account, maxAgeSec, fetchFn = fet
 }
 
 /**
- * File refreshed sessions back into the store.
- *
- * Re-reads before writing: another process may have refreshed meanwhile, and a
- * token issued later must never be replaced by an older one.
- *
- * @param refreshed - `{kind, key, session}` for each session renewed.
- */
-function persistRefreshed(refreshed) {
-  if (refreshed.length === 0) return
-  let current
-  try {
-    current = readSubscriptionsAuthForWrite()
-  } catch (e) {
-    process.stderr.write(`ahv login usage: ${SUBSCRIPTIONS_AUTH_FILE} không đọc được (${e.message}) — không ghi token vừa làm mới\n`)
-    return
-  }
-  let changed = false
-  for (const { kind, key, session } of refreshed) {
-    const existing = storeAccounts(current[kind]).accounts[key]
-    const existingExpiry = existing && typeof existing.expiresAt === 'number' ? existing.expiresAt : 0
-    if (existingExpiry >= session.expiresAt) continue
-    // Back into the account it came from: writing the bare session at the
-    // top of the entry is what shadowed a live login with a stale one.
-    current[kind] = withAccountSession(current[kind], key, session)
-    changed = true
-  }
-  if (changed) writeSubscriptionsAuth(current)
-}
-
-/**
  * Renew the sessions about to expire, and ask nothing else.
  *
  * login-sync's keepalive called `ahv login usage` only to keep tokens alive,
@@ -1531,16 +1574,14 @@ function persistRefreshed(refreshed) {
  * @throws when the store exists but cannot be read or parsed.
  */
 export async function loginRefreshReport({ fetchFn = fetch, now = Date.now() } = {}) {
-  const auth = existsSync(SUBSCRIPTIONS_AUTH_FILE) ? JSON.parse(readFileSync(SUBSCRIPTIONS_AUTH_FILE, 'utf8')) : {}
+  const auth = readSubscriptionsAuthForWrite()
   const refreshBook = bookOf(readBookFile(REFRESH_BOOK_FILE))
-  const refreshed = []
   const providers = {}
-  await Promise.all(SUPPORTED_LOGIN_PROVIDERS.map(async (kind) => {
+  await completeAuthWork(SUPPORTED_LOGIN_PROVIDERS.map(async (kind) => {
     const stored = auth?.[kind]
     const { defaultKey, accounts } = storeAccounts(stored && typeof stored === 'object' ? stored : undefined)
-    const rows = await Promise.all(Object.entries(accounts).map(async ([key, session]) => {
-      const fresh = await refreshWithBook(kind, key, session, refreshBook, fetchFn, now)
-      if (fresh.refreshed) refreshed.push({ kind, key, session: fresh.session })
+    const rows = await completeAuthWork(Object.entries(accounts).map(async ([key, session]) => {
+      const fresh = await refreshWithBook(kind, key, session, refreshBook, fetchFn, now, SUBSCRIPTIONS_AUTH_FILE)
       return {
         key,
         account: accountLabel(session, key),
@@ -1553,7 +1594,6 @@ export async function loginRefreshReport({ fetchFn = fetch, now = Date.now() } =
     }))
     providers[kind] = { accounts: rows }
   }))
-  persistRefreshed(refreshed)
   writeBookFile(REFRESH_BOOK_FILE, refreshBook)
   return { checked_at: new Date(now).toISOString(), providers }
 }
@@ -1658,34 +1698,40 @@ function loginAccounts(provider) {
  * @param provider - provider id.
  * @param key - the account key from `login accounts`.
  */
-/** The store for a login command that writes it; refuses (exit 1) when the file cannot be read. */
-function authForWrite() {
-  try {
-    return readSubscriptionsAuthForWrite()
-  } catch (e) {
-    return errJson('internal_error', `${SUBSCRIPTIONS_AUTH_FILE} không đọc được (${e.message}) — không ghi đè kho`, true, 0, 1)
-  }
+/** Keep the plugin's write lock from the fresh store read through the command's mutation. */
+async function authForWrite(change) {
+  return withAuthLock(`${SUBSCRIPTIONS_AUTH_FILE}.lock`, async () => {
+    let auth
+    try {
+      auth = readSubscriptionsAuthForWrite()
+    } catch (error) {
+      throw Object.assign(new Error(`${SUBSCRIPTIONS_AUTH_FILE} không đọc được (${error.message}) — không ghi đè kho`), { authReadError: true })
+    }
+    return change(auth)
+  })
 }
 
-function loginUse(provider, key) {
+async function loginUse(provider, key) {
   if (!provider || !key) errJson('internal_error', 'use: cần truyền provider và account key', true, 0, 2)
   if (!SUPPORTED_LOGIN_PROVIDERS.includes(provider)) {
     errJson('internal_error', `provider "${provider}" không hỗ trợ`, true, 0, 2)
   }
-  const auth = authForWrite()
-  const { defaultKey, accounts } = storeAccounts(auth[provider])
-  if (!(key in accounts)) {
-    errJson('internal_error', `account "${key}" chưa có trong kho của ${provider}`, true, 0, 2)
+  try {
+    const output = await authForWrite(auth => {
+      const { defaultKey, accounts } = storeAccounts(auth[provider])
+      if (!(key in accounts)) {
+        throw Object.assign(new Error(`account "${key}" chưa có trong kho của ${provider}`), { exitCode: 2 })
+      }
+      if (defaultKey !== key) {
+        auth[provider] = { ...entryExtras(auth[provider]), default: key, accounts }
+        writeSubscriptionsAuth(auth)
+      }
+      return { provider, default: key, changed: defaultKey !== key }
+    })
+    printJson(output, 0)
+  } catch (error) {
+    errJson(error.authReadError || error.exitCode === 2 ? 'internal_error' : 'permission_denied', error.message, true, 0, error.exitCode ?? 1)
   }
-  if (defaultKey !== key) {
-    auth[provider] = { ...entryExtras(auth[provider]), default: key, accounts }
-    try {
-      writeSubscriptionsAuth(auth)
-    } catch (e) {
-      errJson('permission_denied', `không ghi được ${SUBSCRIPTIONS_AUTH_FILE}: ${e.message}`, true, 0, 1)
-    }
-  }
-  printJson({ provider, default: key, changed: defaultKey !== key }, 0)
 }
 
 /**
@@ -1694,50 +1740,54 @@ function loginUse(provider, key) {
  * @param provider - provider id.
  * @param key - the account key from `login accounts`.
  */
-function loginForget(provider, key) {
+async function loginForget(provider, key) {
   if (!provider || !key) errJson('internal_error', 'forget: cần truyền provider và account key', true, 0, 2)
   if (!SUPPORTED_LOGIN_PROVIDERS.includes(provider)) {
     errJson('internal_error', `provider "${provider}" không hỗ trợ`, true, 0, 2)
   }
-  const auth = authForWrite()
-  const { defaultKey, accounts } = storeAccounts(auth[provider])
-  const existed = key in accounts
-  if (existed) {
-    delete accounts[key]
-    const nextDefault = defaultKey === key ? (Object.keys(accounts)[0] ?? '') : defaultKey
-    if (Object.keys(accounts).length === 0) delete auth[provider]
-    else auth[provider] = { ...entryExtras(auth[provider]), default: nextDefault, accounts }
-    try {
-      writeSubscriptionsAuth(auth)
-    } catch (e) {
-      errJson('permission_denied', `không ghi được ${SUBSCRIPTIONS_AUTH_FILE}: ${e.message}`, true, 0, 1)
-    }
+  try {
+    const output = await authForWrite(auth => {
+      const { defaultKey, accounts } = storeAccounts(auth[provider])
+      const existed = key in accounts
+      if (existed) {
+        delete accounts[key]
+        const nextDefault = defaultKey === key ? (Object.keys(accounts)[0] ?? '') : defaultKey
+        if (Object.keys(accounts).length === 0) delete auth[provider]
+        else auth[provider] = { ...entryExtras(auth[provider]), default: nextDefault, accounts }
+        writeSubscriptionsAuth(auth)
+      }
+      const { defaultKey: after } = storeAccounts(auth[provider])
+      return { provider, forgot: key, was_present: existed, default: after === '' ? null : after }
+    })
+    printJson(output, 0)
+  } catch (error) {
+    errJson(error.authReadError ? 'internal_error' : 'permission_denied', error.message, true, 0, 1)
   }
-  const { defaultKey: after } = storeAccounts(auth[provider])
-  printJson({ provider, forgot: key, was_present: existed, default: after === '' ? null : after }, 0)
 }
 
-function loginLogout(provider) {
+async function loginLogout(provider) {
   if (!provider) errJson('internal_error', 'logout: cần truyền provider', true, 0, 2)
   if (!SUPPORTED_LOGIN_PROVIDERS.includes(provider)) {
     errJson('internal_error', `provider "${provider}" không hỗ trợ`, true, 0, 2)
   }
-  const auth = authForWrite()
-  const wasLoggedIn = Boolean(auth[provider])
-  if (wasLoggedIn) {
-    delete auth[provider]
-    try {
-      writeSubscriptionsAuth(auth)
-    } catch (e) {
-      errJson('permission_denied', `không ghi được ${SUBSCRIPTIONS_AUTH_FILE}: ${e.message}`, true, 0, 1)
-    }
+  try {
+    const wasLoggedIn = await authForWrite(auth => {
+      const present = Boolean(auth[provider])
+      if (present) {
+        delete auth[provider]
+        writeSubscriptionsAuth(auth)
+      }
+      return present
+    })
+    printJson({
+      provider,
+      logged_out: true,
+      was_logged_in: wasLoggedIn,
+      note: wasLoggedIn ? 'token đã xoá khỏi auth.json — cần restart ahv-web service để plugin refresh routes' : 'provider chưa từng login',
+    }, 0)
+  } catch (error) {
+    errJson(error.authReadError ? 'internal_error' : 'permission_denied', error.message, true, 0, 1)
   }
-  printJson({
-    provider,
-    logged_out: true,
-    was_logged_in: wasLoggedIn,
-    note: wasLoggedIn ? 'token đã xoá khỏi auth.json — cần restart ahv-web service để plugin refresh routes' : 'provider chưa từng login',
-  }, 0)
 }
 
 // ── models ──────────────────────────────────────────────────────────────
@@ -2302,6 +2352,8 @@ function readCodexCliSession(home) {
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
       expiresAt: expiresAt ?? Date.now(),
+      ...(typeof tokens.refreshTokenExpiresAt === 'number' && Number.isFinite(tokens.refreshTokenExpiresAt)
+        ? { refreshTokenExpiresAt: tokens.refreshTokenExpiresAt } : {}),
       accountId: tokens.account_id ?? null,
       idToken: tokens.id_token ?? null,
     },
@@ -2345,6 +2397,8 @@ function readClaudeCliSession(home, claudeConfigDir) {
       accessToken,
       refreshToken,
       expiresAt: typeof expiresAt === 'number' ? expiresAt : Date.now(),
+      ...(typeof oauth?.refreshTokenExpiresAt === 'number' && Number.isFinite(oauth.refreshTokenExpiresAt)
+        ? { refreshTokenExpiresAt: oauth.refreshTokenExpiresAt } : {}),
       ...(scopes === undefined ? {} : { scopes }),
       ...(typeof oauth?.emailAddress === 'string' ? { emailAddress: oauth.emailAddress } : {}),
       ...(typeof oauth?.subscriptionType === 'string' ? { subscriptionType: oauth.subscriptionType } : {}),
@@ -2371,6 +2425,8 @@ function readGrokCliSession(home) {
       accessToken,
       refreshToken,
       expiresAt: typeof expiresAt === 'number' ? expiresAt : Date.now(),
+      ...(typeof raw?.refreshTokenExpiresAt === 'number' && Number.isFinite(raw.refreshTokenExpiresAt)
+        ? { refreshTokenExpiresAt: raw.refreshTokenExpiresAt } : {}),
       tokenEndpoint: raw?.token_endpoint ?? 'https://auth.x.ai/oauth2/token',
       account: raw?.email ?? raw?.account ?? null,
     },
@@ -2389,17 +2445,12 @@ function readGrokCliSession(home) {
  * @returns {Promise<Record<string, {imported: boolean, reason: string | null}>>} per-provider outcome.
  */
 export async function importCliCredentials({ home = homedir(), claudeConfigDir, fetchFn = fetch } = {}) {
-  const storePath = join(home, '.dsh', 'plugins', 'subscriptions', 'auth.json')
-  let store = {}
-  if (existsSync(storePath)) {
-    try {
-      store = JSON.parse(readFileSync(storePath, 'utf8'))
-    } catch {
-      store = null
-    }
-    if (store === null || typeof store !== 'object' || Array.isArray(store)) {
-      return Object.fromEntries(['codex', 'grok', 'claude'].map(p => [p, { imported: false, reason: 'store_unreadable' }]))
-    }
+  const storePath = home === homedir() ? SUBSCRIPTIONS_AUTH_FILE : join(home, '.dsh', 'plugins', 'subscriptions', 'auth.json')
+  let before
+  try {
+    before = readSubscriptionsAuthForWrite(storePath)
+  } catch {
+    return Object.fromEntries(['codex', 'grok', 'claude'].map(p => [p, { imported: false, reason: 'store_unreadable' }]))
   }
 
   const readers = {
@@ -2408,7 +2459,7 @@ export async function importCliCredentials({ home = homedir(), claudeConfigDir, 
     claude: (userHome) => readClaudeCliSession(userHome, claudeConfigDir),
   }
   const report = {}
-  let changed = false
+  const candidates = []
 
   for (const [provider, read] of Object.entries(readers)) {
     const { session: read$, reason } = read(home)
@@ -2422,26 +2473,47 @@ export async function importCliCredentials({ home = homedir(), claudeConfigDir, 
       const email = await claudeProfileEmail(session.accessToken, fetchFn)
       if (email !== '') session.emailAddress = email
     }
-    const existing = store[provider]
-    // A store the plugin already keeps per account takes the login into one
-    // account: spreading the bare session over it would make the plugin read
-    // the entry as a single legacy session and drop every other account.
-    const perAccount = existing !== null && typeof existing === 'object' && typeof existing.accessToken !== 'string'
-      && existing.accounts !== null && typeof existing.accounts === 'object' && !Array.isArray(existing.accounts)
-    const key = perAccount ? importAccountKey(provider, session, existing) : ''
-    const current = perAccount ? existing.accounts[key] : existing
-    const existingExpiry = typeof current?.expiresAt === 'number' ? current.expiresAt : 0
-    if (existingExpiry >= session.expiresAt) {
-      report[provider] = { imported: false, reason: 'plugin_token_newer' }
-      continue
-    }
-    store[provider] = perAccount ? withAccountSession(existing, key, { ...current, ...session }) : { ...existing, ...session }
-    report[provider] = { imported: true, reason: null }
-    changed = true
+    candidates.push({ provider, session })
   }
 
-  if (changed) writeFileAtomic600(storePath, JSON.stringify(store, null, 2))
-  return report
+  if (candidates.length === 0) return report
+  return withAuthLock(`${storePath}.lock`, async () => {
+    let store
+    try {
+      store = readSubscriptionsAuthForWrite(storePath)
+    } catch {
+      for (const { provider } of candidates) report[provider] = { imported: false, reason: 'store_unreadable' }
+      return report
+    }
+    let changed = false
+    for (const { provider, session } of candidates) {
+      if (Object.hasOwn(before, provider) && !Object.hasOwn(store, provider)) {
+        report[provider] = { imported: false, reason: 'store_changed' }
+        continue
+      }
+      const existing = store[provider]
+      const perAccount = existing !== null && typeof existing === 'object' && typeof existing.accessToken !== 'string'
+        && existing.accounts !== null && typeof existing.accounts === 'object' && !Array.isArray(existing.accounts)
+      const key = perAccount ? importAccountKey(provider, session, existing) : ''
+      const current = perAccount ? existing.accounts[key] : existing
+      const initial = before[provider]
+      const initialSession = initial?.accounts ? initial.accounts[importAccountKey(provider, session, initial)] : initial
+      if (!sameAuthTokens(current, initialSession)) {
+        report[provider] = { imported: false, reason: 'store_changed' }
+        continue
+      }
+      const existingExpiry = typeof current?.expiresAt === 'number' ? current.expiresAt : 0
+      if (existingExpiry >= session.expiresAt) {
+        report[provider] = { imported: false, reason: 'plugin_token_newer' }
+        continue
+      }
+      store[provider] = perAccount ? withAccountSession(existing, key, { ...current, ...session }) : { ...existing, ...session }
+      report[provider] = { imported: true, reason: null }
+      changed = true
+    }
+    if (changed) writeSubscriptionsAuth(store, storePath)
+    return report
+  })
 }
 
 /**
@@ -2583,9 +2655,9 @@ if (subcommand === 'version') {
   if (action === 'status') loginStatus()
   else if (action === 'url') loginUrl(rest[1])
   else if (action === 'accounts') loginAccounts(rest[1])
-  else if (action === 'use') loginUse(rest[1], rest[2])
-  else if (action === 'forget') loginForget(rest[1], rest[2])
-  else if (action === 'logout') loginLogout(rest[1])
+  else if (action === 'use') void loginUse(rest[1], rest[2])
+  else if (action === 'forget') void loginForget(rest[1], rest[2])
+  else if (action === 'logout') void loginLogout(rest[1])
   else if (action === 'import') void loginImport()
   else if (action === 'usage') void loginUsage(rest.slice(1))
   else if (action === 'quota') void loginQuota(rest.slice(1))
