@@ -13,6 +13,10 @@
 # Usage: scripts/prod/mirror-prebuilt.sh [channel-dir]
 set -euo pipefail
 dir="${1:-/srv/ahvclaw.com/releases/ahv-cli}"
+# Serialize channel writes and cleanup using the directory inode, with no lock file.
+exec {AHV_CHANNEL_LOCK_FD}<"$dir"
+flock -x "$AHV_CHANNEL_LOCK_FD"
+export AHV_CHANNEL_LOCK_FD
 repo="${AHV_GITHUB_REPO:-tranhieu860/AHVclaw}"
 platforms="${AHV_MIRROR_PLATFORMS:-linux-arm64 linux-x64}"
 # Only the channels: channels.json also carries "store_floor" (the CMS's store-safe floor), which is not a tag to mirror.
@@ -98,3 +102,6 @@ for tag in $tags; do
     merge "$tag" "$platform" "$file"
   done
 done
+
+# The timer also bounds old downloads when no new asset was mirrored.
+python3 "$(dirname "$0")/prune-releases.py" "$dir"

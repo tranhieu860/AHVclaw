@@ -1,0 +1,9 @@
+# AHV CLI production scripts
+
+`release-cli.sh` prunes the download directory after a successful release. `mirror-prebuilt.sh` also prunes on every timer pass, including when it downloads nothing; `promote.sh` prunes after changing stable. This bounds old downloads left by earlier runs without changing the standalone prebuilt builder's staging directories.
+
+Retention keeps the three newest numeric `vN.N.N` versions found in regular release files, plus every version named by `stable`, `canary` and optional `store_floor` in `channels.json`. A pointer outside the latest three adds a retained version. Cleanup refuses missing, malformed or invalid channel pointers. Only complete `<tag>.json` and `ahv-cli-<tag>-linux-{x64,arm64}[-glibcN.N[.N]].tar.zst` names are eligible; all archive variants and orphan archives of an expired tag are removed individually. Partial files, symlinks, directories, aliases such as `manifest.json`, and other files remain untouched.
+
+The three channel writers and `prune-releases.py` take an exclusive `flock` on the channel directory inode before reading or writing channel state. Shell writers pass their locked descriptor in `AHV_CHANNEL_LOCK_FD`; cleanup verifies that it refers to the same directory. External channel writers must use the same directory lock. Cleanup also stops when it detects externally changed channel bytes or replaced artifacts. This protocol requires Linux `flock` and Python's `fcntl`; it creates no lock file and releases automatically when a process exits.
+
+Run the temporary-directory checks with `python3 scripts/prod/tests/test-release-retention.py`. Run the selected behavioral mutants with `python3 scripts/prod/tests/test-release-retention-mutations.py`; they run copies of these scripts with fake build, git and curl commands and never publish. The test fixture redirects the release log into its temporary tree.

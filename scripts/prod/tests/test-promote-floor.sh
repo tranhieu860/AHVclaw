@@ -36,6 +36,9 @@ for t in v0.2.49 v0.2.54 v0.2.55; do expect "refuses $t under the published floo
 expect "promotes the floor tag itself" 0 "$d" v0.2.56 v0.2.56
 expect "promotes above the floor" 0 "$d" v0.2.57 v0.2.57
 if grep -q '"store_floor": "v0.2.56"' "$d/channels.json"; then printf '  PASS  keeps store_floor in channels.json\n'; else printf '  FAIL  store_floor lost\n'; fails=$((fails + 1)); fi
+# Successful promotes now prune expired releases; recreate this input so the
+# next assertion exercises the floor refusal rather than a missing manifest.
+printf '{"version":"v0.2.49","packages":{}}\n' > "$d/v0.2.49.json"
 out="$(bash "$PROMOTE" v0.2.49 "$d" 2>&1)"
 if printf '%s' "$out" | grep -q 'under the store-safe floor v0.2.56' && ! grep -q v0.2.49 "$d/manifest.json" 2>/dev/null; then
   printf '  PASS  says why, and manifest.json is untouched\n'

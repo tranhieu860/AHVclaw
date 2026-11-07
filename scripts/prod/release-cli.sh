@@ -175,6 +175,9 @@ log "smoke passed"
 # that a proven build exists.
 log "packaging $next → $RELEASE_DIR"
 mkdir -p "$RELEASE_DIR" || { rollback; fail "cannot create $RELEASE_DIR"; }
+exec {AHV_CHANNEL_LOCK_FD}<"$RELEASE_DIR"
+flock -x "$AHV_CHANNEL_LOCK_FD"
+export AHV_CHANNEL_LOCK_FD
 # The reference machine's glibc (2.39) is newer than the fleet's oldest hosts
 # (2.28): its x64 archive would not run there, and a dsh 0.2 core cannot be
 # built from source on them. Publish it only if it happens to run on the
@@ -212,5 +215,7 @@ print("channels:", json.dumps(channels))
 PY
 log "pushing master and $next to origin"
 git push --no-verify -q origin master "$next" || fail "push failed (build and channel are done; push by hand)"
+python3 "$FORK/scripts/prod/prune-releases.py" "$RELEASE_DIR" \
+  || fail "released $next, but download retention failed; retry prune-releases.py"
 log "released $next"
 printf '%s\n' "$next"
