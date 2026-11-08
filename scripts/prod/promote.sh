@@ -61,4 +61,8 @@ os.replace(staged, manifest_path)
 print("stable →", tag, "| channels:", json.dumps(channels))
 PY
 
-python3 "$(dirname "$0")/prune-releases.py" "$dir"
+if cleanup_output="$(python3 "$(dirname "$0")/prune-releases.py" "$dir" 2>&1)"; then
+  [ -z "$cleanup_output" ] || printf '%s\n' "$cleanup_output"
+else
+  printf 'stable → %s OK; dọn kho lỗi: %s; chạy lại prune-releases.py\n' "$tag" "$cleanup_output" >&2
+fi

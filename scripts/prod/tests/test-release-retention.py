@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import shutil
+import stat
 import tempfile
 import unittest
 import sys
@@ -42,8 +43,11 @@ class ReleaseRetentionTests(unittest.TestCase):
         names = [f'{tag}.json', f'ahv-cli-{tag}-linux-x64.tar.zst',
                  f'ahv-cli-{tag}-linux-arm64.tar.zst',
                  f'ahv-cli-{tag}-linux-x64-glibc2.28.tar.zst']
-        for name in names:
-            (self.channel / name).write_text(json.dumps({'version': tag, 'packages': {}}))
+        packages = {platform: {'file': name} for platform, name in zip(
+            ['linux-x64', 'linux-arm64', 'linux-x64-glibc2.28'], names[1:])}
+        (self.channel / names[0]).write_text(json.dumps({'version': tag, 'packages': packages}))
+        for name in names[1:]:
+            (self.channel / name).write_text('archive bytes')
         return set(names)
 
     def mirror(self):
@@ -132,16 +136,99 @@ class ReleaseRetentionTests(unittest.TestCase):
         self.assertEqual(self.mirror().returncode, 0)
         self.assertEqual({p.name: p.read_bytes() for p in self.channel.iterdir()}, before)
 
+    def test_invalid_pointer_targets_refuse_all_deletion(self):
+        # Skipping any pointer's manifest/archive validation must leave an expired
+        # release eligible for deletion here, making the preservation check fail.
+        def snapshot():
+            result = {}
+            for path in self.channel.iterdir():
+                mode = path.lstat().st_mode
+                if stat.S_ISLNK(mode):
+                    content = os.readlink(path)
+                elif stat.S_ISREG(mode):
+                    try:
+                        content = path.read_bytes()
+                    except PermissionError:
+                        content = None
+                else:
+                    content = None
+                result[path.name] = (mode, content)
+            return result
+
+        for pointer in ['stable', 'canary', 'store_floor']:
+            for defect in ['missing-manifest', 'missing-archive', 'version-mismatch',
+                           'manifest-symlink', 'manifest-directory', 'archive-symlink',
+                           'archive-directory', 'invalid-json', 'unreadable-manifest']:
+                with self.subTest(pointer=pointer, defect=defect):
+                    shutil.rmtree(self.channel)
+                    self.channel.mkdir()
+                    self.pointers = {'stable': 'v0.2.10', 'canary': 'v0.2.10', 'store_floor': 'v0.2.10'}
+                    self.pointers[pointer] = 'v0.2.1'
+                    self.channels()
+                    for tag in ['v0.2.1', 'v0.2.2', 'v0.2.3', 'v0.2.8', 'v0.2.9', 'v0.2.10']:
+                        self.release(tag)
+                    manifest = self.channel / 'v0.2.1.json'
+                    archive = self.channel / 'ahv-cli-v0.2.1-linux-arm64.tar.zst'
+                    if defect == 'missing-manifest':
+                        manifest.unlink()
+                    elif defect == 'missing-archive':
+                        archive.unlink()
+                    elif defect == 'version-mismatch':
+                        data = json.loads(manifest.read_text())
+                        data['version'] = 'v0.2.99'
+                        manifest.write_text(json.dumps(data))
+                    elif defect in ['manifest-symlink', 'archive-symlink']:
+                        target = manifest if defect == 'manifest-symlink' else archive
+                        outside = self.root / 'symlink-target'
+                        outside.write_bytes(target.read_bytes())
+                        target.unlink()
+                        target.symlink_to(outside)
+                    elif defect in ['manifest-directory', 'archive-directory']:
+                        target = manifest if defect == 'manifest-directory' else archive
+                        target.unlink()
+                        target.mkdir()
+                    elif defect == 'invalid-json':
+                        manifest.write_text('{')
+                    else:
+                        unreadable_bytes = manifest.read_bytes()
+                        manifest.chmod(0)
+                    before = snapshot()
+                    result = subprocess.run(['python3', str(SCRIPTS / 'prune-releases.py'), str(self.channel)],
+                                            env=self.env, capture_output=True, text=True, timeout=20)
+                    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn('v0.2.1', result.stderr)
+                    self.assertEqual(snapshot(), before)
+                    if defect == 'unreadable-manifest':
+                        manifest.chmod(0o644)
+                        self.assertEqual(manifest.read_bytes(), unreadable_bytes)
+
+    def test_promote_warns_when_cleanup_fails_after_stable_moves(self):
+        self.pointers = {'stable': 'v0.2.56', 'canary': 'invalid-tag', 'store_floor': 'v0.2.57'}
+        self.channels()
+        for tag in ['v0.2.56', 'v0.2.57', 'v0.2.58', 'v0.2.59', 'v0.2.60', 'v0.2.61']:
+            self.release(tag)
+        before = {p.name: p.read_bytes() for p in self.channel.iterdir() if p.name != 'channels.json'}
+        result = subprocess.run(['bash', str(SCRIPTS / 'promote.sh'), 'v0.2.60', str(self.channel)],
+                                env=self.env, capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads((self.channel / 'channels.json').read_text())['stable'], 'v0.2.60')
+        self.assertEqual((self.channel / 'manifest.json').read_bytes(), before['v0.2.60.json'])
+        self.assertIn('stable → v0.2.60 OK; dọn kho lỗi: prune: invalid or missing channel pointer: canary; '
+                      'chạy lại prune-releases.py', result.stderr)
+        self.assertEqual({p.name: p.read_bytes() for p in self.channel.iterdir()
+                          if p.name not in ['channels.json', 'manifest.json']}, before)
+
     def test_changed_pointer_or_replaced_artifact_stops_a_stale_plan(self):
         spec = importlib.util.spec_from_file_location('prune_releases', SCRIPTS / 'prune-releases.py')
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        for tag in ['v0.2.1', 'v0.2.2', 'v0.2.3', 'v0.2.8', 'v0.2.9', 'v0.2.10']:
-            self.release(tag)
         scandir = os.scandir
         for change in ['pointer', 'artifact']:
             with self.subTest(change=change):
+                self.pointers['store_floor'] = 'v0.2.1'
                 self.channels()
+                for tag in ['v0.2.1', 'v0.2.2', 'v0.2.3', 'v0.2.8', 'v0.2.9', 'v0.2.10']:
+                    self.release(tag)
                 @contextmanager
                 def concurrent_writer(directory):
                     with scandir(directory) as entries:
@@ -158,7 +245,6 @@ class ReleaseRetentionTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, 'changed during cleanup'):
                         module.prune(self.channel)
                 self.assertTrue((self.channel / 'v0.2.3.json').exists())
-                self.pointers['store_floor'] = 'v0.2.1'
 
     def test_promote_releases_the_old_stable_after_pointer_moves(self):
         self.pointers = {'stable': 'v0.2.56', 'canary': 'v0.2.61', 'store_floor': 'v0.2.57'}

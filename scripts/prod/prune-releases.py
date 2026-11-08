@@ -3,7 +3,8 @@
 
 Only regular files with complete names emitted by build-prebuilt.sh and
 mirror-prebuilt.sh are eligible. Symlinks, directories and partial files stay.
-Missing or invalid channel pointers stop cleanup before any deletion.
+Missing or invalid channel pointers, manifests or referenced archives stop
+cleanup before any deletion.
 """
 import json
 import fcntl
@@ -16,6 +17,25 @@ import sys
 TAG = r'v[0-9]+\.[0-9]+\.[0-9]+'
 MANIFEST = re.compile(rf'({TAG})\.json')
 ARCHIVE = re.compile(rf'ahv-cli-({TAG})-linux-(?:x64|arm64)(?:-glibc[0-9]+(?:\.[0-9]+)+)?\.tar\.zst')
+
+
+def validate_pointer(directory, tag):
+    """Require a readable tag manifest and every package's regular archive."""
+    path = directory / f'{tag}.json'
+    if not stat.S_ISREG(path.lstat().st_mode):
+        raise ValueError(f'pointer manifest is not a regular file: {path.name}')
+    manifest = json.loads(path.read_bytes())
+    if not isinstance(manifest, dict) or manifest.get('version') != tag:
+        raise ValueError(f'pointer manifest version does not match {tag}')
+    packages = manifest.get('packages')
+    if not isinstance(packages, dict):
+        raise ValueError(f'pointer manifest packages must be an object: {path.name}')
+    for package in packages.values():
+        name = package.get('file') if isinstance(package, dict) else None
+        if not isinstance(name, str) or not name or Path(name).name != name:
+            raise ValueError(f'invalid pointer package file in {path.name}')
+        if not stat.S_ISREG((directory / name).lstat().st_mode):
+            raise ValueError(f'pointer archive is not a regular file: {name}')
 
 
 def prune(directory):
@@ -50,6 +70,11 @@ def prune_locked(directory):
         if not isinstance(value, str) or re.fullmatch(TAG, value) is None:
             raise ValueError(f'invalid or missing channel pointer: {key}')
         keep.add(value)
+    for tag in keep:
+        try:
+            validate_pointer(directory, tag)
+        except (OSError, ValueError) as error:
+            raise ValueError(f'pointer {tag}: {error}') from error
     artifacts = []
     with os.scandir(directory) as entries:
         for entry in entries:

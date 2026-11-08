@@ -41,6 +41,7 @@ chmod +x "$T/bin/curl"
 
 setup() { # fresh channel + fake GitHub
   rm -rf "$T/ch" "$T/gh"; mkdir -p "$T/ch" "$T/gh/v1.0.1"
+  printf '{"version":"v1.0.0","packages":{}}\n' > "$T/ch/v1.0.0.json"
   export FAKE_GH="$T/gh"
 }
 gh_asset() { # tag platform glibc content
@@ -81,12 +82,13 @@ check "no mirror line crashes" '! grep -q Traceback "$T/out.log"'
 echo "== store_floor in channels.json is not a tag to mirror"
 setup
 printf '{"stable":"v1.0.1","canary":"v1.0.1","store_floor":"v1.0.0"}\n' > "$T/ch/channels.json"
+cp "$T/ch/v1.0.0.json" "$T/floor.orig"
 local_x64 v1.0.1 2.28 "x64-local"
 mkdir -p "$T/gh/v1.0.0"; gh_asset v1.0.0 linux-arm64 2.39 "old-arm-bytes"
 gh_asset v1.0.1 linux-arm64 2.39 "arm-bytes"
 run_mirror; rc=$?
 check "mirror exits 0 with store_floor present" '[ "$rc" = 0 ]'
-check "the floor tag is not fetched" '[ "$(fetched v1.0.0)" = 0 ] && [ ! -e "$T/ch/v1.0.0.json" ]'
+check "the floor tag is not fetched or rewritten" '[ "$(fetched v1.0.0)" = 0 ] && cmp -s "$T/ch/v1.0.0.json" "$T/floor.orig"'
 check "the channel tag still is" '[ "$(entry v1.0.1 linux-arm64 glibc)" = "2.39" ]'
 
 echo "== an archive already downloaded but never merged is merged without a refetch"

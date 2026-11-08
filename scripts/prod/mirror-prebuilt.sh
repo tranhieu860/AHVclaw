@@ -14,6 +14,8 @@
 set -euo pipefail
 dir="${1:-/srv/ahvclaw.com/releases/ahv-cli}"
 # Serialize channel writes and cleanup using the directory inode, with no lock file.
+# The lock stays held during downloads (up to 900 seconds per archive), so a CMS
+# promote can exceed its 120-second timeout; retry promotion on the next run.
 exec {AHV_CHANNEL_LOCK_FD}<"$dir"
 flock -x "$AHV_CHANNEL_LOCK_FD"
 export AHV_CHANNEL_LOCK_FD

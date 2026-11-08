@@ -14,8 +14,11 @@ CHANGED = 'test_changed_pointer_or_replaced_artifact_stops_a_stale_plan'
 LOCK = 'test_cleanup_mirror_and_promote_wait_for_the_channel_writer'
 RELEASE = 'test_release_prunes_after_the_new_canary_is_committed'
 PROMOTE = 'test_promote_releases_the_old_stable_after_pointer_moves'
+TARGET = 'test_invalid_pointer_targets_refuse_all_deletion'
+PROMOTE_WARNING = 'test_promote_warns_when_cleanup_fails_after_stable_moves'
 HOOK = 'python3 "$(dirname "$0")/prune-releases.py" "$dir"'
 SHELL_LOCK = 'flock -x "$AHV_CHANNEL_LOCK_FD"'
+WARNING = '  printf \'stable → %s OK; dọn kho lỗi: %s; chạy lại prune-releases.py\\n\' "$tag" "$cleanup_output" >&2'
 MUTANTS = [
     ('keep-two', 'prune-releases.py', '[:3]', '[:2]', TIMER),
     ('keep-four', 'prune-releases.py', '[:3]', '[:4]', TIMER),
@@ -27,7 +30,16 @@ MUTANTS = [
     ('leave-glibc-variants', 'prune-releases.py', r'(?:-glibc[0-9]+(?:\.[0-9]+)+)?', '', TIMER),
     ('broad-archive-suffix', 'prune-releases.py', r"\.tar\.zst')", r"\.tar\.zst.*')", SAFETY),
     ('admit-nonregular-files', 'prune-releases.py', 'entry.is_file(follow_symlinks=False)', 'True', SAFETY),
-    ('ignore-invalid-pointers', 'prune-releases.py', "if not isinstance(value, str) or re.fullmatch(TAG, value) is None:", 'if False:', 'test_missing_or_invalid_channels_refuses_all_deletion'),
+    ('ignore-invalid-pointers', 'prune-releases.py', "raise ValueError(f'invalid or missing channel pointer: {key}')", 'continue', 'test_missing_or_invalid_channels_refuses_all_deletion'),
+    ('skip-pointer-target-validation', 'prune-releases.py', '        validate_pointer(directory, tag)', '        pass', TARGET),
+    ('skip-stable-target-validation', 'prune-releases.py', '        validate_pointer(directory, tag)', "        if channels.get('stable') != tag: validate_pointer(directory, tag)", TARGET),
+    ('skip-canary-target-validation', 'prune-releases.py', '        validate_pointer(directory, tag)', "        if channels.get('canary') != tag: validate_pointer(directory, tag)", TARGET),
+    ('skip-floor-target-validation', 'prune-releases.py', '        validate_pointer(directory, tag)', "        if channels.get('store_floor') != tag: validate_pointer(directory, tag)", TARGET),
+    ('ignore-pointer-version-mismatch', 'prune-releases.py', "if not isinstance(manifest, dict) or manifest.get('version') != tag:", 'if False:', TARGET),
+    ('allow-pointer-manifest-symlink', 'prune-releases.py', 'path.lstat().st_mode', 'path.stat().st_mode', TARGET),
+    ('allow-pointer-archive-symlink', 'prune-releases.py', '(directory / name).lstat().st_mode', '(directory / name).stat().st_mode', TARGET),
+    ('only-validate-first-package', 'prune-releases.py', 'for package in packages.values():', 'for package in list(packages.values())[:1]:', TARGET),
+    ('drop-pointer-error-tag', 'prune-releases.py', "raise ValueError(f'pointer {tag}: {error}') from error", 'raise ValueError(str(error)) from error', TARGET),
     ('ignore-pointer-change', 'prune-releases.py', 'if channels_path.read_bytes() != snapshot:', 'if False:', CHANGED),
     ('ignore-artifact-change', 'prune-releases.py', 'if not stat.S_ISREG(current.st_mode) or (current.st_dev, current.st_ino, current.st_mtime_ns, current.st_size) != (original.st_dev, original.st_ino, original.st_mtime_ns, original.st_size):', 'if False:', CHANGED),
     ('skip-prune-lock', 'prune-releases.py', 'fcntl.flock(descriptor, fcntl.LOCK_EX)', 'pass', LOCK),
@@ -36,6 +48,9 @@ MUTANTS = [
     ('skip-release-lock', 'release-cli.sh', SHELL_LOCK, ':', RELEASE),
     ('skip-mirror-cleanup', 'mirror-prebuilt.sh', HOOK, ':', TIMER),
     ('skip-promote-cleanup', 'promote.sh', HOOK, ':', PROMOTE),
+    ('promote-fails-after-pointer-moves', 'promote.sh', WARNING, '  exit 1', PROMOTE_WARNING),
+    ('hide-promote-cleanup-warning', 'promote.sh', WARNING, '  :', PROMOTE_WARNING),
+    ('hide-promote-cleanup-reason', 'promote.sh', WARNING, WARNING.replace('"$cleanup_output"', '"failed"'), PROMOTE_WARNING),
     ('skip-release-cleanup', 'release-cli.sh', 'python3 "$FORK/scripts/prod/prune-releases.py" "$RELEASE_DIR"', ':', RELEASE),
 ]
 
