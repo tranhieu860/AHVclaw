@@ -8,6 +8,9 @@ set -euo pipefail
 tag="${1:?tag}"
 dir="${2:-/srv/ahvclaw.com/releases/ahv-cli}"
 [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "tag must be vN.N.N (ASCII digits): $tag" >&2; exit 1; }
+exec {AHV_CHANNEL_LOCK_FD}<"$dir"
+flock -x "$AHV_CHANNEL_LOCK_FD"
+export AHV_CHANNEL_LOCK_FD
 [ -f "$dir/$tag.json" ] || { echo "no manifest for $tag in $dir — release it first" >&2; exit 1; }
 # The store-safe floor ("sàn an toàn kho"): v0.2.49 and v0.2.53–v0.2.55 drop an
 # account from the store when refreshing its token fails. Promoting an older
@@ -57,3 +60,9 @@ keep_owner(staged)
 os.replace(staged, manifest_path)
 print("stable →", tag, "| channels:", json.dumps(channels))
 PY
+
+if cleanup_output="$(python3 "$(dirname "$0")/prune-releases.py" "$dir" 2>&1)"; then
+  [ -z "$cleanup_output" ] || printf '%s\n' "$cleanup_output"
+else
+  printf 'stable → %s OK; dọn kho lỗi: %s; chạy lại prune-releases.py\n' "$tag" "$cleanup_output" >&2
+fi
