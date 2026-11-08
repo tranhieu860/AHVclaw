@@ -41,10 +41,10 @@ function cli(args, traceLock) {
   const preload = join(home, 'observe-lock.mjs')
   if (traceLock) writeFileSync(preload, `
     import fs from 'node:fs'; import { syncBuiltinESMExports } from 'node:module';
-    const mkdir = fs.mkdirSync; let sent = false;
-    fs.mkdirSync = function(path, ...args) {
-      if (path === ${JSON.stringify(traceLock)} && !sent) { sent = true; process.send('lock-attempt') }
-      return mkdir.call(this, path, ...args);
+    const rename = fs.renameSync; let sent = false;
+    fs.renameSync = function(from, to, ...args) {
+      if (to === ${JSON.stringify(traceLock)} && !sent) { sent = true; process.send('lock-attempt') }
+      return rename.call(this, from, to, ...args);
     };
     syncBuiltinESMExports();
     globalThis.fetch = async () => { throw new Error('real network forbidden') };
@@ -61,12 +61,12 @@ function cli(args, traceLock) {
 
 async function holdLock(path) {
   const child = spawn(process.execPath, ['--input-type=module', '-e', `
-    import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+    import { mkdirSync, writeFileSync, renameSync, rmSync } from 'node:fs';
     const path = ${JSON.stringify(path)};
     mkdirSync(path, { mode: 0o700 });
     writeFileSync(path + '/owner.json', JSON.stringify({pid:process.pid}), {mode:0o600});
     process.stdout.write('locked\\n');
-    process.stdin.once('data', () => { rmSync(path, {recursive:true,force:true}); process.exit(0) });
+    process.stdin.once('data', () => { const retired = path + '.released-' + process.pid; renameSync(path, retired); rmSync(retired, {recursive:true,force:true}); process.exit(0) });
   `], { env: { ...process.env }, stdio: ['pipe', 'pipe', 'pipe'] })
   const done = once(child, 'exit')
   await once(child.stdout, 'data')

@@ -658,25 +658,109 @@ function writeSubscriptionsAuth(obj, path = SUBSCRIPTIONS_AUTH_FILE) {
   writeFileAtomic600(path, JSON.stringify(obj, null, 2))
 }
 
-/** Share the plugin's mkdir lock; abandoned locks require explicit operator recovery. */
+/** Read field 22 after the final ')' because a process name may contain spaces or parentheses. */
+function authProcessStart(pid) {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
+    const start = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/)[19]
+    return /^\d+$/.test(start ?? '') ? start : null
+  } catch (error) {
+    // Platforms without proc metadata can still establish death through ESRCH.
+    return null
+  }
+}
+
+function authBootId() {
+  try { return readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim() || null }
+  catch (error) { return null } // No boot identity is available on non-proc platforms.
+}
+
+/** Keep the raw bytes for the comparison made under the reclaim lock. */
+function readAuthLockOwner(path) {
+  try {
+    const text = readFileSync(join(path, 'owner.json'), 'utf8')
+    const owner = JSON.parse(text)
+    if (!Number.isSafeInteger(owner?.pid) || owner.pid <= 0) return null
+    return { text, owner }
+  } catch (error) {
+    // A missing or unreadable owner is never evidence that a lock is dead.
+    return null
+  }
+}
+
+function authLockOwnerDead(owner, boot) {
+  if (typeof owner.boot === 'string' && boot !== null && owner.boot !== boot) return true
+  try { process.kill(owner.pid, 0) }
+  catch (error) { return error.code === 'ESRCH' } // EPERM and unknown errors mean busy.
+  const start = authProcessStart(owner.pid)
+  return typeof owner.start === 'string' && start !== null && owner.start !== start
+}
+
+/** Publish only populated directories, so another process never sees an ownerless lock. */
+function tryAuthLock(path, ownerText) {
+  const prepared = `${path}.new-${process.pid}-${Math.random().toString(36).slice(2)}`
+  mkdirSync(prepared, { mode: 0o700 })
+  try {
+    writeFileSync(join(prepared, 'owner.json'), ownerText, { mode: 0o600 })
+    try { renameSync(prepared, path); return true }
+    catch (error) {
+      if (error.code !== 'EEXIST' && error.code !== 'ENOTEMPTY') throw error
+      return false
+    }
+  } finally {
+    rmSync(prepared, { recursive: true, force: true })
+  }
+}
+
+/** Retire before deleting; a crash during rm must not leave an empty canonical lock. */
+function retireAuthLock(path, expected, ownerBoot) {
+  const current = readAuthLockOwner(path)
+  if (current?.text !== expected) return
+  // Reclaim rechecks death too: without proc, a reused pid can have identical owner bytes.
+  if (ownerBoot !== undefined && !authLockOwnerDead(current.owner, ownerBoot)) return
+  const stale = `${path}.stale-${process.pid}-${Math.random().toString(36).slice(2)}`
+  try { renameSync(path, stale) }
+  catch (error) {
+    if (error.code === 'ENOENT') return
+    throw error
+  }
+  rmSync(stale, { recursive: true, force: true })
+}
+
+/** Every reclaim gate uses this same protocol, including when its own owner died. */
+async function claimAuthLock(path, ownerText, owner, deadline) {
+  for (;;) {
+    if (tryAuthLock(path, ownerText)) return
+    const observed = readAuthLockOwner(path)
+    if (observed && authLockOwnerDead(observed.owner, owner.boot)) {
+      const reclaim = `${path}.reclaim`
+      await claimAuthLock(reclaim, ownerText, owner, deadline)
+      try {
+        // Recheck under the gate: a competing reaper may already have replaced the lock.
+        retireAuthLock(path, observed.text, owner.boot)
+      } finally {
+        retireAuthLock(reclaim, ownerText)
+      }
+      continue
+    }
+    if (Date.now() >= deadline) {
+      throw Object.assign(new Error(`khoá ${path} đang bị giữ bởi pid ${observed?.owner.pid ?? 'không rõ'}`), { code: 'AUTH_LOCK_BUSY' })
+    }
+    await waitForAuthLock(25)
+  }
+}
+
+/** Share the plugin's recoverable pid/start/boot lock; live owners retain a 30-second wait budget. */
 async function withAuthLock(path, callback) {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
+  const owner = { pid: process.pid, start: authProcessStart(process.pid), boot: authBootId() }
+  const ownerText = JSON.stringify(owner)
   const deadline = Date.now() + 30_000
-  for (;;) {
-    try {
-      mkdirSync(path, { mode: 0o700 })
-      break
-    } catch (error) {
-      if (error.code !== 'EEXIST') throw error
-      if (Date.now() >= deadline) throw new Error(`auth store lock timed out: ${path}`)
-      await waitForAuthLock(25)
-    }
-  }
+  await claimAuthLock(path, ownerText, owner, deadline)
   try {
-    writeFileSync(join(path, 'owner.json'), JSON.stringify({ pid: process.pid }), { mode: 0o600 })
     return await callback()
   } finally {
-    rmSync(path, { recursive: true, force: true })
+    retireAuthLock(path, ownerText)
   }
 }
 
@@ -1603,7 +1687,7 @@ async function loginRefresh() {
   try {
     report = await loginRefreshReport()
   } catch (e) {
-    errJson('internal_error', `không đọc được ${SUBSCRIPTIONS_AUTH_FILE}: ${e.message}`, true, 0, 1)
+    errJson('internal_error', e.code === 'AUTH_LOCK_BUSY' ? e.message : `không đọc được ${SUBSCRIPTIONS_AUTH_FILE}: ${e.message}`, true, 0, 1)
   }
   printJson(report, 0)
 }

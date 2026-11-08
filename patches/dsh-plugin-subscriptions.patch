@@ -1,6 +1,15 @@
 diff --git a/lib/index.js b/lib/index.js
 --- a/lib/index.js
 +++ b/lib/index.js
+@@ -9,7 +9,7 @@
+ import { basename, dirname, join } from "node:path";
+ import { dshHomePath } from "@deepseek-ai/dsh-home-paths";
+ import { execFileSync } from "node:child_process";
+-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
++import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+ import { homedir } from "node:os";
+ import { AttachmentId } from "@deepseek-ai/dsh-attachment";
+ import { WebError } from "@deepseek-ai/dsh-web";
 @@ -788,6 +788,7 @@
  		accessToken: data.accessToken,
  		refreshToken: data.refreshToken,
@@ -96,41 +105,119 @@ diff --git a/lib/index.js b/lib/index.js
  	await mkdir(dirname(path), { recursive: true });
  	const tmp = `${path}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`;
  	try {
-@@ -1315,6 +1372,33 @@
+@@ -1314,6 +1371,111 @@
+ 		throw error;
  	}
  }
- /**
-+* Cooperating processes hold an atomic directory lock until the action settles.
-+* A busy lock fails closed after 30 seconds; only its owner removes it.
-+* @param path - lock directory, next to the protected auth store.
-+* @param action - work requiring exclusive ownership.
-+* @returns the action's result.
-+*/
-+async function withAuthLock(path, action) {
-+	await mkdir(dirname(path), { recursive: true });
-+	const deadline = Date.now() + 3e4;
-+	for (;;) {
-+		try {
-+			await mkdir(path, { mode: 448 });
-+			break;
-+		} catch (error) {
-+			if (error.code !== "EEXIST") throw error;
-+			if (Date.now() >= deadline) throw new Error(`subscriptions auth lock busy: ${path}; inspect owner.json before removing an abandoned lock`);
-+			await new Promise((resolve) => setTimeout(resolve, 25));
-+		}
-+	}
++/** Read field 22 after the final ")" because a process name may contain spaces or parentheses. */
++function authProcessStart(pid) {
 +	try {
-+		await writeFile(join(path, "owner.json"), JSON.stringify({ pid: process.pid }), { mode: 384 });
-+		return await action();
-+	} finally {
-+		await rm(path, { recursive: true, force: true });
++		const stat = readFileSync(`/proc/${pid}/stat`, "utf8")
++		const start = stat.slice(stat.lastIndexOf(")") + 1).trim().split(/\s+/)[19]
++		return /^\d+$/.test(start ?? "") ? start : null
++	} catch (error) {
++		// Platforms without proc metadata can still establish death through ESRCH.
++		return null
 +	}
 +}
-+/**
++
++function authBootId() {
++	try { return readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim() || null }
++	catch (error) { return null } // No boot identity is available on non-proc platforms.
++}
++
++/** Keep the raw bytes for the comparison made under the reclaim lock. */
++function readAuthLockOwner(path) {
++	try {
++		const text = readFileSync(join(path, "owner.json"), "utf8")
++		const owner = JSON.parse(text)
++		if (!Number.isSafeInteger(owner?.pid) || owner.pid <= 0) return null
++		return { text, owner }
++	} catch (error) {
++		// A missing or unreadable owner is never evidence that a lock is dead.
++		return null
++	}
++}
++
++function authLockOwnerDead(owner, boot) {
++	if (typeof owner.boot === "string" && boot !== null && owner.boot !== boot) return true
++	try { process.kill(owner.pid, 0) }
++	catch (error) { return error.code === "ESRCH" } // EPERM and unknown errors mean busy.
++	const start = authProcessStart(owner.pid)
++	return typeof owner.start === "string" && start !== null && owner.start !== start
++}
++
++/** Publish only populated directories, so another process never sees an ownerless lock. */
++function tryAuthLock(path, ownerText) {
++	const prepared = `${path}.new-${process.pid}-${Math.random().toString(36).slice(2)}`
++	mkdirSync(prepared, { mode: 0o700 })
++	try {
++		writeFileSync(join(prepared, "owner.json"), ownerText, { mode: 0o600 })
++		try { renameSync(prepared, path); return true }
++		catch (error) {
++			if (error.code !== "EEXIST" && error.code !== "ENOTEMPTY") throw error
++			return false
++		}
++	} finally {
++		rmSync(prepared, { recursive: true, force: true })
++	}
++}
++
++/** Retire before deleting; a crash during rm must not leave an empty canonical lock. */
++function retireAuthLock(path, expected, ownerBoot) {
++	const current = readAuthLockOwner(path)
++	if (current?.text !== expected) return
++	// Reclaim rechecks death too: without proc, a reused pid can have identical owner bytes.
++	if (ownerBoot !== undefined && !authLockOwnerDead(current.owner, ownerBoot)) return
++	const stale = `${path}.stale-${process.pid}-${Math.random().toString(36).slice(2)}`
++	try { renameSync(path, stale) }
++	catch (error) {
++		if (error.code === "ENOENT") return
++		throw error
++	}
++	rmSync(stale, { recursive: true, force: true })
++}
++
++/** Every reclaim gate uses this same protocol, including when its own owner died. */
++async function claimAuthLock(path, ownerText, owner, deadline) {
++	for (;;) {
++		if (tryAuthLock(path, ownerText)) return
++		const observed = readAuthLockOwner(path)
++		if (observed && authLockOwnerDead(observed.owner, owner.boot)) {
++			const reclaim = `${path}.reclaim`
++			await claimAuthLock(reclaim, ownerText, owner, deadline)
++			try {
++				// Recheck under the gate: a competing reaper may already have replaced the lock.
++				retireAuthLock(path, observed.text, owner.boot)
++			} finally {
++				retireAuthLock(reclaim, ownerText)
++			}
++			continue
++		}
++		if (Date.now() >= deadline) {
++			throw Object.assign(new Error(`khoá ${path} đang bị giữ bởi pid ${observed?.owner.pid ?? "không rõ"}`), { code: "AUTH_LOCK_BUSY" })
++		}
++		await new Promise((resolve) => setTimeout(resolve, 25))
++	}
++}
++
++/** Hold the shared pid/start/boot lock until the action settles; recover only proven dead owners. */
++async function withAuthLock(path, action) {
++	mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
++	const owner = { pid: process.pid, start: authProcessStart(process.pid), boot: authBootId() }
++	const ownerText = JSON.stringify(owner)
++	const deadline = Date.now() + 3e4
++	await claimAuthLock(path, ownerText, owner, deadline)
++	try {
++		return await action()
++	} finally {
++		retireAuthLock(path, ownerText)
++	}
++}
+ /**
  * One write chain per store path. Every mutation is a read-modify-write of a
  * single JSON file, and the plugin has several independent writers — a login,
- * a logout, and one token refresh per provider account, each on its own
-@@ -1333,7 +1417,8 @@
+@@ -1333,7 +1495,8 @@
  * @returns whatever `action` returns.
  */
  async function serialize(path, action) {
@@ -140,7 +227,7 @@ diff --git a/lib/index.js b/lib/index.js
  	const tail = next.then(() => void 0, () => void 0);
  	writeChains.set(path, tail);
  	try {
-@@ -1383,17 +1468,19 @@
+@@ -1383,17 +1546,19 @@
  * @param account - the account key (see {@link accountKeyOf}).
  * @param session - the fresh session from a login or refresh.
  * @param path - store file path; defaults to {@link authFilePath}.
@@ -166,7 +253,7 @@ diff --git a/lib/index.js b/lib/index.js
  		store[provider] = {
  			...entry,
  			default: entry?.default ?? account,
-@@ -1403,6 +1490,7 @@
+@@ -1403,6 +1568,7 @@
  			}
  		};
  		await writeStore(store, path);
@@ -174,7 +261,7 @@ diff --git a/lib/index.js b/lib/index.js
  	});
  }
  /**
-@@ -1414,7 +1502,7 @@
+@@ -1414,7 +1580,7 @@
  */
  async function deleteAccountSession(provider, account, path = authFilePath()) {
  	return serialize(path, async () => {
@@ -183,7 +270,7 @@ diff --git a/lib/index.js b/lib/index.js
  		const entry = store[provider];
  		if (entry === void 0) return;
  		account = resolveAccount(entry, account);
-@@ -1438,7 +1526,7 @@
+@@ -1438,7 +1604,7 @@
  */
  async function setDefaultAccount(provider, account, path = authFilePath()) {
  	return serialize(path, async () => {
@@ -192,7 +279,7 @@ diff --git a/lib/index.js b/lib/index.js
  		const entry = store[provider];
  		if (entry !== void 0) account = resolveAccount(entry, account);
  		if (entry === void 0 || !Object.hasOwn(entry.accounts, account)) throw new Error(`no ${provider} account "${account}" is logged in`);
-@@ -2491,6 +2579,15 @@
+@@ -2491,6 +2657,15 @@
  * coalesces concurrent refreshes behind one in-flight promise. Permanent
  * refresh failures delete the stored session and surface INVALID_CREDENTIAL
  * with a re-login hint; transient failures fall back to a still-valid token.
@@ -208,7 +295,7 @@ diff --git a/lib/index.js b/lib/index.js
  */
  var TokenManager = class {
  	inflight;
-@@ -2525,6 +2622,16 @@
+@@ -2525,6 +2700,16 @@
  	async session(forceRefresh = false) {
  		const session = await this.options.load();
  		if (session === void 0) throw new LlmError(`dsh-plugin-subscriptions: not logged in to ${this.options.displayName}; log in via Settings → Subscriptions in the dsh web app`, "MISSING_CREDENTIAL");
@@ -225,7 +312,7 @@ diff --git a/lib/index.js b/lib/index.js
  		if (!forceRefresh && session.expiresAt - Date.now() > this.options.preemptMs) return session;
  		this.inflight ??= this.doRefresh(session).finally(() => {
  			this.inflight = void 0;
-@@ -2532,26 +2639,39 @@
+@@ -2532,26 +2717,39 @@
  		try {
  			return await this.inflight;
  		} catch (error) {
@@ -273,7 +360,7 @@ diff --git a/lib/index.js b/lib/index.js
  	}
  };
  /** Bound on one account catalog fetch or usage poll — a hang must not block the picker. */
-@@ -2906,7 +3026,7 @@
+@@ -2906,7 +3104,7 @@
  		this.io = options.io ?? {
  			list: () => listAccounts(provider),
  			get: (account) => getAccountSession(provider, account),
@@ -282,7 +369,7 @@ diff --git a/lib/index.js b/lib/index.js
  			remove: (account) => deleteAccountSession(provider, account),
  			resolve: (account) => resolveAccountKey(provider, account)
  		};
-@@ -2954,15 +3074,18 @@
+@@ -2954,15 +3152,18 @@
  			manager = new TokenManager({
  				displayName: this.options.displayName,
  				...this.options.makeOptions(account),
@@ -303,7 +390,7 @@ diff --git a/lib/index.js b/lib/index.js
  				},
  				remove: () => io.remove(boundAccount),
  				onRemoved: () => {
-@@ -4199,6 +4322,13 @@
+@@ -4199,6 +4400,13 @@
  		return {};
  	}
  }
@@ -317,7 +404,7 @@ diff --git a/lib/index.js b/lib/index.js
  /** Build a session from a token response. */
  async function claudeSession(tokens, fallbackRefreshToken, withProfile) {
  	if (typeof tokens.access_token !== "string" || tokens.access_token.length === 0) throw new Error("claude token endpoint returned no access token");
-@@ -4209,6 +4339,7 @@
+@@ -4209,6 +4417,7 @@
  	return {
  		accessToken: tokens.access_token,
  		refreshToken,
@@ -325,7 +412,7 @@ diff --git a/lib/index.js b/lib/index.js
  		expiresAt: Date.now() + tokens.expires_in * 1e3,
  		scopes: tokens.scope ?? CLAUDE_SCOPE,
  		...profile
-@@ -5141,6 +5272,7 @@
+@@ -5141,6 +5350,7 @@
  	"refresh_token_expired",
  	"refresh_token_reused",
  	"refresh_token_invalidated",
@@ -333,7 +420,7 @@ diff --git a/lib/index.js b/lib/index.js
  	"invalid_grant"
  ]);
  const CODEX_EFFORTS = [
-@@ -5248,6 +5380,7 @@
+@@ -5248,6 +5458,7 @@
  	return {
  		accessToken: tokens.access_token,
  		refreshToken,
@@ -341,7 +428,7 @@ diff --git a/lib/index.js b/lib/index.js
  		expiresAt,
  		accountId: tokens.id_token === void 0 && fallback !== void 0 ? fallback.accountId : accountIdOf(tokens.id_token),
  		...idToken === void 0 ? {} : { idToken },
-@@ -7379,6 +7512,7 @@
+@@ -7379,6 +7590,7 @@
  	return {
  		accessToken: tokens.access_token,
  		refreshToken,
@@ -349,7 +436,7 @@ diff --git a/lib/index.js b/lib/index.js
  		expiresAt: Date.now() + tokens.expires_in * 1e3,
  		tokenEndpoint,
  		...typeof tokens.scope === "string" ? { scopes: tokens.scope } : {},
-@@ -9736,6 +9870,7 @@
+@@ -9736,6 +9948,7 @@
  	return {
  		accessToken: tokens.access_token,
  		refreshToken,

@@ -14,11 +14,11 @@ const account = 'dead@claude.test'
 if (process.env.SUBSCRIPTIONS_INTEROP_BOT === '1') {
   assert.ok(process.env.HOME && process.env.DSH_HOME, 'worker requires an explicit fixture home')
   const authPath = join(process.env.DSH_HOME, 'plugins/subscriptions/auth.json')
-  const mkdir = fs.mkdirSync
-  fs.mkdirSync = function (path, ...args) {
-    try { return mkdir(path, ...args) }
+  const rename = fs.renameSync
+  fs.renameSync = function (from, to, ...args) {
+    try { return rename(from, to, ...args) }
     catch (error) {
-      if (error.code === 'EEXIST' && String(path) === `${authPath}.refresh-claude.lock`) process.send({ type: 'lock-wait' })
+      if (['EEXIST', 'ENOTEMPTY'].includes(error.code) && String(to) === `${authPath}.refresh-claude.lock`) process.send({ type: 'lock-wait' })
       throw error
     }
   }

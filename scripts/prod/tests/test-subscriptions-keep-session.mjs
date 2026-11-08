@@ -24,7 +24,7 @@
 //        node test-subscriptions-keep-session.mjs --plugin <plugin dir>
 // Exit 0 only when every check passes. Tokens here are fake and never printed.
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import fs, { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire, syncBuiltinESMExports } from 'node:module'
 import fsPromises from 'node:fs/promises'
 import { fork } from 'node:child_process'
@@ -74,11 +74,11 @@ if (workerMode) {
     }
     return value
   }
-  const mkdir = fsPromises.mkdir
-  fsPromises.mkdir = async (...args) => {
-    try { return await mkdir(...args) }
+  const rename = fs.renameSync
+  fs.renameSync = (...args) => {
+    try { return rename(...args) }
     catch (error) {
-      if (error.code === 'EEXIST' && String(args[0]).endsWith('.lock')) process.send({ type: 'lock-wait' })
+      if (['EEXIST', 'ENOTEMPTY'].includes(error.code) && String(args[1]).endsWith('.lock')) process.send({ type: 'lock-wait' })
       throw error
     }
   }
