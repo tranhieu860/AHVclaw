@@ -105,9 +105,10 @@ else
 fi
 
 log "Cài dependencies (mất 3-8 phút, tốn ~2GB disk)..."
-# pnpm 11 exit 1 khi có build scripts bị ignore (cloudflared/cpu-features/ssh2 —
-# optional deps của các plugin community, không blocker cho AHV core). Chấp nhận
-# non-zero exit ở đây; bước sau (wrapper, skin) sẽ fail rõ ràng nếu thật sự hỏng.
+# pnpm 11 exit 1 khi có build script chưa khai trong allowBuilds. Từ #1234 mọi
+# gói đã khai (cloudflared/cpu-features/ssh2/opencli = false) nên cài sạch thoát 0;
+# vẫn chấp nhận non-zero exit làm lưới an toàn cho cây cũ/gói mới chưa khai —
+# bước sau (wrapper, skin) sẽ fail rõ ràng nếu thật sự hỏng.
 # Trừ lỗi bản vá (patches/, patchedDependencies): cây dựng tiếp mà thiếu vá thì
 # chạy được nhưng mang lỗi cũ — vd plugin đăng nhập xoá phiên Codex chết.
 pnpm_log="$(mktemp)"
