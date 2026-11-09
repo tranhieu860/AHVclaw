@@ -60,11 +60,11 @@ allowBuilds:
   electron-winstaller: false
   # Store-index rewriting only needs msgpackr's portable JavaScript codec.
   msgpackr-extract: false
-  # AHV bundle plugin deps (dsh-browser/opencli, ssh) — existing AHV policy.
-  cloudflared: set this to true or false
-  cpu-features: set this to true or false
-  ssh2: set this to true or false
-  '@jackwener/opencli': set this to true or false
+  # Script của 4 gói này chưa từng chạy trong bản phát hành AHV nên bị từ chối: cloudflared tải binary, ssh2 và cpu-features dựng addon native tuỳ chọn có đường lùi JS, @jackwener/opencli chỉ cài completion shell và đồng bộ adapter cục bộ (postinstall, `|| true`).
+  cloudflared: false
+  cpu-features: false
+  ssh2: false
+  '@jackwener/opencli': false
 
 minimumReleaseAgeExclude:
   # Office engines and their API are qualified and released together by the kit repository.
