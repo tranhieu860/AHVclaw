@@ -461,7 +461,7 @@ diff --git a/lib/index.js b/lib/index.js
  		expiresAt: Date.now() + tokens.expires_in * 1e3,
  		projectId: account.projectId,
  		...tokens.scope === void 0 ? {} : { scopes: tokens.scope },
-@@ -12076,7 +12292,60 @@
+@@ -12076,7 +12292,69 @@
  			for (const [route, handle] of handles) handle.replace([route]);
  		}
  	});
@@ -495,17 +495,26 @@ diff --git a/lib/index.js b/lib/index.js
 +							if (probed) throw new Error("one-shot catalog probe already attempted");
 +							probed = true;
 +						}
-+						return proxiedFetch(url, { ...init, signal });
++						const response = await proxiedFetch(url, { ...init, signal });
++						if (url !== VSCODE_RELEASES_URL && (response.status === 401 || response.status === 403)) {
++							process.stderr.write(`subscriptions: ${provider}: token bị từ chối, danh sách chưa làm mới; sẽ tự mới khi đăng nhập được gia hạn.\n`);
++						}
++						return response;
 +					};
 +					const catalog = await adapter.catalogFor(key);
 +					await catalog.ensureSeeded();
 +					if (signal.aborted || catalog.entry !== void 0 && Date.now() - catalog.entry.at < CATALOG_REFRESH_INTERVAL_MS) return;
 +					await catalog.get(async () => {
 +						// No auth retry/invalidate: one failed probe must preserve the saved snapshot.
-+						// Discovery uses the saved access token: token rotation/keychain sync is not cancellable.
++						// Read a newer Claude Code token without rotating or writing either credential store.
++						let discoverySession = session;
++						if (provider === "claude" && session.keychainBound === true) {
++							const fromSource = readClaudeCodeCredentials();
++							if (fromSource !== void 0 && fromSource.accessToken !== session.accessToken && fromSource.expiresAt > Date.now() + 6e4) discoverySession = fromSource;
++						}
 +						let models;
 +						switch (provider) {
-+							case "claude": models = await fetchClaudeModels(session, fetch, signal, version(CLAUDE_CLI_VERSION_URL, CLAUDE_CLI_FALLBACK_VERSION)); break;
++							case "claude": models = await fetchClaudeModels(discoverySession, fetch, signal, version(CLAUDE_CLI_VERSION_URL, CLAUDE_CLI_FALLBACK_VERSION)); break;
 +							case "codex": models = await fetchCodexModels(session, fetch, signal, config.codexClientVersion ?? await version(CODEX_VERSION_URL, CODEX_CLIENT_VERSION)()); break;
 +							case "grok": models = await fetchGrokModels(session, fetch, onWarn, catalog.lastKnown(), signal); break;
 +							case "copilot": models = await fetchCopilotModels(session, fetch, signal); break;

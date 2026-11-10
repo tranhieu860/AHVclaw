@@ -37,7 +37,7 @@ function command(t, { fresh = false, behavior, waitMs = 200 } = {}) {
     env: { PATH: process.env.PATH, HOME: home, DSH_HOME: dshHome, AHV_FORK: fork,
       AHV_MODELS_TEST_PLUGIN: plugin, AHV_MODELS_TEST_CASE: JSON.stringify({ behavior }),
       ...(waitMs === null ? {} : { AHV_MODELS_REFRESH_WAIT_MS: String(waitMs) }) },
-    encoding: 'utf8', timeout: waitMs === null ? 16_000 : 5000,
+    encoding: 'utf8', timeout: waitMs === null ? 14_000 : 5000,
   })
   const elapsedMs = performance.now() - start
   assert.equal(result.status, 0, `${result.error ?? ''} ${result.stderr}`)
@@ -70,9 +70,9 @@ test('CLI fresh snapshot timing with the offline launcher', t => {
   t.diagnostic(`real CLI with offline launcher, fresh snapshot: ${r.elapsedMs.toFixed(1)} ms`)
 })
 
-test('CLI default deadline is 12000 ms when the setting is absent', t => {
+test('CLI default deadline is 8000 ms when the setting is absent', t => {
   const r = command(t, { behavior: 'hang', waitMs: null })
   assert.equal(r.after, r.before)
-  assert.ok(r.elapsedMs >= 12_000 && r.elapsedMs < 14_000, `unexpected default wait ${r.elapsedMs}`)
+  assert.ok(r.elapsedMs >= 8_000 && r.elapsedMs < 10_000, `unexpected default wait ${r.elapsedMs}`)
   t.diagnostic(`real CLI with offline launcher, default budget: ${r.elapsedMs.toFixed(1)} ms`)
 })

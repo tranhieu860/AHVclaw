@@ -41,9 +41,9 @@ async function dump(ctx: Context, exit: (code: number) => void): Promise<void> {
 
   const refresh = ctx.get('subscriptionsCatalogRefresh')
   if (refresh !== undefined) {
-    const configuredWait = Number(process.env.AHV_MODELS_REFRESH_WAIT_MS ?? 12_000)
+    const configuredWait = Number(process.env.AHV_MODELS_REFRESH_WAIT_MS ?? 8_000)
     const waitMs = Number.isFinite(configuredWait) && configuredWait >= 0 && configuredWait <= 2_147_483_647
-      ? configuredWait : 12_000
+      ? configuredWait : 8_000
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
