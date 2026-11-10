@@ -5,7 +5,8 @@
  * bất cứ LLM plugin nào khác được mount. Bot đọc list này thay vì scrape
  * config file hoặc query mỗi endpoint riêng biệt.
  *
- * Runner mode: mount → await loader → cho mỗi provider gọi `listModels(id)`
+ * Runner mode: mount → await loader → bounded subscription refresh (one-shot)
+ * → cho mỗi provider gọi `listModels(id)`
  * → emit 1 JSON object trên stdout → exit 0. Không chạy prompt, không tạo
  * agent — chỉ dump catalog rồi ra.
  *
@@ -15,6 +16,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-llm'
+import type {} from 'dsh-plugin-subscriptions'
 
 /** Stable Cordis plugin name. */
 export const name = 'bot-list-models'
@@ -35,6 +37,28 @@ async function dump(ctx: Context, exit: (code: number) => void): Promise<void> {
     internals.stderr.write('bot-list-models: ctx.llm not available (no LLM plugin mounted)\n')
     exit(1)
     return
+  }
+
+  const refresh = ctx.get('subscriptionsCatalogRefresh')
+  if (refresh !== undefined) {
+    const configuredWait = Number(process.env.AHV_MODELS_REFRESH_WAIT_MS ?? 12_000)
+    const waitMs = Number.isFinite(configuredWait) && configuredWait >= 0 && configuredWait <= 2_147_483_647
+      ? configuredWait : 12_000
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        refresh(controller.signal),
+        new Promise<void>(resolve => {
+          timer = setTimeout(() => { controller.abort(); resolve() }, waitMs)
+        }),
+      ])
+    } catch (error) {
+      internals.stderr.write(`bot-list-models: catalog refresh failed: ${String(error)}\n`)
+    } finally {
+      clearTimeout(timer)
+      controller.abort()
+    }
   }
 
   const providers = llm.listProviders()

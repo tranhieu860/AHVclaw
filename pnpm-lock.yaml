@@ -17,7 +17,7 @@ patchedDependencies:
   '@fortune-sheet/react@1.0.4': 2932e52e79afcd4ced08cfa123b5eded786c85043da32f622f3e80af6fc96c37
   '@yao-pkg/pkg@6.21.0': 75891fc22b277c145cafeab83e41baf4a70f5b8fe6dc0801c6a0b922d7ee88c7
   app-builder-lib@26.17.0: b70dc2a2a78ffabb80a4f14fafc7c103237f2b0a207e1f296fa1c1387ea29348
-  dsh-plugin-subscriptions: dd9dea917c24931235d7673255e79f6ef8c40097a3da3685c89dd52c2b4fe09a
+  dsh-plugin-subscriptions: 70965d749db9b453e0b34bb2e74e1257263e6f8af7a31c5efbe00101ca934258
   exceljs@4.4.0: c1bf8ac8f319dab382f08e3a669b715e691d46c703ac5a4163eb383fbedd1d48
   node-pty@1.2.0-beta.15: 9d30053266d0f39d3debe894c675867f6782da6bcadbc94a693b3cfb9eff8ed0
 
@@ -2346,7 +2346,7 @@ importers:
         version: 15.0.0
       dsh-plugin-subscriptions:
         specifier: ^0.9.12
-        version: 0.9.12(patch_hash=dd9dea917c24931235d7673255e79f6ef8c40097a3da3685c89dd52c2b4fe09a)(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-attachment@packages+attachment+attachment)(@deepseek-ai/dsh-home-paths@packages+util+home-paths)(@deepseek-ai/dsh-llm@packages+llm+llm)(@deepseek-ai/dsh-tools@packages+core+tools)(@deepseek-ai/dsh-web@packages+web+web)(@deepseek-ai/schemastery@vendor+schemastery)
+        version: 0.9.12(patch_hash=70965d749db9b453e0b34bb2e74e1257263e6f8af7a31c5efbe00101ca934258)(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-attachment@packages+attachment+attachment)(@deepseek-ai/dsh-home-paths@packages+util+home-paths)(@deepseek-ai/dsh-llm@packages+llm+llm)(@deepseek-ai/dsh-tools@packages+core+tools)(@deepseek-ai/dsh-web@packages+web+web)(@deepseek-ai/schemastery@vendor+schemastery)
       dshmarket:
         specifier: ^1.73.17
         version: 1.73.17(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-settings@packages+settings+settings)(@deepseek-ai/schemastery@vendor+schemastery)
@@ -29710,7 +29710,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  dsh-plugin-subscriptions@0.9.12(patch_hash=dd9dea917c24931235d7673255e79f6ef8c40097a3da3685c89dd52c2b4fe09a)(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-attachment@packages+attachment+attachment)(@deepseek-ai/dsh-home-paths@packages+util+home-paths)(@deepseek-ai/dsh-llm@packages+llm+llm)(@deepseek-ai/dsh-tools@packages+core+tools)(@deepseek-ai/dsh-web@packages+web+web)(@deepseek-ai/schemastery@vendor+schemastery):
+  dsh-plugin-subscriptions@0.9.12(patch_hash=70965d749db9b453e0b34bb2e74e1257263e6f8af7a31c5efbe00101ca934258)(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-attachment@packages+attachment+attachment)(@deepseek-ai/dsh-home-paths@packages+util+home-paths)(@deepseek-ai/dsh-llm@packages+llm+llm)(@deepseek-ai/dsh-tools@packages+core+tools)(@deepseek-ai/dsh-web@packages+web+web)(@deepseek-ai/schemastery@vendor+schemastery):
     dependencies:
       '@deepseek-ai/cordis': link:vendor/cordis
       '@deepseek-ai/dsh-attachment': link:packages/attachment/attachment
