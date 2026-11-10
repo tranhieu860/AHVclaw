@@ -88,7 +88,7 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
     if (fixture.behavior === 'abort') throw new DOMException('fixture cancelled', 'AbortError')
     if (fixture.behavior === 'delayed') {
       await new Promise((resolve, reject) => {
-        const timer = setTimeout(resolve, 400)
+        const timer = fixture.legacy ? undefined : setTimeout(resolve, 400)
         if (fixture.legacy) init.signal?.addEventListener('abort', () => {
           clearTimeout(timer)
           reject(new DOMException('fixture cancelled', 'AbortError'))
@@ -99,6 +99,7 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
     if (grok || grokCli) return Response.json({ data: [{ id: providerModels.grok.fresh.id, name: providerModels.grok.fresh.name }] })
     if (antigravity) return Response.json({ models: { [providerModels.antigravity.fresh.id]: { displayName: providerModels.antigravity.fresh.name } } })
     if (copilot) return Response.json({ data: [{ ...providerModels.copilot.fresh, model_picker_enabled: true, supported_endpoints: ['/chat/completions'] }] })
+    if (fixture.goodDelayMs) await new Promise(resolve => setTimeout(resolve, fixture.goodDelayMs))
     const accountModel = account === 'Bearer fake-two@fixture.test' ? 'claude-account-two' : 'claude-account-one'
     return Response.json({ data: [...[oldModel, newModel].map(m => ({ id: m.id, display_name: m.name })),
       ...(fixture.fleet ? [{ id: accountModel, display_name: accountModel }] : [])] })
@@ -113,7 +114,12 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
     listModels: id => adapters.get(id).listModels(id),
   }
   services.set('llm', llm)
-  services.set('loader', { await: async () => {} })
+  services.set('loader', { await: async () => {
+    // The legacy reproduction must dispose a request that has already started.
+    if (fixture.legacy && fixture.behavior === 'delayed' && catalogCalls.length === 0) {
+      await new Promise(resolve => { startupProbe = resolve })
+    }
+  } })
   services.set('appExit', code => {
     for (const dispose of disposers.reverse()) dispose()
     const finish = () => {
@@ -208,7 +214,7 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
       AHV_MODELS_TEST_WORKER: '1', AHV_MODELS_TEST_PLUGIN: plugin,
       AHV_MODELS_TEST_CASE: JSON.stringify(fixture),
       ...(fixture.legacy ? {} : { AHV_MODELS_LIST_ONESHOT: '1' }),
-      AHV_MODELS_REFRESH_WAIT_MS: String(fixture.waitMs ?? 200),
+      AHV_MODELS_REFRESH_WAIT_MS: String(fixture.waitMs ?? 3000),
     }
     if (fixture.daemonMode === 'unset') delete env.AHV_MODELS_LIST_ONESHOT
     else if (fixture.daemonMode) env.AHV_MODELS_LIST_ONESHOT = fixture.daemonMode === 'empty' ? '' : '0'
@@ -267,7 +273,7 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
 
   for (const behavior of ['hang', 'network', '401', '403', 'abort']) {
     test(`T3/T4 ${behavior}: keep the exact saved bytes, one probe, exit 0`, async t => {
-      const r = await listing(t, { behavior })
+      const r = await listing(t, { behavior, ...(behavior === 'hang' ? { waitMs: 200 } : {}) })
       assert.deepEqual(r.payload.models.map(m => m.model_id), [oldModel.id])
       assert.equal(r.after, r.before)
       assert.equal(r.calls.length, 1)
@@ -294,13 +300,13 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
   })
 
   test('missing snapshot and timeout: no second probe while printing fallback', async t => {
-    const r = await listing(t, { missing: true, behavior: 'hang' })
+    const r = await listing(t, { missing: true, behavior: 'hang', waitMs: 200 })
     assert.equal(r.calls.length, 1)
     assert.equal(r.after, undefined)
   })
 
   test('two authenticated accounts share one deadline and each probe only once', async t => {
-    const r = await listing(t, { twoAccounts: true, behavior: 'hang' })
+    const r = await listing(t, { twoAccounts: true, behavior: 'hang', waitMs: 200 })
     assert.deepEqual(r.calls.sort(), ['Bearer fake-one@fixture.test', 'Bearer fake-two@fixture.test'])
     assert.equal(r.after, r.before)
     assert.equal(r.aborted.length, 2)
@@ -308,7 +314,7 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
   })
 
   test('two providers start in parallel and share the 200 ms deadline', async t => {
-    const r = await listing(t, { twoProviders: true, behavior: 'hang' })
+    const r = await listing(t, { twoProviders: true, behavior: 'hang', waitMs: 200 })
     assert.deepEqual(r.calls.sort(), ['Bearer fake-codex', 'Bearer fake-one@fixture.test'])
     assert.equal(r.aborted.length, 2)
     assert.equal(r.after, r.before)
@@ -399,15 +405,36 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
     })
   }
 
+  for (const selectedRejected of [false, true]) {
+    test(`B5 skewed responses: ${selectedRejected ? 'T2 selected rejected' : 'T1 selected valid'}`, async t => {
+      // Accounts one/two (a/b) reply after 300 ms; account three (c) returns 401 immediately.
+      const r = await listing(t, { fleet: true, selectedRejected, goodDelayMs: 300, waitMs: 3000 })
+      assert.ok(r.payload.models.some(m => m.model_id === newModel.id), 'new model must print after the good accounts settle')
+      assert.ok(r.payload.models.some(m => m.model_id === 'claude-account-one'))
+      assert.ok(r.payload.models.some(m => m.model_id === 'claude-account-two'))
+      const before = JSON.parse(r.before), after = JSON.parse(r.after)
+      const selected = selectedRejected ? 'three@fixture.test' : 'one@fixture.test'
+      const snapshot = (store, key) => key === selected ? store.claude : store.accounts.claude[key]
+      for (const key of ['one@fixture.test', 'two@fixture.test']) {
+        assert.ok(snapshot(after, key).at > r.seededAt, `${key}: snapshot must be fresh`)
+        assert.ok(snapshot(after, key).models.some(m => m.id === newModel.id))
+      }
+      assert.deepEqual(snapshot(after, 'three@fixture.test'), snapshot(before, 'three@fixture.test'))
+      assert.deepEqual(r.calls.slice().sort(), ['Bearer fake-one@fixture.test', 'Bearer fake-two@fixture.test', 'Bearer fake-three@fixture.test'].sort())
+      assert.equal(r.stderr, rejectedNotice('claude'))
+      assert.equal(r.credentialsReads, 0)
+    })
+  }
+
   test('a late successful response after cancellation cannot overwrite the snapshot', async t => {
-    const r = await listing(t, { behavior: 'delayed', lateResult: true })
+    const r = await listing(t, { behavior: 'delayed', lateResult: true, waitMs: 200 })
     assert.deepEqual(r.payload.models.map(m => m.model_id), [oldModel.id])
     assert.equal(r.after, r.before)
     assert.equal(r.calls.length, 1)
   })
 
   test('a hanging CLI-version registry is inside the same refresh deadline', async t => {
-    const r = await listing(t, { registryHang: true })
+    const r = await listing(t, { registryHang: true, waitMs: 200 })
     assert.equal(r.calls.length, 0)
     assert.equal(r.registryCalls.length, 1)
     assert.equal(r.after, r.before)
