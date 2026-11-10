@@ -1891,7 +1891,7 @@ function spawnListModels() {
       '--patch', ahvPatch,
       '--patch', patch,
     ]
-    const env = { ...process.env, NO_COLOR: '1' }
+    const env = { ...process.env, NO_COLOR: '1', AHV_MODELS_LIST_ONESHOT: '1' }
     const proc = spawn(process.execPath, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       env,

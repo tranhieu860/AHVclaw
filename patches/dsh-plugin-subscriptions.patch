@@ -360,7 +360,24 @@ diff --git a/lib/index.js b/lib/index.js
  	}
  };
  /** Bound on one account catalog fetch or usage poll — a hang must not block the picker. */
-@@ -2906,7 +3104,7 @@
+@@ -2743,6 +2941,8 @@
+ 		const fresh = this.cached();
+ 		if (fresh !== void 0) return fresh;
+ 		if (preferCached && this.entry !== void 0) return this.entry.models;
++		// One-shot discovery has already spent its budget; a cold menu uses its static fallback.
++		if (preferCached && process.env.AHV_MODELS_LIST_ONESHOT === "1") throw new Error("model catalog unavailable after bounded refresh");
+ 		return this.refresh(fetcher);
+ 	}
+ 	/**
+@@ -2760,6 +2960,7 @@
+ 		if (fresh !== void 0) return fresh;
+ 		const known = this.entry?.models;
+ 		if (known !== void 0) return known;
++		if (process.env.AHV_MODELS_LIST_ONESHOT === "1") return;
+ 		try {
+ 			return await this.refresh(fetcher);
+ 		} catch {
+@@ -2906,7 +3107,7 @@
  		this.io = options.io ?? {
  			list: () => listAccounts(provider),
  			get: (account) => getAccountSession(provider, account),
@@ -369,7 +386,7 @@ diff --git a/lib/index.js b/lib/index.js
  			remove: (account) => deleteAccountSession(provider, account),
  			resolve: (account) => resolveAccountKey(provider, account)
  		};
-@@ -2954,15 +3152,18 @@
+@@ -2954,15 +3155,18 @@
  			manager = new TokenManager({
  				displayName: this.options.displayName,
  				...this.options.makeOptions(account),
@@ -390,7 +407,7 @@ diff --git a/lib/index.js b/lib/index.js
  				},
  				remove: () => io.remove(boundAccount),
  				onRemoved: () => {
-@@ -4199,6 +4400,13 @@
+@@ -4199,6 +4403,13 @@
  		return {};
  	}
  }
@@ -404,7 +421,7 @@ diff --git a/lib/index.js b/lib/index.js
  /** Build a session from a token response. */
  async function claudeSession(tokens, fallbackRefreshToken, withProfile) {
  	if (typeof tokens.access_token !== "string" || tokens.access_token.length === 0) throw new Error("claude token endpoint returned no access token");
-@@ -4209,6 +4417,7 @@
+@@ -4209,6 +4420,7 @@
  	return {
  		accessToken: tokens.access_token,
  		refreshToken,
@@ -412,7 +429,7 @@ diff --git a/lib/index.js b/lib/index.js
  		expiresAt: Date.now() + tokens.expires_in * 1e3,
  		scopes: tokens.scope ?? CLAUDE_SCOPE,
  		...profile
-@@ -5141,6 +5350,7 @@
+@@ -5141,6 +5353,7 @@
  	"refresh_token_expired",
  	"refresh_token_reused",
  	"refresh_token_invalidated",
@@ -420,7 +437,7 @@ diff --git a/lib/index.js b/lib/index.js
  	"invalid_grant"
  ]);
  const CODEX_EFFORTS = [
-@@ -5248,6 +5458,7 @@
+@@ -5248,6 +5461,7 @@
  	return {
  		accessToken: tokens.access_token,
  		refreshToken,
@@ -428,7 +445,7 @@ diff --git a/lib/index.js b/lib/index.js
  		expiresAt,
  		accountId: tokens.id_token === void 0 && fallback !== void 0 ? fallback.accountId : accountIdOf(tokens.id_token),
  		...idToken === void 0 ? {} : { idToken },
-@@ -7379,6 +7590,7 @@
+@@ -7379,6 +7593,7 @@
  	return {
  		accessToken: tokens.access_token,
  		refreshToken,
@@ -436,7 +453,7 @@ diff --git a/lib/index.js b/lib/index.js
  		expiresAt: Date.now() + tokens.expires_in * 1e3,
  		tokenEndpoint,
  		...typeof tokens.scope === "string" ? { scopes: tokens.scope } : {},
-@@ -9736,6 +9948,7 @@
+@@ -9736,6 +9951,7 @@
  	return {
  		accessToken: tokens.access_token,
  		refreshToken,
@@ -444,6 +461,92 @@ diff --git a/lib/index.js b/lib/index.js
  		expiresAt: Date.now() + tokens.expires_in * 1e3,
  		projectId: account.projectId,
  		...tokens.scope === void 0 ? {} : { scopes: tokens.scope },
+@@ -12076,7 +12292,69 @@
+ 			for (const [route, handle] of handles) handle.replace([route]);
+ 		}
+ 	});
+-	ctx.effect(() => startCatalogRefresh(async (signal) => {
++	if (process.env.AHV_MODELS_LIST_ONESHOT === "1") {
++		// Only the one-shot catalog runner owns this refresh; daemon scheduling stays unchanged.
++		ctx.provide("subscriptionsCatalogRefresh", async (signal) => {
++			const versions = new Map();
++			const version = (url, floor) => () => {
++				if (!versions.has(url)) versions.set(url, (async () => {
++					try {
++						signal.throwIfAborted();
++						const response = await proxiedFetch(url, { signal });
++						const value = response.ok ? (await response.json())?.version : void 0;
++						return typeof value === "string" && STABLE_VERSION.test(value) && compareVersions(value, floor) >= 0 ? value : floor;
++					} catch (error) {
++						// Registry failure keeps the shipped version; the catalog still shares the deadline.
++						return floor;
++					}
++				})());
++				return versions.get(url);
++			};
++			await Promise.allSettled([...adapters].map(async ([provider, adapter]) => {
++				if (signal.aborted || overridden.has(provider)) return;
++				await Promise.allSettled((await accountTokens.get(provider).list()).map(async ({ key, session }) => {
++					let probed = false;
++					const fetch = async (url, init) => {
++						signal.throwIfAborted();
++						if (url !== VSCODE_RELEASES_URL) {
++							// Suppress optional enrichment and alternate-origin retries in this one-shot.
++							if (probed) throw new Error("one-shot catalog probe already attempted");
++							probed = true;
++						}
++						const response = await proxiedFetch(url, { ...init, signal });
++						if (url !== VSCODE_RELEASES_URL && (response.status === 401 || response.status === 403)) {
++							process.stderr.write(`subscriptions: ${provider}: token bị từ chối, danh sách chưa làm mới; sẽ tự mới khi đăng nhập được gia hạn.\n`);
++						}
++						return response;
++					};
++					const catalog = await adapter.catalogFor(key);
++					await catalog.ensureSeeded();
++					if (signal.aborted || catalog.entry !== void 0 && Date.now() - catalog.entry.at < CATALOG_REFRESH_INTERVAL_MS) return;
++					await catalog.get(async () => {
++						// No auth retry/invalidate: one failed probe must preserve the saved snapshot.
++						// Read a newer Claude Code token without rotating or writing either credential store.
++						let discoverySession = session;
++						if (provider === "claude" && session.keychainBound === true) {
++							const fromSource = readClaudeCodeCredentials();
++							if (fromSource !== void 0 && fromSource.accessToken !== session.accessToken && fromSource.expiresAt > Date.now() + 6e4) discoverySession = fromSource;
++						}
++						let models;
++						switch (provider) {
++							case "claude": models = await fetchClaudeModels(discoverySession, fetch, signal, version(CLAUDE_CLI_VERSION_URL, CLAUDE_CLI_FALLBACK_VERSION)); break;
++							case "codex": models = await fetchCodexModels(session, fetch, signal, config.codexClientVersion ?? await version(CODEX_VERSION_URL, CODEX_CLIENT_VERSION)()); break;
++							case "grok": models = await fetchGrokModels(session, fetch, onWarn, catalog.lastKnown(), signal); break;
++							case "copilot": models = await fetchCopilotModels(session, fetch, signal); break;
++							case "antigravity": models = await fetchAntigravityModels(session, config.antigravity, fetch, signal); break;
++						}
++						signal.throwIfAborted();
++						return models;
++					});
++					// ModelCatalogCache writes through asynchronously; finish persistence before printing.
++					await catalogWrites.get(modelsFilePath());
++				}));
++			}));
++		});
++	} else ctx.effect(() => startCatalogRefresh(async (signal) => {
+ 		await Promise.all([...adapters].map(async ([provider, adapter]) => {
+ 			if (signal.aborted || overridden.has(provider)) return;
+ 			await adapter.listOwnModels(provider, void 0, signal);
+diff --git a/lib/index.d.ts b/lib/index.d.ts
+--- a/lib/index.d.ts
++++ b/lib/index.d.ts
+@@ -87,3 +87,11 @@
+  */
+ export declare function presentedVersion(cache: Pick<NpmCliVersionCache, 'resolve' | 'current'>, waitMs?: number): () => Promise<CliVersion | undefined>;
+ export declare function apply(ctx: Context, config: Config): void;
++
++/** Bounded catalog discovery exposed only in the AHV one-shot listing process. */
++declare module '@deepseek-ai/cordis' {
++    interface Context {
++        /** Refresh authenticated stale catalogs, preserving saved snapshots on failure. */
++        subscriptionsCatalogRefresh?: (signal: AbortSignal) => Promise<void>;
++    }
++}
 diff --git a/lib/auth/store.d.ts b/lib/auth/store.d.ts
 --- a/lib/auth/store.d.ts
 +++ b/lib/auth/store.d.ts
