@@ -16,26 +16,32 @@ RELEASE = 'test_release_prunes_after_the_new_canary_is_committed'
 PROMOTE = 'test_promote_releases_the_old_stable_after_pointer_moves'
 TARGET = 'test_invalid_pointer_targets_refuse_all_deletion'
 PROMOTE_WARNING = 'test_promote_warns_when_cleanup_fails_after_stable_moves'
+VALIDATE = '            validate_pointer(directory, tag)\n        except (OSError, ValueError) as error:'
+FALLBACK_SKIP = '        except (OSError, ValueError):\n            continue'
+FALLBACK_KEEP = '        keep.add(tag)\n        break'
+FALLBACK = 'test_fallback_below_stable_is_kept_and_nothing_older'
+SKIPPED = 'test_incomplete_fallback_candidate_is_skipped_without_error'
 HOOK = 'python3 "$(dirname "$0")/prune-releases.py" "$dir"'
 SHELL_LOCK = 'flock -x "$AHV_CHANNEL_LOCK_FD"'
 WARNING = '  printf \'stable → %s OK; dọn kho lỗi: %s; chạy lại prune-releases.py\\n\' "$tag" "$cleanup_output" >&2'
 MUTANTS = [
     ('keep-none', 'prune-releases.py', '[:1]', '[:0]', 'test_newest_version_no_channel_points_to_is_kept'),
-    ('keep-two', 'prune-releases.py', '[:1]', '[:2]', 'test_stable_equal_canary_equal_newest_leaves_exactly_one_version'),
+    # Was checked by the one-version test; that case now keeps a fallback, so a dedicated case kills it.
+    ('keep-two', 'prune-releases.py', '[:1]', '[:2]', 'test_unpromoted_newer_versions_expire_except_the_newest'),
     ('keep-three', 'prune-releases.py', '[:1]', '[:3]', TIMER),
-    ('lexical-order', 'prune-releases.py', "key=lambda tag: tuple(int(p) for p in tag[1:].split('.'))", 'key=lambda tag: tag', TIMER),
+    ('lexical-order', 'prune-releases.py', 'sorted(versions, key=version_key, reverse=True)', 'sorted(versions, key=lambda tag: tag, reverse=True)', TIMER),
     ('forget-stable', 'prune-releases.py', 'keep.add(value)', "keep.add(value) if key != 'stable' else None", TIMER),
     ('forget-canary', 'prune-releases.py', 'keep.add(value)', "keep.add(value) if key != 'canary' else None", 'test_canary_outside_newest_is_preserved_and_floor_is_not'),
-    ('readd-floor-to-keep', 'prune-releases.py', "if key != 'store_floor':", 'if True:', TIMER),
+    ('readd-floor-to-keep', 'prune-releases.py', "if key != 'store_floor':", 'if True:', 'test_canary_outside_newest_is_preserved_and_floor_is_not'),
     ('skip-floor-tag-shape-check', 'prune-releases.py', 'if not isinstance(value, str) or re.fullmatch(TAG, value) is None:', "if key != 'store_floor' and (not isinstance(value, str) or re.fullmatch(TAG, value) is None):", 'test_malformed_floor_refuses_all_deletion'),
     ('leave-archives', 'prune-releases.py', ' or ARCHIVE.fullmatch(entry.name)', '', TIMER),
     ('leave-glibc-variants', 'prune-releases.py', r'(?:-glibc[0-9]+(?:\.[0-9]+)+)?', '', TIMER),
     ('broad-archive-suffix', 'prune-releases.py', r"\.tar\.zst')", r"\.tar\.zst.*')", SAFETY),
     ('admit-nonregular-files', 'prune-releases.py', 'entry.is_file(follow_symlinks=False)', 'True', SAFETY),
     ('ignore-invalid-pointers', 'prune-releases.py', "raise ValueError(f'invalid or missing channel pointer: {key}')", 'continue', 'test_missing_or_invalid_channels_refuses_all_deletion'),
-    ('skip-pointer-target-validation', 'prune-releases.py', '        validate_pointer(directory, tag)', '        pass', TARGET),
-    ('skip-stable-target-validation', 'prune-releases.py', '        validate_pointer(directory, tag)', "        if channels.get('stable') != tag: validate_pointer(directory, tag)", TARGET),
-    ('skip-canary-target-validation', 'prune-releases.py', '        validate_pointer(directory, tag)', "        if channels.get('canary') != tag: validate_pointer(directory, tag)", TARGET),
+    ('skip-pointer-target-validation', 'prune-releases.py', VALIDATE, '            pass\n        except (OSError, ValueError) as error:', TARGET),
+    ('skip-stable-target-validation', 'prune-releases.py', VALIDATE, "            if channels.get('stable') != tag: validate_pointer(directory, tag)\n        except (OSError, ValueError) as error:", TARGET),
+    ('skip-canary-target-validation', 'prune-releases.py', VALIDATE, "            if channels.get('canary') != tag: validate_pointer(directory, tag)\n        except (OSError, ValueError) as error:", TARGET),
     ('validate-floor-target', 'prune-releases.py', 'for tag in keep:', "for tag in keep | ({channels['store_floor']} if 'store_floor' in channels else set()):", 'test_floor_without_files_is_not_an_error_and_existing_floor_files_expire'),
     ('ignore-pointer-version-mismatch', 'prune-releases.py', "if not isinstance(manifest, dict) or manifest.get('version') != tag:", 'if False:', TARGET),
     ('allow-pointer-manifest-symlink', 'prune-releases.py', 'path.lstat().st_mode', 'path.stat().st_mode', TARGET),
@@ -44,6 +50,17 @@ MUTANTS = [
     ('drop-pointer-error-tag', 'prune-releases.py', "raise ValueError(f'pointer {tag}: {error}') from error", 'raise ValueError(str(error)) from error', TARGET),
     ('ignore-pointer-change', 'prune-releases.py', 'if channels_path.read_bytes() != snapshot:', 'if False:', CHANGED),
     ('ignore-artifact-change', 'prune-releases.py', 'if not stat.S_ISREG(current.st_mode) or (current.st_dev, current.st_ino, current.st_mtime_ns, current.st_size) != (original.st_dev, original.st_ino, original.st_mtime_ns, original.st_size):', 'if False:', CHANGED),
+    ('drop-fallback', 'prune-releases.py', FALLBACK_KEEP, '        break', FALLBACK),
+    ('fallback-by-canary', 'prune-releases.py', "stable_key = version_key(channels['stable'])", "stable_key = version_key(channels['canary'])", 'test_canary_newer_than_stable_keeps_fallback_of_stable'),
+    ('fallback-ignores-floor', 'prune-releases.py', '(floor_key is None or version_key(tag) >= floor_key)', 'True', 'test_floor_bounds_the_fallback'),
+    ('fallback-floor-exclusive', 'prune-releases.py', 'version_key(tag) >= floor_key', 'version_key(tag) > floor_key', 'test_floor_bounds_the_fallback'),
+    ('fallback-skips-completeness-check', 'prune-releases.py', '            validate_pointer(directory, tag)\n        except (OSError, ValueError):', '            pass\n        except (OSError, ValueError):', SKIPPED),
+    ('fallback-incomplete-is-fatal', 'prune-releases.py', FALLBACK_SKIP, '        except (OSError, ValueError):\n            raise', SKIPPED),
+    ('fallback-stops-at-incomplete', 'prune-releases.py', FALLBACK_SKIP, '        except (OSError, ValueError):\n            break', SKIPPED),
+    ('fallback-compares-text', 'prune-releases.py', 'version_key(tag) < stable_key', "tag < channels['stable']", 'test_fallback_compares_version_numbers_not_text'),
+    ('fallback-picks-by-text', 'prune-releases.py', 'sorted(candidates, key=version_key, reverse=True)', 'sorted(candidates, key=lambda tag: tag, reverse=True)', 'test_fallback_compares_version_numbers_not_text'),
+    ('fallback-includes-stable', 'prune-releases.py', 'version_key(tag) < stable_key', 'version_key(tag) <= stable_key', FALLBACK),
+    ('keep-every-version-below-stable', 'prune-releases.py', FALLBACK_KEEP, '        keep.add(tag)', FALLBACK),
     ('skip-prune-lock', 'prune-releases.py', 'fcntl.flock(descriptor, fcntl.LOCK_EX)', 'pass', LOCK),
     ('skip-mirror-lock', 'mirror-prebuilt.sh', SHELL_LOCK, ':', LOCK),
     ('skip-promote-lock', 'promote.sh', SHELL_LOCK, ':', LOCK),
