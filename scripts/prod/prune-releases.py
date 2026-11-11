@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep the three newest AHV CLI versions plus the channel and store-floor tags.
+"""Keep the newest AHV CLI version plus the versions the stable and canary channels point to.
 
 Only regular files with complete names emitted by build-prebuilt.sh and
 mirror-prebuilt.sh are eligible. Symlinks, directories and partial files stay.
@@ -82,7 +82,7 @@ def prune_locked(directory):
             if match is not None and entry.is_file(follow_symlinks=False):
                 artifacts.append((entry.name, match[1], entry.stat(follow_symlinks=False)))
     versions = {tag for _, tag, _ in artifacts}
-    keep.update(sorted(versions, key=lambda tag: tuple(int(p) for p in tag[1:].split('.')), reverse=True)[:3])
+    keep.update(sorted(versions, key=lambda tag: tuple(int(p) for p in tag[1:].split('.')), reverse=True)[:1])
     for name, tag, original in artifacts:
         if tag in keep:
             continue

@@ -8,7 +8,7 @@ import tempfile
 
 PROD = Path(__file__).resolve().parents[1]
 TEST = 'test-release-retention.py'
-TIMER = 'test_timer_keeps_three_newest_numeric_versions_plus_all_pointers'
+TIMER = 'test_timer_keeps_newest_numeric_version_plus_all_pointers'
 SAFETY = 'test_only_exact_owned_files_are_removed'
 CHANGED = 'test_changed_pointer_or_replaced_artifact_stops_a_stale_plan'
 LOCK = 'test_cleanup_mirror_and_promote_wait_for_the_channel_writer'
@@ -20,11 +20,12 @@ HOOK = 'python3 "$(dirname "$0")/prune-releases.py" "$dir"'
 SHELL_LOCK = 'flock -x "$AHV_CHANNEL_LOCK_FD"'
 WARNING = '  printf \'stable → %s OK; dọn kho lỗi: %s; chạy lại prune-releases.py\\n\' "$tag" "$cleanup_output" >&2'
 MUTANTS = [
-    ('keep-two', 'prune-releases.py', '[:3]', '[:2]', TIMER),
-    ('keep-four', 'prune-releases.py', '[:3]', '[:4]', TIMER),
+    ('keep-none', 'prune-releases.py', '[:1]', '[:0]', 'test_newest_version_no_channel_points_to_is_kept'),
+    ('keep-two', 'prune-releases.py', '[:1]', '[:2]', 'test_stable_equal_canary_equal_newest_leaves_exactly_one_version'),
+    ('keep-three', 'prune-releases.py', '[:1]', '[:3]', TIMER),
     ('lexical-order', 'prune-releases.py', "key=lambda tag: tuple(int(p) for p in tag[1:].split('.'))", 'key=lambda tag: tag', TIMER),
     ('forget-stable', 'prune-releases.py', 'keep.add(value)', "keep.add(value) if key != 'stable' else None", TIMER),
-    ('forget-canary', 'prune-releases.py', 'keep.add(value)', "keep.add(value) if key != 'canary' else None", 'test_canary_and_floor_outside_latest_three_are_preserved'),
+    ('forget-canary', 'prune-releases.py', 'keep.add(value)', "keep.add(value) if key != 'canary' else None", 'test_canary_and_floor_outside_newest_are_preserved'),
     ('forget-floor', 'prune-releases.py', 'keep.add(value)', "keep.add(value) if key != 'store_floor' else None", TIMER),
     ('leave-archives', 'prune-releases.py', ' or ARCHIVE.fullmatch(entry.name)', '', TIMER),
     ('leave-glibc-variants', 'prune-releases.py', r'(?:-glibc[0-9]+(?:\.[0-9]+)+)?', '', TIMER),
