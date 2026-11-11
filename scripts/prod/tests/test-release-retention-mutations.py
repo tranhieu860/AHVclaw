@@ -8,7 +8,7 @@ import tempfile
 
 PROD = Path(__file__).resolve().parents[1]
 TEST = 'test-release-retention.py'
-TIMER = 'test_timer_keeps_newest_numeric_version_plus_all_pointers'
+TIMER = 'test_timer_keeps_newest_numeric_version_plus_stable_and_canary'
 SAFETY = 'test_only_exact_owned_files_are_removed'
 CHANGED = 'test_changed_pointer_or_replaced_artifact_stops_a_stale_plan'
 LOCK = 'test_cleanup_mirror_and_promote_wait_for_the_channel_writer'
@@ -25,8 +25,9 @@ MUTANTS = [
     ('keep-three', 'prune-releases.py', '[:1]', '[:3]', TIMER),
     ('lexical-order', 'prune-releases.py', "key=lambda tag: tuple(int(p) for p in tag[1:].split('.'))", 'key=lambda tag: tag', TIMER),
     ('forget-stable', 'prune-releases.py', 'keep.add(value)', "keep.add(value) if key != 'stable' else None", TIMER),
-    ('forget-canary', 'prune-releases.py', 'keep.add(value)', "keep.add(value) if key != 'canary' else None", 'test_canary_and_floor_outside_newest_are_preserved'),
-    ('forget-floor', 'prune-releases.py', 'keep.add(value)', "keep.add(value) if key != 'store_floor' else None", TIMER),
+    ('forget-canary', 'prune-releases.py', 'keep.add(value)', "keep.add(value) if key != 'canary' else None", 'test_canary_outside_newest_is_preserved_and_floor_is_not'),
+    ('readd-floor-to-keep', 'prune-releases.py', "if key != 'store_floor':", 'if True:', TIMER),
+    ('skip-floor-tag-shape-check', 'prune-releases.py', 'if not isinstance(value, str) or re.fullmatch(TAG, value) is None:', "if key != 'store_floor' and (not isinstance(value, str) or re.fullmatch(TAG, value) is None):", 'test_malformed_floor_refuses_all_deletion'),
     ('leave-archives', 'prune-releases.py', ' or ARCHIVE.fullmatch(entry.name)', '', TIMER),
     ('leave-glibc-variants', 'prune-releases.py', r'(?:-glibc[0-9]+(?:\.[0-9]+)+)?', '', TIMER),
     ('broad-archive-suffix', 'prune-releases.py', r"\.tar\.zst')", r"\.tar\.zst.*')", SAFETY),
@@ -35,7 +36,7 @@ MUTANTS = [
     ('skip-pointer-target-validation', 'prune-releases.py', '        validate_pointer(directory, tag)', '        pass', TARGET),
     ('skip-stable-target-validation', 'prune-releases.py', '        validate_pointer(directory, tag)', "        if channels.get('stable') != tag: validate_pointer(directory, tag)", TARGET),
     ('skip-canary-target-validation', 'prune-releases.py', '        validate_pointer(directory, tag)', "        if channels.get('canary') != tag: validate_pointer(directory, tag)", TARGET),
-    ('skip-floor-target-validation', 'prune-releases.py', '        validate_pointer(directory, tag)', "        if channels.get('store_floor') != tag: validate_pointer(directory, tag)", TARGET),
+    ('validate-floor-target', 'prune-releases.py', 'for tag in keep:', "for tag in keep | ({channels['store_floor']} if 'store_floor' in channels else set()):", 'test_floor_without_files_is_not_an_error_and_existing_floor_files_expire'),
     ('ignore-pointer-version-mismatch', 'prune-releases.py', "if not isinstance(manifest, dict) or manifest.get('version') != tag:", 'if False:', TARGET),
     ('allow-pointer-manifest-symlink', 'prune-releases.py', 'path.lstat().st_mode', 'path.stat().st_mode', TARGET),
     ('allow-pointer-archive-symlink', 'prune-releases.py', '(directory / name).lstat().st_mode', '(directory / name).stat().st_mode', TARGET),

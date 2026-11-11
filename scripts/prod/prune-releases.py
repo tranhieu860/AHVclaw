@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Keep the newest AHV CLI version plus the versions the stable and canary channels point to.
 
+A malformed store_floor stops cleanup, but the floor is only a threshold: its files
+are not kept or required, and an absent floor version is not an error.
+
 Only regular files with complete names emitted by build-prebuilt.sh and
 mirror-prebuilt.sh are eligible. Symlinks, directories and partial files stay.
 Missing or invalid channel pointers, manifests or referenced archives stop
@@ -69,7 +72,10 @@ def prune_locked(directory):
         value = channels.get(key)
         if not isinstance(value, str) or re.fullmatch(TAG, value) is None:
             raise ValueError(f'invalid or missing channel pointer: {key}')
-        keep.add(value)
+        # store_floor is only a threshold the CMS writes: its shape is checked,
+        # but its files are neither kept nor required.
+        if key != 'store_floor':
+            keep.add(value)
     for tag in keep:
         try:
             validate_pointer(directory, tag)

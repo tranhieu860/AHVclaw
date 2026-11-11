@@ -54,12 +54,12 @@ class ReleaseRetentionTests(unittest.TestCase):
         return subprocess.run(['bash', str(SCRIPTS / 'mirror-prebuilt.sh'), str(self.channel)],
                               env=self.env, capture_output=True, text=True, timeout=20)
 
-    def test_timer_keeps_newest_numeric_version_plus_all_pointers(self):
+    def test_timer_keeps_newest_numeric_version_plus_stable_and_canary(self):
         kept = {'channels.json'}
         removed = set()
         for tag in ['v0.2.1', 'v0.2.2', 'v0.2.3', 'v0.2.4', 'v0.2.8', 'v0.2.9', 'v0.2.10']:
             names = self.release(tag)
-            (kept if tag in ['v0.2.1', 'v0.2.2', 'v0.2.10'] else removed).update(names)
+            (kept if tag in ['v0.2.2', 'v0.2.10'] else removed).update(names)
         # Historical archives can outlive their tag manifest after an interrupted cleanup.
         orphan = 'ahv-cli-v0.2.0-linux-x64.tar.zst'
         (self.channel / orphan).write_text('old orphan')
@@ -73,15 +73,16 @@ class ReleaseRetentionTests(unittest.TestCase):
         self.assertEqual(self.mirror().returncode, 0)
         self.assertEqual(set(p.name for p in self.channel.iterdir()), kept)
 
-    def test_canary_and_floor_outside_newest_are_preserved(self):
+    def test_canary_outside_newest_is_preserved_and_floor_is_not(self):
         self.pointers = {'stable': 'v0.2.10', 'canary': 'v0.2.1', 'store_floor': 'v0.2.2'}
         self.channels()
         for tag in ['v0.2.1', 'v0.2.2', 'v0.2.3', 'v0.2.8', 'v0.2.9', 'v0.2.10']:
             self.release(tag)
         self.assertEqual(self.mirror().returncode, 0)
-        for tag in ['v0.2.1', 'v0.2.2', 'v0.2.10']:
+        for tag in ['v0.2.1', 'v0.2.10']:
             self.assertTrue((self.channel / f'{tag}.json').exists(), tag)
-        for tag in ['v0.2.3', 'v0.2.8', 'v0.2.9']:
+        # store_floor v0.2.2 is only a threshold: its files go like any old release.
+        for tag in ['v0.2.2', 'v0.2.3', 'v0.2.8', 'v0.2.9']:
             self.assertFalse((self.channel / f'{tag}.json').exists(), tag)
 
     def test_only_exact_owned_files_are_removed(self):
@@ -157,6 +158,37 @@ class ReleaseRetentionTests(unittest.TestCase):
         self.assertEqual(self.mirror().returncode, 0)
         self.assertEqual(set(p.name for p in self.channel.iterdir()), kept)
 
+    def test_floor_without_files_is_not_an_error_and_existing_floor_files_expire(self):
+        self.pointers = {'stable': 'v0.2.10', 'canary': 'v0.2.10', 'store_floor': 'v0.2.1'}
+        self.channels()
+        kept = self.release('v0.2.10') | {'channels.json'}
+        self.release('v0.2.8')
+        for floor, files in [('v0.2.1', False), ('v0.2.8', True), ('v0.2.1', False)]:
+            self.pointers['store_floor'] = floor
+            self.channels()
+            if files:
+                self.release(floor)
+            result = subprocess.run(['python3', str(SCRIPTS / 'prune-releases.py'), str(self.channel)],
+                                    env=self.env, capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(set(p.name for p in self.channel.iterdir()), kept)
+            self.assertEqual(json.loads((self.channel / 'channels.json').read_text()), self.pointers)
+
+    def test_malformed_floor_refuses_all_deletion(self):
+        for tag in ['v0.2.1', 'v0.2.2', 'v0.2.3', 'v0.2.10']:
+            self.release(tag)
+        path = self.channel / 'channels.json'
+        for floor in [3, '3', 'v0.2.4５', '../v0.2.1', 'v0.2', None]:
+            with self.subTest(floor=floor):
+                path.write_text(json.dumps({'stable': 'v0.2.10', 'canary': 'v0.2.10', 'store_floor': floor},
+                                           ensure_ascii=False), encoding='utf-8')
+                before = {p.name: p.read_bytes() for p in self.channel.iterdir()}
+                result = subprocess.run(['python3', str(SCRIPTS / 'prune-releases.py'), str(self.channel)],
+                                        env=self.env, capture_output=True, text=True, timeout=20)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn('store_floor', result.stderr)
+                self.assertEqual({p.name: p.read_bytes() for p in self.channel.iterdir()}, before)
+
     def test_invalid_pointer_targets_refuse_all_deletion(self):
         # Skipping any pointer's manifest/archive validation must leave an expired
         # release eligible for deletion here, making the preservation check fail.
@@ -176,7 +208,7 @@ class ReleaseRetentionTests(unittest.TestCase):
                 result[path.name] = (mode, content)
             return result
 
-        for pointer in ['stable', 'canary', 'store_floor']:
+        for pointer in ['stable', 'canary']:
             for defect in ['missing-manifest', 'missing-archive', 'version-mismatch',
                            'manifest-symlink', 'manifest-directory', 'archive-symlink',
                            'archive-directory', 'invalid-json', 'unreadable-manifest']:
@@ -275,9 +307,9 @@ class ReleaseRetentionTests(unittest.TestCase):
         result = subprocess.run(['bash', str(SCRIPTS / 'promote.sh'), 'v0.2.60', str(self.channel)],
                                 env=self.env, capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stderr)
-        for tag in ['v0.2.56', 'v0.2.58', 'v0.2.59']:
+        for tag in ['v0.2.56', 'v0.2.57', 'v0.2.58', 'v0.2.59']:
             self.assertFalse((self.channel / f'{tag}.json').exists(), tag)
-        for tag in ['v0.2.57', 'v0.2.60', 'v0.2.61']:
+        for tag in ['v0.2.60', 'v0.2.61']:
             self.assertTrue((self.channel / f'{tag}.json').exists(), tag)
         self.assertEqual(json.loads((self.channel / 'manifest.json').read_text())['version'], 'v0.2.60')
 
@@ -307,7 +339,7 @@ class ReleaseRetentionTests(unittest.TestCase):
                         while_locked = json.loads((self.channel / 'channels.json').read_text())
                         requested_while_locked = (self.root / 'requested').exists()
                         # The queued cleaner must use this latest pointer after acquiring the lock.
-                        self.pointers['store_floor'] = 'v0.2.56'
+                        self.pointers['canary'] = 'v0.2.56'
                         self.channels()
                         fcntl.flock(lock, fcntl.LOCK_UN)
                     out, err = process.communicate(timeout=20)
@@ -393,7 +425,8 @@ printf bytes > "$2/ahv-cli-$1-linux-x64.tar.zst"
         self.assertEqual(json.loads((self.channel / 'channels.json').read_text())['canary'], 'v0.2.101')
         for tag in ['v0.2.98', 'v0.2.99', 'v0.2.100']:
             self.assertFalse((self.channel / f'{tag}.json').exists(), tag)
-        for tag in ['v0.2.90', 'v0.2.91', 'v0.2.101']:
+        self.assertFalse((self.channel / 'v0.2.91.json').exists())
+        for tag in ['v0.2.90', 'v0.2.101']:
             self.assertTrue((self.channel / f'{tag}.json').exists(), tag)
 
 
