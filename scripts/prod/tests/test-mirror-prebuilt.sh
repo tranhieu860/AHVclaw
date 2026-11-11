@@ -88,7 +88,8 @@ mkdir -p "$T/gh/v1.0.0"; gh_asset v1.0.0 linux-arm64 2.39 "old-arm-bytes"
 gh_asset v1.0.1 linux-arm64 2.39 "arm-bytes"
 run_mirror; rc=$?
 check "mirror exits 0 with store_floor present" '[ "$rc" = 0 ]'
-check "the floor tag is not fetched or rewritten" '[ "$(fetched v1.0.0)" = 0 ] && cmp -s "$T/ch/v1.0.0.json" "$T/floor.orig"'
+# The floor is only a threshold: retention may delete its old files, but never rewrites them.
+check "the floor tag is not fetched or rewritten" '[ "$(fetched v1.0.0)" = 0 ] && { [ ! -e "$T/ch/v1.0.0.json" ] || cmp -s "$T/ch/v1.0.0.json" "$T/floor.orig"; }'
 check "the channel tag still is" '[ "$(entry v1.0.1 linux-arm64 glibc)" = "2.39" ]'
 
 echo "== an archive already downloaded but never merged is merged without a refetch"

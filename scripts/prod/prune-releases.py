@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Keep the three newest AHV CLI versions plus the channel and store-floor tags.
+"""Keep the newest AHV CLI version, the versions the stable and canary channels point to,
+and one fallback: the highest complete version strictly below stable and not below
+store_floor. The CMS rolls stable back to the tag it pointed to just before, so that
+tag's manifest and archives must still be here. An incomplete candidate is skipped.
+
+A malformed store_floor stops cleanup, but the floor is only a threshold: its files
+are not kept or required, and an absent floor version is not an error.
 
 Only regular files with complete names emitted by build-prebuilt.sh and
 mirror-prebuilt.sh are eligible. Symlinks, directories and partial files stay.
@@ -17,6 +23,10 @@ import sys
 TAG = r'v[0-9]+\.[0-9]+\.[0-9]+'
 MANIFEST = re.compile(rf'({TAG})\.json')
 ARCHIVE = re.compile(rf'ahv-cli-({TAG})-linux-(?:x64|arm64)(?:-glibc[0-9]+(?:\.[0-9]+)+)?\.tar\.zst')
+
+
+def version_key(tag):
+    return tuple(int(part) for part in tag[1:].split('.'))
 
 
 def validate_pointer(directory, tag):
@@ -69,7 +79,10 @@ def prune_locked(directory):
         value = channels.get(key)
         if not isinstance(value, str) or re.fullmatch(TAG, value) is None:
             raise ValueError(f'invalid or missing channel pointer: {key}')
-        keep.add(value)
+        # store_floor is only a threshold the CMS writes: its shape is checked,
+        # but its files are neither kept nor required.
+        if key != 'store_floor':
+            keep.add(value)
     for tag in keep:
         try:
             validate_pointer(directory, tag)
@@ -82,7 +95,18 @@ def prune_locked(directory):
             if match is not None and entry.is_file(follow_symlinks=False):
                 artifacts.append((entry.name, match[1], entry.stat(follow_symlinks=False)))
     versions = {tag for _, tag, _ in artifacts}
-    keep.update(sorted(versions, key=lambda tag: tuple(int(p) for p in tag[1:].split('.')), reverse=True)[:3])
+    keep.update(sorted(versions, key=version_key, reverse=True)[:1])
+    stable_key = version_key(channels['stable'])
+    floor_key = version_key(channels['store_floor']) if 'store_floor' in channels else None
+    candidates = [tag for tag in versions
+                  if version_key(tag) < stable_key and (floor_key is None or version_key(tag) >= floor_key)]
+    for tag in sorted(candidates, key=version_key, reverse=True):
+        try:
+            validate_pointer(directory, tag)
+        except (OSError, ValueError):
+            continue
+        keep.add(tag)
+        break
     for name, tag, original in artifacts:
         if tag in keep:
             continue
