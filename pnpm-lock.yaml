@@ -2348,7 +2348,7 @@ importers:
         specifier: ^0.9.12
         version: 0.9.12(patch_hash=ed573f18df70407f5bd9327b2402d143fb4246546b9e42f9ca406bbe92f28d39)(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-attachment@packages+attachment+attachment)(@deepseek-ai/dsh-home-paths@packages+util+home-paths)(@deepseek-ai/dsh-llm@packages+llm+llm)(@deepseek-ai/dsh-tools@packages+core+tools)(@deepseek-ai/dsh-web@packages+web+web)(@deepseek-ai/schemastery@vendor+schemastery)
       dshmarket:
-        specifier: ^1.73.18
+        specifier: ^1.73.19
         version: 1.73.19(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-settings@packages+settings+settings)(@deepseek-ai/schemastery@vendor+schemastery)
       superpowers-dsh:
         specifier: ^0.5.0
