@@ -12,7 +12,7 @@ const original = readFileSync(source, 'utf8')
 const mutations = [
   ['ignore shared mutex', 'logout waits', 'async function withAuthLock(path, callback) {', 'async function withAuthLock(path, callback) {\n  return callback()'],
   ['unstable provider mutex', 'concurrent refreshes', '`${authPath}.refresh-${kind}.lock`', '`${authPath}.refresh-${kind}-${Math.random()}.lock`'],
-  ['reuse snapshot after waiting', 'refresh rereads the token', 'const current = storedAccount(readSubscriptionsAuthForWrite(authPath)[kind], key)', 'const current = { key, session }'],
+  ['reuse snapshot after waiting', 'refresh rereads the token', 'const current = storedAccount(readSubscriptionsAuthForWrite(authPath)[kind], key, kind)', 'const current = { key, session }'],
   ['ignore refresh CAS', 'cannot resurrect', 'if (!existing.session || !sameAuthTokens(existing.session, current.session))', 'if (false)'],
   ['ignore access-token CAS', 'refresh CAS preserves', 'return left?.accessToken === right?.accessToken && left?.refreshToken === right?.refreshToken', 'return left?.refreshToken === right?.refreshToken'],
   ['ignore refresh-token CAS', 'refresh CAS preserves', 'return left?.accessToken === right?.accessToken && left?.refreshToken === right?.refreshToken', 'return left?.accessToken === right?.accessToken'],

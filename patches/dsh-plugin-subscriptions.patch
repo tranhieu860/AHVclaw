@@ -139,11 +139,11 @@ diff --git a/lib/index.js b/lib/index.js
  			};
  			continue;
  		}
-+		if (isAccountsMap(record$1.accounts) && (typeof record$1.accessToken === "string" || Object.values(record$1.accounts).some((child) => typeof child === "object" && child !== null && Object.hasOwn(child, "accounts")))) record$1 = flattenNestedEntry(provider, record$1);
++		if (needsFlatten(record$1)) record$1 = flattenNestedEntry(provider, record$1);
  		const accounts = record$1.accounts;
  		if (typeof accounts !== "object" || accounts === null || Array.isArray(accounts)) {
  			console.warn(`subscriptions auth store: entry "${provider}" has no accounts map; skipped`);
-@@ -1295,14 +1299,113 @@ function parseStore(text, path) {
+@@ -1295,14 +1299,164 @@ function parseStore(text, path) {
  	if (store.codex !== void 0) migrateCodex(store.codex);
  	return store;
  }
@@ -151,42 +151,92 @@ diff --git a/lib/index.js b/lib/index.js
 +function isAccountsMap(value) {
 +	return typeof value === "object" && value !== null && !Array.isArray(value);
 +}
++/** Whether an entry carries a session next to its `accounts` map, or accounts that hold `accounts` maps. */
++function needsFlatten(entry) {
++	return isAccountsMap(entry) && isAccountsMap(entry.accounts) && (typeof entry.accessToken === "string" || Object.values(entry.accounts).some((child) => isAccountsMap(child) && Object.hasOwn(child, "accounts")));
++}
++/** Keys {@link accountKeyOf} derives from a refresh token, for sessions with no identity field. */
++function isAnonymousKey(key) {
++	return /^token-[0-9a-f]{16}$/.test(key);
++}
++/**
++* AHV: the one rule that picks between copies of the same account when an
++* entry is flattened (the bot's `storeAccounts` and login-sync follow it):
++* a usable session beats an unusable row (non-object or missing tokens) in
++* any order; an unusable row only fills a key nobody else holds; between two
++* usable copies the later `expiresAt` wins and the copy already held, which
++* is the outer one, wins a tie.
++* @param accounts - the flat accounts being built.
++* @param name - the account key the candidate is filed under.
++* @param candidate - a session or an unusable row found under that key.
++*/
++function placeAccount(accounts, name, candidate) {
++	if (!Object.hasOwn(accounts, name)) {
++		accounts[name] = candidate;
++		return;
++	}
++	if (!isValidSessionShape(candidate)) return;
++	const held = accounts[name];
++	if (!isValidSessionShape(held) || candidate.expiresAt > held.expiresAt) accounts[name] = candidate;
++}
 +/**
 +* AHV: flatten an entry that carries a session AND an `accounts` map, or whose
 +* accounts hold `accounts` maps of their own. An older reader wrapped such an
 +* entry whole as one account, so every read-and-write added a level (122
 +* levels of grok seen on a host). Walks outermost first without recursion; the
 +* session fields at each level are one account, filed under the map key it was
-+* found under (a bare session under its own account key). When one key shows
-+* up more than once, the later `expiresAt` wins and the outer copy wins a tie.
++* found under (a bare session under {@link accountKeyOf}, for every provider).
++* Copies of one key are chosen by {@link placeAccount}. Accounts with no
++* identity are keyed by a hash of their own refresh token, so a wrapper chain
++* of them carries a different key per level: the only account of an
++* account-less level is that level's own older copy and takes its key. The
++* default is the outer `default`, unless the bare session is strictly later
++* than the account it names, then the bare session's account; defaults found
++* in nested levels come last.
 +* @param provider - provider id the entry belongs to.
 +* @param record - the entry as read from the store.
 +* @returns `{default?, accounts}` with every account at one level and no wrapper fields.
 +*/
 +function flattenNestedEntry(provider, record) {
 +	const accounts = {};
-+	const defaults = [];
++	const nestedDefaults = [];
++	let outerDefault;
++	let bareName;
 +	const queue = [{
 +		node: record,
-+		key: void 0
++		key: void 0,
++		parentAnonymous: void 0
 +	}];
 +	for (let index = 0; index < queue.length; index += 1) {
-+		const { node, key } = queue[index];
++		const { node, key, parentAnonymous } = queue[index];
 +		const { accounts: children, default: preferred, ...session } = node;
-+		if (typeof preferred === "string") defaults.push(preferred);
-+		if (isValidSessionShape(session)) {
-+			const name = key ?? (provider === "codex" ? session.accountId : accountKeyOf(provider, session));
-+			if (key === void 0) defaults.push(name);
-+			const held = accounts[name];
-+			if (held === void 0 || session.expiresAt > held.expiresAt) accounts[name] = session;
-+		} else if (key !== void 0 && !isAccountsMap(children)) accounts[key] = session;
-+		if (isAccountsMap(children)) for (const [childKey, child] of Object.entries(children)) if (typeof child === "object" && child !== null && !Array.isArray(child)) queue.push({
++		if (typeof preferred === "string") if (index === 0) outerDefault = preferred;
++		else nestedDefaults.push(preferred);
++		const valid = isValidSessionShape(session);
++		const name = key === void 0 ? valid ? accountKeyOf(provider, session) : void 0 : parentAnonymous !== void 0 && isAnonymousKey(key) ? parentAnonymous : key;
++		if (valid) {
++			if (key === void 0) bareName = name;
++			placeAccount(accounts, name, session);
++		} else if (name !== void 0 && !isAccountsMap(children)) placeAccount(accounts, name, session);
++		if (!isAccountsMap(children)) continue;
++		const anonymous = valid && isAnonymousKey(name) && Object.keys(children).length === 1 ? name : void 0;
++		for (const [childKey, child] of Object.entries(children)) if (isAccountsMap(child)) queue.push({
 +			node: child,
-+			key: childKey
++			key: childKey,
++			parentAnonymous: anonymous
 +		});
-+			else accounts[childKey] = child;
++			else placeAccount(accounts, anonymous !== void 0 && isAnonymousKey(childKey) ? anonymous : childKey, child);
 +	}
-+	const preferred = defaults.find((name) => Object.hasOwn(accounts, name));
++	const named = (name) => name !== void 0 && Object.hasOwn(accounts, name);
++	let preferred;
++	if (named(outerDefault) && named(bareName) && outerDefault !== bareName) {
++		const outer = accounts[outerDefault];
++		preferred = !isValidSessionShape(outer) || accounts[bareName].expiresAt > outer.expiresAt ? bareName : outerDefault;
++	} else preferred = [
++		outerDefault,
++		bareName,
++		...nestedDefaults
++	].find(named);
 +	return preferred === void 0 ? { accounts } : {
 +		default: preferred,
 +		accounts
@@ -217,12 +267,13 @@ diff --git a/lib/index.js b/lib/index.js
 +	}
 +	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return store;
 +	const out = { ...store };
-+	for (const [provider, entry] of Object.entries(raw)) {
++	for (const [provider, rawEntry] of Object.entries(raw)) {
++		const entry = PROVIDER_IDS.includes(provider) && needsFlatten(rawEntry) ? flattenNestedEntry(provider, rawEntry) : rawEntry;
 +		const whole = !PROVIDER_IDS.includes(provider) || typeof entry !== "object" || entry === null || Array.isArray(entry) || typeof entry.accessToken === "string" && !isValidSessionShape(entry) || typeof entry.accessToken !== "string" && (typeof entry.accounts !== "object" || entry.accounts === null || Array.isArray(entry.accounts) || entry.default !== void 0 && typeof entry.default !== "string");
 +		if (whole) {
 +			if (out[provider] === void 0) out[provider] = entry;
 +			else if (PROVIDER_IDS.includes(provider) && typeof entry === "object" && entry !== null && !Array.isArray(entry)) {
-+				const unread = typeof entry.accessToken === "string" ? isAccountsMap(entry.accounts) ? {} : { [`unparsed-${provider}`]: entry } : typeof entry.accounts === "object" && entry.accounts !== null && !Array.isArray(entry.accounts) ? entry.accounts : {};
++				const unread = typeof entry.accessToken === "string" ? { [`unparsed-${provider}`]: entry } : typeof entry.accounts === "object" && entry.accounts !== null && !Array.isArray(entry.accounts) ? entry.accounts : {};
 +				const kept = Object.entries(unread).filter(([key]) => out[provider].accounts?.[key] === void 0);
 +				if (kept.length > 0) out[provider] = {
 +					...out[provider],
@@ -257,7 +308,7 @@ diff --git a/lib/index.js b/lib/index.js
  	await mkdir(dirname(path), { recursive: true });
  	const tmp = `${path}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`;
  	try {
-@@ -1314,6 +1417,111 @@ async function writeStore(store, path) {
+@@ -1314,6 +1468,111 @@ async function writeStore(store, path) {
  		throw error;
  	}
  }
@@ -369,7 +420,7 @@ diff --git a/lib/index.js b/lib/index.js
  /**
  * One write chain per store path. Every mutation is a read-modify-write of a
  * single JSON file, and the plugin has several independent writers — a login,
-@@ -1333,7 +1541,8 @@ const writeChains = /* @__PURE__ */ new Map();
+@@ -1333,7 +1592,8 @@ const writeChains = /* @__PURE__ */ new Map();
  * @returns whatever `action` returns.
  */
  async function serialize(path, action) {
@@ -379,7 +430,7 @@ diff --git a/lib/index.js b/lib/index.js
  	const tail = next.then(() => void 0, () => void 0);
  	writeChains.set(path, tail);
  	try {
-@@ -1383,17 +1592,19 @@ async function getAccountSession(provider, account, path = authFilePath()) {
+@@ -1383,17 +1643,19 @@ async function getAccountSession(provider, account, path = authFilePath()) {
  * @param account - the account key (see {@link accountKeyOf}).
  * @param session - the fresh session from a login or refresh.
  * @param path - store file path; defaults to {@link authFilePath}.
@@ -405,7 +456,7 @@ diff --git a/lib/index.js b/lib/index.js
  		store[provider] = {
  			...entry,
  			default: entry?.default ?? account,
-@@ -1403,6 +1614,7 @@ async function saveAccountSession(provider, account, session, path = authFilePat
+@@ -1403,6 +1665,7 @@ async function saveAccountSession(provider, account, session, path = authFilePat
  			}
  		};
  		await writeStore(store, path);
@@ -413,7 +464,7 @@ diff --git a/lib/index.js b/lib/index.js
  	});
  }
  /**
-@@ -1414,7 +1626,7 @@ async function saveAccountSession(provider, account, session, path = authFilePat
+@@ -1414,7 +1677,7 @@ async function saveAccountSession(provider, account, session, path = authFilePat
  */
  async function deleteAccountSession(provider, account, path = authFilePath()) {
  	return serialize(path, async () => {
@@ -422,7 +473,7 @@ diff --git a/lib/index.js b/lib/index.js
  		const entry = store[provider];
  		if (entry === void 0) return;
  		account = resolveAccount(entry, account);
-@@ -1438,7 +1650,7 @@ async function deleteAccountSession(provider, account, path = authFilePath()) {
+@@ -1438,7 +1701,7 @@ async function deleteAccountSession(provider, account, path = authFilePath()) {
  */
  async function setDefaultAccount(provider, account, path = authFilePath()) {
  	return serialize(path, async () => {
@@ -431,7 +482,7 @@ diff --git a/lib/index.js b/lib/index.js
  		const entry = store[provider];
  		if (entry !== void 0) account = resolveAccount(entry, account);
  		if (entry === void 0 || !Object.hasOwn(entry.accounts, account)) throw new Error(`no ${provider} account "${account}" is logged in`);
-@@ -2491,6 +2703,15 @@ async function oauthEndpointError(response, label) {
+@@ -2491,6 +2754,15 @@ async function oauthEndpointError(response, label) {
  * coalesces concurrent refreshes behind one in-flight promise. Permanent
  * refresh failures delete the stored session and surface INVALID_CREDENTIAL
  * with a re-login hint; transient failures fall back to a still-valid token.
@@ -447,7 +498,7 @@ diff --git a/lib/index.js b/lib/index.js
  */
  var TokenManager = class {
  	inflight;
-@@ -2525,6 +2746,16 @@ var TokenManager = class {
+@@ -2525,6 +2797,16 @@ var TokenManager = class {
  	async session(forceRefresh = false) {
  		const session = await this.options.load();
  		if (session === void 0) throw new LlmError(`dsh-plugin-subscriptions: not logged in to ${this.options.displayName}; log in via Settings → Subscriptions in the dsh web app`, "MISSING_CREDENTIAL");
@@ -464,7 +515,7 @@ diff --git a/lib/index.js b/lib/index.js
  		if (!forceRefresh && session.expiresAt - Date.now() > this.options.preemptMs) return session;
  		this.inflight ??= this.doRefresh(session).finally(() => {
  			this.inflight = void 0;
-@@ -2532,26 +2763,39 @@ var TokenManager = class {
+@@ -2532,26 +2814,39 @@ var TokenManager = class {
  		try {
  			return await this.inflight;
  		} catch (error) {
@@ -512,7 +563,7 @@ diff --git a/lib/index.js b/lib/index.js
  	}
  };
  /** Bound on one account catalog fetch or usage poll — a hang must not block the picker. */
-@@ -2743,6 +2987,8 @@ var ModelCatalogCache = class {
+@@ -2743,6 +3038,8 @@ var ModelCatalogCache = class {
  		const fresh = this.cached();
  		if (fresh !== void 0) return fresh;
  		if (preferCached && this.entry !== void 0) return this.entry.models;
@@ -521,7 +572,7 @@ diff --git a/lib/index.js b/lib/index.js
  		return this.refresh(fetcher);
  	}
  	/**
-@@ -2760,6 +3006,7 @@ var ModelCatalogCache = class {
+@@ -2760,6 +3057,7 @@ var ModelCatalogCache = class {
  		if (fresh !== void 0) return fresh;
  		const known = this.entry?.models;
  		if (known !== void 0) return known;
@@ -529,7 +580,7 @@ diff --git a/lib/index.js b/lib/index.js
  		try {
  			return await this.refresh(fetcher);
  		} catch {
-@@ -2906,7 +3153,7 @@ var AccountTokenManager = class {
+@@ -2906,7 +3204,7 @@ var AccountTokenManager = class {
  		this.io = options.io ?? {
  			list: () => listAccounts(provider),
  			get: (account) => getAccountSession(provider, account),
@@ -538,7 +589,7 @@ diff --git a/lib/index.js b/lib/index.js
  			remove: (account) => deleteAccountSession(provider, account),
  			resolve: (account) => resolveAccountKey(provider, account)
  		};
-@@ -2954,15 +3201,18 @@ var AccountTokenManager = class {
+@@ -2954,15 +3252,18 @@ var AccountTokenManager = class {
  			manager = new TokenManager({
  				displayName: this.options.displayName,
  				...this.options.makeOptions(account),
@@ -559,7 +610,7 @@ diff --git a/lib/index.js b/lib/index.js
  				},
  				remove: () => io.remove(boundAccount),
  				onRemoved: () => {
-@@ -4199,6 +4449,13 @@ async function fetchClaudeProfile(accessToken) {
+@@ -4199,6 +4500,13 @@ async function fetchClaudeProfile(accessToken) {
  		return {};
  	}
  }
@@ -573,7 +624,7 @@ diff --git a/lib/index.js b/lib/index.js
  /** Build a session from a token response. */
  async function claudeSession(tokens, fallbackRefreshToken, withProfile) {
  	if (typeof tokens.access_token !== "string" || tokens.access_token.length === 0) throw new Error("claude token endpoint returned no access token");
-@@ -4209,6 +4466,7 @@ async function claudeSession(tokens, fallbackRefreshToken, withProfile) {
+@@ -4209,6 +4517,7 @@ async function claudeSession(tokens, fallbackRefreshToken, withProfile) {
  	return {
  		accessToken: tokens.access_token,
  		refreshToken,
@@ -581,7 +632,7 @@ diff --git a/lib/index.js b/lib/index.js
  		expiresAt: Date.now() + tokens.expires_in * 1e3,
  		scopes: tokens.scope ?? CLAUDE_SCOPE,
  		...profile
-@@ -5141,6 +5399,7 @@ const PERMANENT_REFRESH_CODES = new Set([
+@@ -5141,6 +5450,7 @@ const PERMANENT_REFRESH_CODES = new Set([
  	"refresh_token_expired",
  	"refresh_token_reused",
  	"refresh_token_invalidated",
@@ -589,7 +640,7 @@ diff --git a/lib/index.js b/lib/index.js
  	"invalid_grant"
  ]);
  const CODEX_EFFORTS = [
-@@ -5248,6 +5507,7 @@ function codexSession(tokens, fallback) {
+@@ -5248,6 +5558,7 @@ function codexSession(tokens, fallback) {
  	return {
  		accessToken: tokens.access_token,
  		refreshToken,
@@ -597,7 +648,7 @@ diff --git a/lib/index.js b/lib/index.js
  		expiresAt,
  		accountId: tokens.id_token === void 0 && fallback !== void 0 ? fallback.accountId : accountIdOf(tokens.id_token),
  		...idToken === void 0 ? {} : { idToken },
-@@ -7379,6 +7639,7 @@ function grokSession(tokens, tokenEndpoint, fallbackRefreshToken) {
+@@ -7379,6 +7690,7 @@ function grokSession(tokens, tokenEndpoint, fallbackRefreshToken) {
  	return {
  		accessToken: tokens.access_token,
  		refreshToken,
@@ -605,7 +656,7 @@ diff --git a/lib/index.js b/lib/index.js
  		expiresAt: Date.now() + tokens.expires_in * 1e3,
  		tokenEndpoint,
  		...typeof tokens.scope === "string" ? { scopes: tokens.scope } : {},
-@@ -9736,6 +9997,7 @@ function sessionFromTokens(tokens, account, fallback) {
+@@ -9736,6 +10048,7 @@ function sessionFromTokens(tokens, account, fallback) {
  	return {
  		accessToken: tokens.access_token,
  		refreshToken,
@@ -613,7 +664,7 @@ diff --git a/lib/index.js b/lib/index.js
  		expiresAt: Date.now() + tokens.expires_in * 1e3,
  		projectId: account.projectId,
  		...tokens.scope === void 0 ? {} : { scopes: tokens.scope },
-@@ -12076,7 +12338,69 @@ function apply(ctx, config) {
+@@ -12076,7 +12389,69 @@ function apply(ctx, config) {
  			for (const [route, handle] of handles) handle.replace([route]);
  		}
  	});

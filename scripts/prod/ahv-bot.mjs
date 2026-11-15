@@ -552,40 +552,98 @@ function readSubscriptionsAuthForWrite(path = SUBSCRIPTIONS_AUTH_FILE) {
  * the new shape every panel reported "chua login provider nay", and an entry
  * carrying both read as the stale one.
  *
+ * An entry an older writer wrapped into itself (a bare session beside its
+ * `accounts`, or `accounts` holding more `accounts`, seen 122 levels deep) is
+ * flattened with the rule the plugin's parseStore and login_sync share:
+ * a usable session beats an unusable row (non-object, empty token) in any
+ * order; an unusable row only fills a key nobody holds; between usable copies
+ * the later expiresAt wins and the outer copy wins a tie. A bare session is
+ * filed under the plugin's own key (`pluginAccountKey`). An account-less level
+ * that is the only account of an account-less parent is that parent's older
+ * copy and takes its key. The default is the outer `default`, unless the bare
+ * session is strictly later than the account it names; nested defaults last.
+ *
  * @param entry - the provider's entry from the store.
+ * @param provider - the provider id, which decides how a bare session is keyed.
  * @returns the default account key and every account, possibly empty.
  */
-function storeAccounts(entry) {
+function storeAccounts(entry, provider) {
   if (entry === null || typeof entry !== 'object') return { defaultKey: '', accounts: {} }
   const accounts = {}
-  const defaults = []
-  // Outermost first: an entry an older writer wrapped into itself keeps one
-  // account per key, the later expiresAt winning and the outer copy a tie.
-  const queue = [{ node: entry, key: undefined }]
+  const nestedDefaults = []
+  let outerDefault
+  let bareName
+  const queue = [{ node: entry, key: undefined, parentAnonymous: undefined }]
   for (let index = 0; index < queue.length; index += 1) {
-    const { node, key } = queue[index]
+    const { node, key, parentAnonymous } = queue[index]
     const { accounts: children, default: preferred, ...session } = node
-    if (typeof preferred === 'string') defaults.push(preferred)
-    if (typeof session.accessToken === 'string' && session.accessToken !== '') {
-      let name = key ?? accountKeyOf(session)
-      if (name === '' && typeof session.refreshToken === 'string') name = `token-${refreshTokenFingerprint(session.refreshToken)}`
-      if (name !== '') {
-        const held = accounts[name]
-        if (held === undefined || (typeof session.expiresAt === 'number' && session.expiresAt > (typeof held.expiresAt === 'number' ? held.expiresAt : -Infinity))) accounts[name] = session
-        if (key === undefined) defaults.push(name)
-      }
-    } else if (key !== undefined && !isPlainObject(children)) {
-      accounts[key] = session
+    if (typeof preferred === 'string') {
+      if (index === 0) outerDefault = preferred
+      else nestedDefaults.push(preferred)
     }
-    if (isPlainObject(children)) {
-      for (const [childKey, child] of Object.entries(children)) {
-        if (isPlainObject(child)) queue.push({ node: child, key: childKey })
-        else accounts[childKey] = child
+    const valid = typeof session.accessToken === 'string' && session.accessToken !== ''
+    let name
+    if (key !== undefined) name = parentAnonymous !== undefined && isAnonymousKey(key) ? parentAnonymous : key
+    else if (valid) name = bareAccountKey(provider, session)
+    if (valid) {
+      if (name !== '') {
+        if (key === undefined) bareName = name
+        placeAccount(accounts, name, session)
       }
+    } else if (name !== undefined && !isPlainObject(children)) {
+      placeAccount(accounts, name, session)
+    }
+    if (!isPlainObject(children)) continue
+    const anonymous = valid && name !== '' && isAnonymousKey(name) && Object.keys(children).length === 1 ? name : undefined
+    for (const [childKey, child] of Object.entries(children)) {
+      if (isPlainObject(child)) queue.push({ node: child, key: childKey, parentAnonymous: anonymous })
+      else placeAccount(accounts, anonymous !== undefined && isAnonymousKey(childKey) ? anonymous : childKey, child)
     }
   }
-  const defaultKey = defaults.find(name => Object.hasOwn(accounts, name)) ?? Object.keys(accounts)[0] ?? ''
-  return { defaultKey, accounts }
+  const named = name => name !== undefined && Object.hasOwn(accounts, name)
+  let preferredKey
+  if (named(outerDefault) && named(bareName) && outerDefault !== bareName) {
+    preferredKey = !hasUsableToken(accounts[outerDefault]) || accounts[bareName].expiresAt > accounts[outerDefault].expiresAt ? bareName : outerDefault
+  } else {
+    preferredKey = [outerDefault, bareName, ...nestedDefaults].find(named)
+  }
+  return { defaultKey: preferredKey ?? Object.keys(accounts)[0] ?? '', accounts }
+}
+
+/** Whether a stored row is a session with a non-empty access token. */
+function hasUsableToken(row) {
+  return isPlainObject(row) && typeof row.accessToken === 'string' && row.accessToken !== ''
+}
+
+/** Keys the plugin derives from a refresh token for a session with no identity. */
+function isAnonymousKey(key) {
+  return /^token-[0-9a-f]{16}$/.test(key)
+}
+
+/**
+ * Where a bare session beside `accounts` is filed: the plugin's key for known providers
+ * (Codex by workspace and user), else the legacy identity, else a refresh-token hash.
+ */
+function bareAccountKey(provider, session) {
+  if (provider !== undefined) {
+    const key = pluginAccountKey(provider, session)
+    if (key !== '') return key
+  }
+  const key = accountKeyOf(session)
+  if (key !== '') return key
+  return typeof session.refreshToken === 'string' ? `token-${refreshTokenFingerprint(session.refreshToken)}` : ''
+}
+
+/** Rule shared with the plugin's placeAccount; see {@link storeAccounts}. */
+function placeAccount(accounts, name, candidate) {
+  if (!Object.hasOwn(accounts, name)) {
+    accounts[name] = candidate
+    return
+  }
+  if (!hasUsableToken(candidate)) return
+  const held = accounts[name]
+  const heldExpiry = typeof held?.expiresAt === 'number' ? held.expiresAt : -Infinity
+  if (!hasUsableToken(held) || (typeof candidate.expiresAt === 'number' && candidate.expiresAt > heldExpiry)) accounts[name] = candidate
 }
 
 function isPlainObject(value) {
@@ -630,8 +688,8 @@ function accountKeyOf(session) {
 }
 
 /** The session a provider is currently logged in as, or undefined. */
-function activeSession(entry) {
-  const { defaultKey, accounts } = storeAccounts(entry)
+function activeSession(entry, provider) {
+  const { defaultKey, accounts } = storeAccounts(entry, provider)
   return defaultKey === '' ? undefined : accounts[defaultKey]
 }
 
@@ -649,8 +707,8 @@ function activeSession(entry) {
  * @param session - the refreshed session.
  * @returns the entry with that one account replaced.
  */
-export function withAccountSession(entry, key, session) {
-  const { defaultKey, accounts } = storeAccounts(entry)
+export function withAccountSession(entry, key, session, provider) {
+  const { defaultKey, accounts } = storeAccounts(entry, provider)
   if (key === '') return entry
   return { ...entryExtras(entry), default: defaultKey !== '' ? defaultKey : key, accounts: { ...accounts, [key]: session } }
 }
@@ -666,8 +724,8 @@ function entryExtras(entry) {
 }
 
 /** Put a refreshed session back where it came from, leaving other accounts alone. */
-function withSession(entry, session) {
-  const { defaultKey, accounts } = storeAccounts(entry)
+function withSession(entry, session, provider) {
+  const { defaultKey, accounts } = storeAccounts(entry, provider)
   const key = defaultKey !== '' ? defaultKey : accountKeyOf(session)
   if (key === '') return entry
   return { ...entryExtras(entry), default: key, accounts: { ...accounts, [key]: session } }
@@ -784,8 +842,8 @@ async function withAuthLock(path, callback) {
 }
 
 /** Follow account aliases written by the plugin before comparing or updating tokens. */
-function storedAccount(entry, key) {
-  const { accounts } = storeAccounts(entry)
+function storedAccount(entry, key, provider) {
+  const { accounts } = storeAccounts(entry, provider)
   const seen = new Set()
   while (!Object.hasOwn(accounts, key) && typeof entry?.aliases?.[key] === 'string' && !seen.has(key)) {
     seen.add(key)
@@ -1379,18 +1437,18 @@ function writeFileAtomic600(file, text) {
 async function refreshWithBook(kind, key, session, book, fetchFn, now, authPath) {
   if (authPath !== undefined) {
     return withAuthLock(`${authPath}.refresh-${kind}.lock`, async () => {
-      const current = storedAccount(readSubscriptionsAuthForWrite(authPath)[kind], key)
+      const current = storedAccount(readSubscriptionsAuthForWrite(authPath)[kind], key, kind)
       if (!current.session) return { session: undefined, refreshed: false, skipped: 'removed' }
       const fresh = await refreshWithBook(kind, current.key, current.session, book, fetchFn, now)
       return withAuthLock(`${authPath}.lock`, async () => {
         const auth = readSubscriptionsAuthForWrite(authPath)
-        const existing = storedAccount(auth[kind], current.key)
+        const existing = storedAccount(auth[kind], current.key, kind)
         if (!existing.session || !sameAuthTokens(existing.session, current.session)) {
           return { session: existing.session, refreshed: false, skipped: 'changed' }
         }
         if (!fresh.refreshed) return fresh
         const updated = { ...existing.session, ...fresh.session }
-        auth[kind] = withAccountSession(auth[kind], existing.key, updated)
+        auth[kind] = withAccountSession(auth[kind], existing.key, updated, kind)
         writeSubscriptionsAuth(auth, authPath)
         return { ...fresh, session: updated }
       })
@@ -1511,7 +1569,7 @@ export async function collectSubscriptionUsage(auth, fetchFn = fetch, opts = {})
   const refreshed = []
   await completeAuthWork(SUPPORTED_LOGIN_PROVIDERS.map(async (kind) => {
     const stored = auth?.[kind]
-    const { defaultKey, accounts } = storeAccounts(stored && typeof stored === 'object' ? stored : undefined)
+    const { defaultKey, accounts } = storeAccounts(stored && typeof stored === 'object' ? stored : undefined, kind)
     const rows = await completeAuthWork(Object.entries(accounts).map(async ([key, session]) => {
       const fresh = await refreshWithBook(kind, key, session, refreshBook, fetchFn, now, opts.authPath)
       if (fresh.refreshed) refreshed.push({ kind, key, session: fresh.session })
@@ -1634,7 +1692,7 @@ export async function loginQuotaReport({ kind, account, maxAgeSec, fetchFn = fet
     throw new Error('login quota: --max-age cần số giây (số nguyên >= 0)')
   }
   const auth = readSubscriptionsAuth()
-  const { defaultKey, accounts } = storeAccounts(auth[kind])
+  const { defaultKey, accounts } = storeAccounts(auth[kind], kind)
   if (Object.keys(accounts).length === 0) throw new Error(`login quota: kind "${kind}" không có tài khoản`)
   if (account !== undefined && !Object.hasOwn(accounts, account)) {
     throw new Error(`login quota: account "${account}" không có trong kind "${kind}"`)
@@ -1682,7 +1740,7 @@ export async function loginRefreshReport({ fetchFn = fetch, now = Date.now() } =
   const providers = {}
   await completeAuthWork(SUPPORTED_LOGIN_PROVIDERS.map(async (kind) => {
     const stored = auth?.[kind]
-    const { defaultKey, accounts } = storeAccounts(stored && typeof stored === 'object' ? stored : undefined)
+    const { defaultKey, accounts } = storeAccounts(stored && typeof stored === 'object' ? stored : undefined, kind)
     const rows = await completeAuthWork(Object.entries(accounts).map(async ([key, session]) => {
       const fresh = await refreshWithBook(kind, key, session, refreshBook, fetchFn, now, SUBSCRIPTIONS_AUTH_FILE)
       return {
@@ -1715,7 +1773,7 @@ function loginStatus() {
   const auth = readSubscriptionsAuth()
   const providers = {}
   for (const p of SUPPORTED_LOGIN_PROVIDERS) {
-    const { defaultKey, accounts } = storeAccounts(auth[p])
+    const { defaultKey, accounts } = storeAccounts(auth[p], p)
     const entry = defaultKey === '' ? undefined : accounts[defaultKey]
     if (entry && typeof entry === 'object') {
       providers[p] = {
@@ -1780,7 +1838,7 @@ function loginAccounts(provider) {
   if (!SUPPORTED_LOGIN_PROVIDERS.includes(provider)) {
     errJson('internal_error', `provider "${provider}" không hỗ trợ`, true, 0, 2)
   }
-  const { defaultKey, accounts } = storeAccounts(readSubscriptionsAuth()[provider])
+  const { defaultKey, accounts } = storeAccounts(readSubscriptionsAuth()[provider], provider)
   const rows = Object.entries(accounts).map(([key, session]) => ({
     key,
     is_default: key === defaultKey,
@@ -1821,7 +1879,7 @@ async function loginUse(provider, key) {
   }
   try {
     const output = await authForWrite(auth => {
-      const { defaultKey, accounts } = storeAccounts(auth[provider])
+      const { defaultKey, accounts } = storeAccounts(auth[provider], provider)
       if (!(key in accounts)) {
         throw Object.assign(new Error(`account "${key}" chưa có trong kho của ${provider}`), { exitCode: 2 })
       }
@@ -1850,7 +1908,7 @@ async function loginForget(provider, key) {
   }
   try {
     const output = await authForWrite(auth => {
-      const { defaultKey, accounts } = storeAccounts(auth[provider])
+      const { defaultKey, accounts } = storeAccounts(auth[provider], provider)
       const existed = key in accounts
       if (existed) {
         delete accounts[key]
@@ -1859,7 +1917,7 @@ async function loginForget(provider, key) {
         else auth[provider] = { ...entryExtras(auth[provider]), default: nextDefault, accounts }
         writeSubscriptionsAuth(auth)
       }
-      const { defaultKey: after } = storeAccounts(auth[provider])
+      const { defaultKey: after } = storeAccounts(auth[provider], provider)
       return { provider, forgot: key, was_present: existed, default: after === '' ? null : after }
     })
     printJson(output, 0)
@@ -2600,9 +2658,9 @@ export async function importCliCredentials({ home = homedir(), claudeConfigDir, 
         report[provider] = { imported: false, reason: 'no_account_key' }
         continue
       }
-      const current = storeAccounts(existing).accounts[key]
+      const current = storeAccounts(existing, provider).accounts[key]
       const initial = before[provider]
-      const initialSession = storeAccounts(initial).accounts[importAccountKey(provider, session, initial)]
+      const initialSession = storeAccounts(initial, provider).accounts[importAccountKey(provider, session, initial)]
       if (!sameAuthTokens(current, initialSession)) {
         report[provider] = { imported: false, reason: 'store_changed' }
         continue
@@ -2612,7 +2670,7 @@ export async function importCliCredentials({ home = homedir(), claudeConfigDir, 
         report[provider] = { imported: false, reason: 'plugin_token_newer' }
         continue
       }
-      store[provider] = withAccountSession(existing, key, { ...current, ...session })
+      store[provider] = withAccountSession(existing, key, { ...current, ...session }, provider)
       report[provider] = { imported: true, reason: null }
       changed = true
     }
@@ -2676,7 +2734,7 @@ export function pluginAccountKey(provider, session) {
  * a login matching none of them becomes a new account under the plugin's key.
  */
 function importAccountKey(provider, session, entry) {
-  const { accounts } = storeAccounts(entry)
+  const { accounts } = storeAccounts(entry, provider)
   const key = pluginAccountKey(provider, session)
   if (key in accounts) return key
   const alias = entry?.aliases?.[key]

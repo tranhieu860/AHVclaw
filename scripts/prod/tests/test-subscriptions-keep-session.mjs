@@ -25,6 +25,7 @@
 // Exit 0 only when every check passes. Tokens here are fake and never printed.
 import assert from 'node:assert/strict'
 import fs, { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { createRequire, syncBuiltinESMExports } from 'node:module'
 import fsPromises from 'node:fs/promises'
 import { fork } from 'node:child_process'
@@ -858,6 +859,139 @@ await check('repeated reads and writes of a hybrid entry do not add levels', asy
   }
   assert.equal(new Set(sizes).size, 1, `the store changed size across writes: ${sizes}`)
   assert.equal(JSON.stringify(stored().grok.accounts).includes('"accounts"'), false, 'the account still wraps an accounts map')
+})
+
+// #1430 round 2. One rule picks between copies of the same account at any depth:
+// a usable session beats an unusable row whatever the order, an unusable row only
+// fills a key nobody else holds, among usable copies the later `expiresAt` wins and
+// the outer copy wins a tie (login_sync on the bot side follows the same rule).
+const ANON = refreshToken => `token-${createHash('sha256').update(refreshToken).digest('hex').slice(0, 16)}`
+const anonSession = (n, expiresAt) => ({ accessToken: `fake-grok-at-${n}`, refreshToken: `fake-grok-rt-${n}`, expiresAt })
+const BROKEN = { accessToken: '', refreshToken: 'fake-grok-rt-broken', expiresAt: FRESH, account: KEY.grok }
+const touch = async () => assert.equal((await rpc('setDefault', { provider: 'codex', account: KEY.codex }))?.ok, true)
+
+await check('a usable bare session beats an unusable row filed under the same key in accounts', async () => {
+  seedGrok({ ...session('grok', 7, FRESH), default: KEY.grok, accounts: { [KEY.grok]: BROKEN } })
+  await touch()
+  assert.equal(stored().grok?.accounts?.[KEY.grok]?.accessToken, 'fake-grok-at-7', 'the grok login vanished or was replaced by the broken row')
+})
+
+await check('a usable session at one level beats an unusable row at the same key one level down', async () => {
+  seedGrok({ default: KEY.grok, accounts: { [KEY.grok]: { ...session('grok', 7, FRESH), default: KEY.grok, accounts: { [KEY.grok]: BROKEN } } } })
+  await touch()
+  assert.equal(stored().grok?.accounts?.[KEY.grok]?.accessToken, 'fake-grok-at-7')
+})
+
+await check('a null row in a nested accounts map does not remove the usable session of that key', async () => {
+  seedGrok({ default: KEY.grok, accounts: { [KEY.grok]: { ...session('grok', 7, FRESH), accounts: { [KEY.grok]: null } } } })
+  await touch()
+  assert.equal(stored().grok?.accounts?.[KEY.grok]?.accessToken, 'fake-grok-at-7')
+})
+
+await check('a usable session found deeper replaces an unusable row already filed under its key', async () => {
+  const other = { ...session('grok', 5, FRESH), account: 'other@grok.test' }
+  seedGrok({ default: 'other@grok.test', accounts: { [KEY.grok]: BROKEN, 'other@grok.test': { ...other, accounts: { [KEY.grok]: session('grok', 8, FRESH) } } } })
+  await touch()
+  const grok = stored().grok
+  assert.equal(grok.accounts[KEY.grok].accessToken, 'fake-grok-at-8')
+  assert.equal(grok.accounts['other@grok.test'].accessToken, 'fake-grok-at-5')
+})
+
+await check('an unusable row nested in a hybrid entry is carried back to the store, not dropped', async () => {
+  seedGrok({ ...session('grok', 7, FRESH), default: KEY.grok, accounts: { 'broken-null@grok.test': null, 'broken-obj@grok.test': { accessToken: '', refreshToken: 'x', expiresAt: 1 } } })
+  await touch()
+  const grok = stored().grok
+  assert.equal(grok.accounts[KEY.grok].accessToken, 'fake-grok-at-7')
+  assert.equal(grok.accounts['broken-null@grok.test'], null)
+  assert.equal(grok.accounts['broken-obj@grok.test'].refreshToken, 'x')
+})
+
+await check('an unusable row two levels down in a nested entry is carried back to the store', async () => {
+  seedGrok({ default: KEY.grok, accounts: { [KEY.grok]: { ...session('grok', 7, FRESH), default: KEY.grok, accounts: { 'deep-broken@grok.test': { accessToken: '', refreshToken: 'y', expiresAt: 1 }, 'deep-null@grok.test': null } } } })
+  await touch()
+  const grok = stored().grok
+  assert.equal(grok.accounts[KEY.grok].accessToken, 'fake-grok-at-7')
+  assert.equal(grok.accounts['deep-broken@grok.test'].refreshToken, 'y')
+  assert.equal(grok.accounts['deep-null@grok.test'], null)
+})
+
+const codexIdToken = user => `e30.${Buffer.from(JSON.stringify({ 'https://api.openai.com/auth': { chatgpt_account_id: 'acc-1', chatgpt_user_id: user } })).toString('base64url')}.fake`
+await check('a hybrid codex entry is one account keyed by workspace and user, the latest token the default', async () => {
+  const triple = JSON.stringify(['acc-1', 'user', 'u-1'])
+  const row = (n, expiresAt) => ({ accessToken: `fake-codex-at-${n}`, refreshToken: `fake-codex-rt-${n}`, expiresAt, accountId: 'acc-1', idToken: codexIdToken('u-1') })
+  seed()
+  const data = stored()
+  data.codex = { ...row(2, FRESH), default: triple, accounts: { [triple]: row(1, FRESH - 600_000) } }
+  writeFileSync(store, JSON.stringify(data), { mode: 0o600 })
+  assert.equal((await rpc('setDefault', { provider: 'grok', account: KEY.grok }))?.ok, true)
+  const codex = stored().codex
+  assert.deepEqual(Object.keys(codex.accounts), [triple], 'the bare session became a second account')
+  assert.equal(codex.default, triple)
+  assert.equal(codex.accounts[triple].accessToken, 'fake-codex-at-2')
+})
+
+await check('a bare session newer than the stray default of a hybrid entry names the default', async () => {
+  const other = { ...session('grok', 5, FRESH - 600_000), account: 'other@grok.test' }
+  seedGrok({ ...session('grok', 9, FRESH), default: 'other@grok.test', accounts: { 'other@grok.test': other } })
+  await touch()
+  const grok = stored().grok
+  assert.equal(grok.default, KEY.grok)
+  assert.deepEqual(Object.keys(grok.accounts).sort(), [KEY.grok, 'other@grok.test'].sort())
+})
+
+await check('a stray default that is not older than the bare session keeps the default', async () => {
+  const other = { ...session('grok', 5, FRESH + 600_000), account: 'other@grok.test' }
+  seedGrok({ ...session('grok', 9, FRESH), default: 'other@grok.test', accounts: { 'other@grok.test': other } })
+  await touch()
+  assert.equal(stored().grok.default, 'other@grok.test')
+})
+
+await check('122 levels of an account-less grok session are one account, the outermost token the default', async () => {
+  const levels = 122
+  const at = i => ({ ...anonSession(i, FRESH - i * 60_000) })
+  let record = at(levels - 1)
+  for (let i = levels - 2; i >= 0; i--) record = { ...at(i), default: ANON(at(i + 1).refreshToken), accounts: { [ANON(at(i + 1).refreshToken)]: record } }
+  seedGrok(record)
+  await touch()
+  const grok = stored().grok
+  assert.deepEqual(Object.keys(grok.accounts), [ANON(at(0).refreshToken)], `${Object.keys(grok.accounts).length} accounts`)
+  assert.equal(grok.default, ANON(at(0).refreshToken))
+  assert.equal(grok.accounts[grok.default].accessToken, 'fake-grok-at-0')
+})
+
+await check('account-less sessions filed as siblings stay separate accounts', async () => {
+  seedGrok({ default: ANON('fake-grok-rt-1'), accounts: { [ANON('fake-grok-rt-1')]: anonSession(1, FRESH), [ANON('fake-grok-rt-2')]: anonSession(2, FRESH) } })
+  await touch()
+  assert.deepEqual(Object.keys(stored().grok.accounts).sort(), [ANON('fake-grok-rt-1'), ANON('fake-grok-rt-2')].sort())
+})
+
+await check('two usable copies of one account with the same expiry: the outer copy wins', async () => {
+  const outer = session('grok', 1, FRESH)
+  const inner = session('grok', 2, FRESH)
+  seedGrok({ default: KEY.grok, accounts: { [KEY.grok]: { ...outer, accounts: { [KEY.grok]: inner } } } })
+  await touch()
+  assert.equal(stored().grok.accounts[KEY.grok].accessToken, 'fake-grok-at-1')
+})
+
+await check('an account-less hybrid entry with several accounts keeps each of them', async () => {
+  seedGrok({ ...anonSession(1, FRESH), accounts: { [ANON('fake-grok-rt-2')]: anonSession(2, FRESH), [ANON('fake-grok-rt-3')]: anonSession(3, FRESH) } })
+  await touch()
+  assert.deepEqual(Object.keys(stored().grok.accounts).sort(), [ANON('fake-grok-rt-1'), ANON('fake-grok-rt-2'), ANON('fake-grok-rt-3')].sort())
+})
+
+await check('the shape seen on the fleet host (accounts level holding a 122-level hybrid) becomes one flat account and stays put', async () => {
+  const at = i => ({ ...session('grok', i, FRESH - i * 60_000) })
+  let record = at(121)
+  for (let i = 120; i >= 0; i--) record = { ...at(i), default: KEY.grok, accounts: { [KEY.grok]: record } }
+  seedGrok({ default: KEY.grok, accounts: { [KEY.grok]: record } })
+  const before = stored()
+  await touch()
+  const after = stored()
+  assert.deepEqual(after.grok, { default: KEY.grok, accounts: { [KEY.grok]: at(0) } })
+  for (const provider of ['codex', 'claude', 'antigravity']) assert.equal(JSON.stringify(after[provider]), JSON.stringify(before[provider]), `${provider} changed`)
+  const first = readFileSync(store, 'utf8')
+  await touch()
+  assert.equal(readFileSync(store, 'utf8'), first, 'a second write changed the store')
 })
 
 assert.ok(passed + failed > 0, 'test filter selected no checks')

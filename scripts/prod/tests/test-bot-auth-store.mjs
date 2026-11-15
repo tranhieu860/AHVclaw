@@ -16,7 +16,7 @@ process.env.AHV_FORK = new URL('../../..', import.meta.url).pathname
 delete process.env.CLAUDE_CONFIG_DIR
 globalThis.fetch = async () => { throw new Error('real network forbidden') }
 const bot = resolve(process.env.AHV_BOT_UNDER_TEST ?? new URL('../ahv-bot.mjs', import.meta.url).pathname)
-const { loginRefreshReport, loginUsageReport, importCliCredentials, REFRESH_ENDPOINTS } = await import(pathToFileURL(bot).href)
+const { loginRefreshReport, loginUsageReport, importCliCredentials, withAccountSession, REFRESH_ENDPOINTS } = await import(pathToFileURL(bot).href)
 const store = join(process.env.DSH_HOME, 'plugins/subscriptions/auth.json')
 mkdirSync(dirname(store), { recursive: true })
 const now = 1_800_000_000_000
@@ -301,6 +301,96 @@ await check('write failures keep permission errors structured and release the st
     assert.equal(JSON.parse(result.stdout).code, 'permission_denied')
     assert.equal(existsSync(`${store}.lock`), false)
   }
+})
+
+// #1430 round 2: the bot reads hybrid and nested entries with the plugin's rule — a usable
+// session beats an unusable row at any depth, an unusable row only fills a free key, among
+// usable copies the later expiresAt wins and the outer copy a tie. withAccountSession reads
+// the entry through storeAccounts and returns it flat, so it shows what the bot made of it.
+const { createHash } = await import('node:crypto')
+const FRESH = now + 86_400_000
+const GK = 'k@grok.test'
+const grokRow = (n, expiresAt = FRESH, extra = {}) => ({ accessToken: `at-${n}`, refreshToken: `rt-${n}`, expiresAt, account: GK, ...extra })
+const BROKEN = { accessToken: '', refreshToken: 'rt-broken', expiresAt: FRESH, account: GK }
+const flatten = (entry, provider = 'grok') => withAccountSession(entry, 'probe@x.test', { accessToken: 'probe', refreshToken: 'probe', expiresAt: 1 }, provider)
+const anon = refreshToken => `token-${createHash('sha256').update(refreshToken).digest('hex').slice(0, 16)}`
+
+await check('bot: a usable bare session beats an unusable row filed under the same key', async () => {
+  const flat = flatten({ ...grokRow(7), default: GK, accounts: { [GK]: BROKEN } })
+  assert.equal(flat.accounts[GK].accessToken, 'at-7')
+})
+
+await check('bot: a usable session beats an unusable row at the same key one level down', async () => {
+  const flat = flatten({ default: GK, accounts: { [GK]: { ...grokRow(7), default: GK, accounts: { [GK]: BROKEN } } } })
+  assert.equal(flat.accounts[GK].accessToken, 'at-7')
+})
+
+await check('bot: a null row in a nested accounts map does not remove the usable session', async () => {
+  const flat = flatten({ default: GK, accounts: { [GK]: { ...grokRow(7), accounts: { [GK]: null } } } })
+  assert.equal(flat.accounts[GK].accessToken, 'at-7')
+})
+
+await check('bot: a usable session found deeper replaces an unusable row already filed under its key', async () => {
+  const flat = flatten({ default: 'o@grok.test', accounts: { [GK]: BROKEN, 'o@grok.test': { ...grokRow(5, FRESH, { account: 'o@grok.test' }), accounts: { [GK]: grokRow(8) } } } })
+  assert.equal(flat.accounts[GK].accessToken, 'at-8')
+  assert.equal(flat.accounts['o@grok.test'].accessToken, 'at-5')
+})
+
+await check('bot: unusable rows are kept when no usable session holds their key', async () => {
+  const flat = flatten({ ...grokRow(7), default: GK, accounts: { 'n@grok.test': null, 'b@grok.test': { accessToken: '', refreshToken: 'x', expiresAt: 1 } } })
+  assert.equal(flat.accounts['n@grok.test'], null)
+  assert.equal(flat.accounts['b@grok.test'].refreshToken, 'x')
+  assert.equal(flat.accounts[GK].accessToken, 'at-7')
+})
+
+await check('bot: a hybrid codex entry is one account keyed by workspace and user, the latest token the default', async () => {
+  const idToken = `e30.${Buffer.from(JSON.stringify({ 'https://api.openai.com/auth': { chatgpt_account_id: 'acc-1', chatgpt_user_id: 'u-1' } })).toString('base64url')}.fake`
+  const triple = JSON.stringify(['acc-1', 'user', 'u-1'])
+  const row = (n, expiresAt) => ({ accessToken: `cx-${n}`, refreshToken: `cr-${n}`, expiresAt, accountId: 'acc-1', idToken })
+  const flat = withAccountSession({ ...row(2, FRESH), default: triple, accounts: { [triple]: row(1, FRESH - 600_000) } }, 'probe', { accessToken: 'p', refreshToken: 'p', expiresAt: 1 }, 'codex')
+  assert.deepEqual(Object.keys(flat.accounts).sort(), [triple, 'probe'].sort())
+  assert.equal(flat.default, triple)
+  assert.equal(flat.accounts[triple].accessToken, 'cx-2')
+})
+
+await check('bot: a bare session newer than the stray default of a hybrid entry names the default', async () => {
+  const flat = flatten({ ...grokRow(9), default: 'o@grok.test', accounts: { 'o@grok.test': grokRow(5, FRESH - 600_000, { account: 'o@grok.test' }) } })
+  assert.equal(flat.default, GK)
+})
+
+await check('bot: a stray default not older than the bare session keeps the default', async () => {
+  const flat = flatten({ ...grokRow(9), default: 'o@grok.test', accounts: { 'o@grok.test': grokRow(5, FRESH + 600_000, { account: 'o@grok.test' }) } })
+  assert.equal(flat.default, 'o@grok.test')
+})
+
+await check('bot: 122 levels of an account-less session are one account, the outermost token the default', async () => {
+  const at = i => ({ accessToken: `at-${i}`, refreshToken: `rt-${i}`, expiresAt: FRESH - i * 60_000 })
+  let record = at(121)
+  for (let i = 120; i >= 0; i--) record = { ...at(i), default: anon(at(i + 1).refreshToken), accounts: { [anon(at(i + 1).refreshToken)]: record } }
+  const flat = flatten(record)
+  assert.deepEqual(Object.keys(flat.accounts).filter(key => key !== 'probe@x.test'), [anon('rt-0')])
+  assert.equal(flat.default, anon('rt-0'))
+  assert.equal(flat.accounts[anon('rt-0')].accessToken, 'at-0')
+})
+
+await check('bot: two usable copies of one account with the same expiry: the outer copy wins', async () => {
+  const flat = flatten({ default: GK, accounts: { [GK]: { ...grokRow(1, FRESH), accounts: { [GK]: grokRow(2, FRESH) } } } })
+  assert.equal(flat.accounts[GK].accessToken, 'at-1')
+})
+
+await check('bot: an account-less hybrid entry with several accounts keeps each of them', async () => {
+  const at = n => ({ accessToken: `at-${n}`, refreshToken: `rt-${n}`, expiresAt: FRESH })
+  const flat = flatten({ ...at(1), accounts: { [anon('rt-2')]: at(2), [anon('rt-3')]: at(3) } })
+  assert.deepEqual(Object.keys(flat.accounts).filter(key => key !== 'probe@x.test').sort(), [anon('rt-1'), anon('rt-2'), anon('rt-3')].sort())
+})
+
+await check('bot: the fleet host shape (accounts level holding a 122-level hybrid) becomes one flat account', async () => {
+  let record = grokRow(121, FRESH - 121 * 60_000)
+  for (let i = 120; i >= 0; i--) record = { ...grokRow(i, FRESH - i * 60_000), default: GK, accounts: { [GK]: record } }
+  const flat = flatten({ default: GK, accounts: { [GK]: record } })
+  assert.deepEqual(Object.keys(flat.accounts).sort(), [GK, 'probe@x.test'].sort())
+  assert.equal(flat.default, GK)
+  assert.equal(flat.accounts[GK].accessToken, 'at-0')
 })
 
 console.log(`${passed} passed, ${failed} failed`)
