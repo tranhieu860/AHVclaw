@@ -794,6 +794,72 @@ await check('user logout still removes exactly that account', async () => {
   assert.deepEqual(data.futureai, FOREIGN)
 })
 
+// #1430: an entry carrying a session next to its `accounts` map was wrapped whole
+// as one account, so each read and write added one level (122 seen on a host).
+const FRESH = Date.now() + 3_600_000
+function nest(levels, inner) {
+  let record = inner
+  for (let i = 0; i < levels; i++) record = { ...record, default: KEY.grok, accounts: { [KEY.grok]: record } }
+  return record
+}
+function seedGrok(entry) {
+  seed()
+  const data = stored()
+  data.grok = entry
+  writeFileSync(store, JSON.stringify(data), { mode: 0o600 })
+}
+const nested = value => JSON.stringify(value).includes('"accounts":{"' + KEY.grok + '":{') && JSON.stringify(value.accounts?.[KEY.grok] ?? {}).includes('"accounts"')
+
+await check('an entry with a bare session beside its accounts is read as its accounts, not wrapped', async () => {
+  const other = { ...session('grok', 5, FRESH), account: 'other@grok.test' }
+  seedGrok({ ...session('grok', 1), default: KEY.grok, accounts: { [KEY.grok]: session('grok', 1), 'other@grok.test': other } })
+  assert.equal((await rpc('setDefault', { provider: 'codex', account: KEY.codex }))?.ok, true)
+  const grok = stored().grok
+  assert.equal(grok.accessToken, undefined, 'the bare session stayed at the top of the entry')
+  assert.deepEqual(Object.keys(grok.accounts).sort(), [KEY.grok, 'other@grok.test'].sort())
+  assert.deepEqual(grok.accounts['other@grok.test'], other)
+  assert.deepEqual(grok.accounts[KEY.grok], session('grok', 1), 'wrapper fields leaked into the account')
+})
+
+await check('a bare session beside accounts merges into its matching account, newer expiry winning', async () => {
+  seedGrok({ ...session('grok', 9, FRESH), accounts: { [KEY.grok]: session('grok', 1) } })
+  assert.equal((await rpc('setDefault', { provider: 'codex', account: KEY.codex }))?.ok, true)
+  const grok = stored().grok
+  assert.deepEqual(Object.keys(grok.accounts), [KEY.grok])
+  assert.equal(grok.accounts[KEY.grok].accessToken, 'fake-grok-at-9')
+  assert.equal(grok.accounts[KEY.grok].accounts, undefined, 'the account still wraps the old accounts map')
+  assert.equal(grok.default, KEY.grok)
+})
+
+await check('a legacy bare session is wrapped without its stray accounts and default fields', async () => {
+  seedGrok({ ...session('grok', 1), default: 'stale', accounts: 'junk' })
+  assert.equal((await rpc('setDefault', { provider: 'codex', account: KEY.codex }))?.ok, true)
+  assert.deepEqual(stored().grok, { default: KEY.grok, accounts: { [KEY.grok]: session('grok', 1) } })
+})
+
+await check('an entry nested 122 levels deep is flattened keeping every account, newest token winning', async () => {
+  const deepest = { ...session('grok', 1), accounts: { 'deep@grok.test': { ...session('grok', 3), account: 'deep@grok.test' }, [KEY.grok]: session('grok', 2, FRESH) } }
+  seedGrok(nest(122, deepest))
+  assert.equal((await rpc('setDefault', { provider: 'codex', account: KEY.codex }))?.ok, true)
+  const grok = stored().grok
+  assert.deepEqual(Object.keys(grok.accounts).sort(), [KEY.grok, 'deep@grok.test'].sort())
+  assert.equal(grok.accounts[KEY.grok].accessToken, 'fake-grok-at-2', 'an older copy beat the newer token')
+  assert.equal(grok.accounts['deep@grok.test'].accessToken, 'fake-grok-at-3')
+  assert.ok(!nested(grok) && !JSON.stringify(grok.accounts).includes('"accounts"'), 'accounts are still nested')
+  assert.ok(JSON.stringify(grok).length < 2000, 'the entry did not shrink back')
+})
+
+await check('repeated reads and writes of a hybrid entry do not add levels', async () => {
+  seedGrok({ ...session('grok', 1), default: KEY.grok, accounts: { [KEY.grok]: session('grok', 1) } })
+  const sizes = []
+  for (let i = 0; i < 4; i++) {
+    assert.equal((await rpc('setDefault', { provider: 'codex', account: KEY.codex }))?.ok, true)
+    sizes.push(readFileSync(store, 'utf8').length)
+  }
+  assert.equal(new Set(sizes).size, 1, `the store changed size across writes: ${sizes}`)
+  assert.equal(JSON.stringify(stored().grok.accounts).includes('"accounts"'), false, 'the account still wraps an accounts map')
+})
+
 assert.ok(passed + failed > 0, 'test filter selected no checks')
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed ? 1 : 0)

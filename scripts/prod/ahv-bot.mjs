@@ -557,20 +557,39 @@ function readSubscriptionsAuthForWrite(path = SUBSCRIPTIONS_AUTH_FILE) {
  */
 function storeAccounts(entry) {
   if (entry === null || typeof entry !== 'object') return { defaultKey: '', accounts: {} }
-  const accounts = entry.accounts !== null && typeof entry.accounts === 'object' && !Array.isArray(entry.accounts)
-    ? { ...entry.accounts }
-    : {}
-  let defaultKey = typeof entry.default === 'string' ? entry.default : ''
-  if (typeof entry.accessToken === 'string' && entry.accessToken !== '') {
-    const bare = { ...entry }
-    delete bare.accounts
-    delete bare.default
-    const key = accountKeyOf(bare)
-    if (key !== '' && !(key in accounts)) accounts[key] = bare
-    if (defaultKey === '') defaultKey = key
+  const accounts = {}
+  const defaults = []
+  // Outermost first: an entry an older writer wrapped into itself keeps one
+  // account per key, the later expiresAt winning and the outer copy a tie.
+  const queue = [{ node: entry, key: undefined }]
+  for (let index = 0; index < queue.length; index += 1) {
+    const { node, key } = queue[index]
+    const { accounts: children, default: preferred, ...session } = node
+    if (typeof preferred === 'string') defaults.push(preferred)
+    if (typeof session.accessToken === 'string' && session.accessToken !== '') {
+      let name = key ?? accountKeyOf(session)
+      if (name === '' && typeof session.refreshToken === 'string') name = `token-${refreshTokenFingerprint(session.refreshToken)}`
+      if (name !== '') {
+        const held = accounts[name]
+        if (held === undefined || (typeof session.expiresAt === 'number' && session.expiresAt > (typeof held.expiresAt === 'number' ? held.expiresAt : -Infinity))) accounts[name] = session
+        if (key === undefined) defaults.push(name)
+      }
+    } else if (key !== undefined && !isPlainObject(children)) {
+      accounts[key] = session
+    }
+    if (isPlainObject(children)) {
+      for (const [childKey, child] of Object.entries(children)) {
+        if (isPlainObject(child)) queue.push({ node: child, key: childKey })
+        else accounts[childKey] = child
+      }
+    }
   }
-  if (!(defaultKey in accounts)) defaultKey = Object.keys(accounts)[0] ?? ''
+  const defaultKey = defaults.find(name => Object.hasOwn(accounts, name)) ?? Object.keys(accounts)[0] ?? ''
   return { defaultKey, accounts }
+}
+
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
 /**
@@ -2576,12 +2595,14 @@ export async function importCliCredentials({ home = homedir(), claudeConfigDir, 
         continue
       }
       const existing = store[provider]
-      const perAccount = existing !== null && typeof existing === 'object' && typeof existing.accessToken !== 'string'
-        && existing.accounts !== null && typeof existing.accounts === 'object' && !Array.isArray(existing.accounts)
-      const key = perAccount ? importAccountKey(provider, session, existing) : ''
-      const current = perAccount ? existing.accounts[key] : existing
+      const key = importAccountKey(provider, session, existing)
+      if (key === '') {
+        report[provider] = { imported: false, reason: 'no_account_key' }
+        continue
+      }
+      const current = storeAccounts(existing).accounts[key]
       const initial = before[provider]
-      const initialSession = initial?.accounts ? initial.accounts[importAccountKey(provider, session, initial)] : initial
+      const initialSession = storeAccounts(initial).accounts[importAccountKey(provider, session, initial)]
       if (!sameAuthTokens(current, initialSession)) {
         report[provider] = { imported: false, reason: 'store_changed' }
         continue
@@ -2591,7 +2612,7 @@ export async function importCliCredentials({ home = homedir(), claudeConfigDir, 
         report[provider] = { imported: false, reason: 'plugin_token_newer' }
         continue
       }
-      store[provider] = perAccount ? withAccountSession(existing, key, { ...current, ...session }) : { ...existing, ...session }
+      store[provider] = withAccountSession(existing, key, { ...current, ...session })
       report[provider] = { imported: true, reason: null }
       changed = true
     }
@@ -2661,7 +2682,10 @@ function importAccountKey(provider, session, entry) {
   const alias = entry?.aliases?.[key]
   if (typeof alias === 'string' && alias in accounts) return alias
   const same = Object.keys(accounts).find(k => accounts[k]?.refreshToken === session.refreshToken)
-  return same ?? key
+  if (same !== undefined) return same
+  // A bare single-session entry is that one account, whatever identity it was filed under.
+  if (typeof entry?.accessToken === 'string' && !isPlainObject(entry.accounts)) return Object.keys(accounts)[0] ?? key
+  return key
 }
 
 async function loginImport() {

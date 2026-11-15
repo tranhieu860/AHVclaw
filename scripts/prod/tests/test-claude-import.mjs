@@ -36,9 +36,11 @@ await check('a Claude CLI login is imported into the store', async () => {
   const report = await importCliCredentials({ home, fetchFn: offline })
   assert.equal(report.claude?.imported, true, JSON.stringify(report.claude))
   const store = JSON.parse(readFileSync(join(home, '.dsh/plugins/subscriptions/auth.json'), 'utf8'))
-  assert.equal(store.claude.accessToken, 'a1')
-  assert.equal(store.claude.refreshToken, 'r1')
-  assert.equal(store.claude.expiresAt, future)
+  assert.equal(store.claude.accessToken, undefined)
+  const [login] = Object.values(store.claude.accounts)
+  assert.equal(login.accessToken, 'a1')
+  assert.equal(login.refreshToken, 'r1')
+  assert.equal(login.expiresAt, future)
 })
 
 await check('CLAUDE_CONFIG_DIR redirects where the login is read from', async () => {
@@ -49,7 +51,7 @@ await check('CLAUDE_CONFIG_DIR redirects where the login is read from', async ()
   const report = await importCliCredentials({ home, claudeConfigDir: shared, fetchFn: offline })
   assert.equal(report.claude?.imported, true, JSON.stringify(report.claude))
   const store = JSON.parse(readFileSync(join(home, '.dsh/plugins/subscriptions/auth.json'), 'utf8'))
-  assert.equal(store.claude.accessToken, 'shared')
+  assert.equal(Object.values(store.claude.accounts)[0].accessToken, 'shared')
 })
 
 await check('a missing Claude login reports why, and imports nothing', async () => {

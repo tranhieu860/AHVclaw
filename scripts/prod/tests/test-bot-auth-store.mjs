@@ -256,8 +256,9 @@ await check('CLI import copies an optional refresh deadline without inventing on
     mkdirSync(join(home, '.grok'), { recursive: true })
     writeFileSync(join(home, '.grok/auth.json'), JSON.stringify({ access_token: 'fake-grok', refresh_token: 'fake-grok-r', expires_at: now + 500_000, refreshTokenExpiresAt: deadline }))
     await importCliCredentials({ home })
-    assert.equal(read().grok.refreshTokenExpiresAt, deadline)
-    assert.equal(Object.hasOwn(read().grok, 'refreshTokenExpiresAt'), deadline !== undefined)
+    const grok = Object.values(read().grok.accounts)[0]
+    assert.equal(grok.refreshTokenExpiresAt, deadline)
+    assert.equal(Object.hasOwn(grok, 'refreshTokenExpiresAt'), deadline !== undefined)
   }
 })
 

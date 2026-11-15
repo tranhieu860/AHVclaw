@@ -65,10 +65,13 @@ await test('imports codex tokens into plugin shape', async () => {
   const report = await importCliCredentials({ home: root })
 
   assert.equal(report.codex.imported, true)
-  const store = readStore(root)
-  assert.equal(store.codex.refreshToken, 'refresh-abc')
-  assert.equal(store.codex.accountId, 'acct-123')
-  assert.equal(store.codex.expiresAt, exp * 1000)
+  const entry = readStore(root).codex
+  assert.equal(entry.accessToken, undefined, 'a fresh import must file the session under accounts, not bare')
+  const accounts = Object.values(entry.accounts)
+  assert.equal(accounts.length, 1)
+  assert.equal(accounts[0].refreshToken, 'refresh-abc')
+  assert.equal(accounts[0].accountId, 'acct-123')
+  assert.equal(accounts[0].expiresAt, exp * 1000)
 })
 
 await test('imports grok tokens into plugin shape', async () => {
@@ -83,10 +86,13 @@ await test('imports grok tokens into plugin shape', async () => {
   const report = await importCliCredentials({ home: root })
 
   assert.equal(report.grok.imported, true)
-  const store = readStore(root)
-  assert.equal(store.grok.accessToken, 'grok-access')
-  assert.equal(store.grok.refreshToken, 'grok-refresh')
-  assert.equal(store.grok.expiresAt, 1800000000000)
+  const entry = readStore(root).grok
+  assert.equal(entry.accessToken, undefined, 'a fresh import must file the session under accounts, not bare')
+  assert.deepEqual(Object.keys(entry.accounts), [entry.default])
+  const grok = entry.accounts[entry.default]
+  assert.equal(grok.accessToken, 'grok-access')
+  assert.equal(grok.refreshToken, 'grok-refresh')
+  assert.equal(grok.expiresAt, 1800000000000)
 })
 
 await test('keeps a newer plugin token over an older CLI token', async () => {
@@ -160,6 +166,80 @@ await test('writes the store with owner-only permissions', async () => {
   await importCliCredentials({ home: root })
 
   assert.equal(statSync(storePath(root)).mode & 0o777, 0o600)
+})
+
+// #1430: `{ ...existing, ...session }` wrote a bare session next to the `accounts`
+// map of an existing entry; the plugin then wrapped that whole entry as one more account.
+const grokCli = (root, extra = {}) => writeFileSync(join(root, '.grok', 'auth.json'), JSON.stringify({
+  access_token: 'cli-new', refresh_token: 'cli-new-r', expires_at: 1800000000000, email: 'a@example.test', ...extra,
+}))
+const grokSession = (n, expiresAt, account = 'a@example.test') => ({ accessToken: `old-${n}`, refreshToken: `old-${n}-r`, expiresAt, account })
+const seedStore = (root, grok) => writeFileSync(storePath(root), JSON.stringify({ grok }))
+const accountsOf = (entry) => JSON.stringify(entry.accounts)
+
+await test('importing into a multi-account entry adds no bare session beside accounts', async () => {
+  const root = sandbox()
+  grokCli(root)
+  seedStore(root, { default: 'b@example.test', accounts: { 'b@example.test': grokSession(2, 1700000000000, 'b@example.test') } })
+  const report = await importCliCredentials({ home: root })
+  assert.equal(report.grok.imported, true)
+  const entry = readStore(root).grok
+  assert.equal(entry.accessToken, undefined, 'a bare session was written beside the accounts')
+  assert.deepEqual(Object.keys(entry.accounts).sort(), ['a@example.test', 'b@example.test'])
+  assert.equal(entry.accounts['a@example.test'].accessToken, 'cli-new')
+  assert.equal(entry.default, 'b@example.test')
+})
+
+await test('importing over a hybrid entry (bare session beside accounts) flattens it', async () => {
+  const root = sandbox()
+  grokCli(root)
+  const old = grokSession(1, 1700000000000)
+  seedStore(root, { ...old, default: 'a@example.test', accounts: { 'a@example.test': old, 'b@example.test': grokSession(2, 1700000000000, 'b@example.test') } })
+  const report = await importCliCredentials({ home: root })
+  assert.equal(report.grok.imported, true)
+  const entry = readStore(root).grok
+  assert.equal(entry.accessToken, undefined)
+  assert.deepEqual(Object.keys(entry.accounts).sort(), ['a@example.test', 'b@example.test'])
+  assert.equal(entry.accounts['a@example.test'].accessToken, 'cli-new')
+  assert.equal(accountsOf(entry).includes('"accounts"'), false, 'an account still wraps an accounts map')
+})
+
+await test('importing over an entry nested 122 levels deep flattens it and keeps every account', async () => {
+  const root = sandbox()
+  grokCli(root)
+  const old = grokSession(1, 1700000000000)
+  let nested = { ...old, accounts: { 'a@example.test': old, 'deep@example.test': grokSession(3, 1700000000000, 'deep@example.test') } }
+  for (let i = 0; i < 122; i++) nested = { ...nested, default: 'a@example.test', accounts: { 'a@example.test': nested } }
+  seedStore(root, nested)
+  const report = await importCliCredentials({ home: root })
+  assert.equal(report.grok.imported, true)
+  const entry = readStore(root).grok
+  assert.deepEqual(Object.keys(entry.accounts).sort(), ['a@example.test', 'deep@example.test'])
+  assert.equal(entry.accounts['deep@example.test'].accessToken, 'old-3')
+  assert.equal(accountsOf(entry).includes('"accounts"'), false)
+  assert.ok(readFileSync(storePath(root), 'utf8').length < 3000, 'the store did not shrink')
+})
+
+await test('a bare legacy entry is replaced by the accounts form on import, keeping its account', async () => {
+  const root = sandbox()
+  grokCli(root)
+  seedStore(root, grokSession(1, 1700000000000))
+  const report = await importCliCredentials({ home: root })
+  assert.equal(report.grok.imported, true)
+  const entry = readStore(root).grok
+  assert.equal(entry.accessToken, undefined)
+  assert.deepEqual(Object.keys(entry.accounts), ['a@example.test'])
+  assert.equal(entry.accounts['a@example.test'].accessToken, 'cli-new')
+})
+
+await test('a newer token inside a hybrid entry is not rolled back by an older CLI token', async () => {
+  const root = sandbox()
+  grokCli(root)
+  const fresh = grokSession(9, 1900000000000)
+  seedStore(root, { ...fresh, accounts: { 'a@example.test': grokSession(1, 1700000000000) } })
+  const report = await importCliCredentials({ home: root })
+  assert.equal(report.grok.imported, false)
+  assert.equal(report.grok.reason, 'plugin_token_newer')
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)
