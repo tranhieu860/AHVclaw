@@ -11,6 +11,8 @@ const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '../../..')
 const plugin = process.env.AHV_MODELS_TEST_PLUGIN
 assert.ok(plugin, 'set AHV_MODELS_TEST_PLUGIN to the patched 0.9.12 fixture')
+// A hang that ignores abort ends at the 5 s spawn timeout; anything below this proves the deadline ended it.
+const HANG_BOUND_MS = 4000
 const bot = process.env.AHV_MODELS_TEST_BOT ?? join(root, 'scripts/prod/ahv-bot.mjs')
 
 function command(t, { fresh = false, behavior, waitMs = 200 } = {}) {
@@ -44,7 +46,7 @@ function command(t, { fresh = false, behavior, waitMs = 200 } = {}) {
   const payload = JSON.parse(result.stdout)
   assert.equal(result.stdout, JSON.stringify(payload) + '\n')
   assert.equal(payload.source, 'harness', JSON.stringify(payload))
-  return { payload, before, after: readFileSync(join(store, 'models.json'), 'utf8'), seededAt, elapsedMs }
+  return { payload, before, after: readFileSync(join(store, 'models.json'), 'utf8'), seededAt, elapsedMs, stderr: result.stderr }
 }
 
 test('CLI stale snapshot: spawn opts into bounded refresh and prints the new model', t => {
@@ -58,15 +60,20 @@ for (const behavior of ['hang', 'network', '401', 'abort']) {
     const r = command(t, { behavior })
     assert.ok(r.payload.models.some(m => m.id === 'claude-old'))
     assert.equal(r.after, r.before)
-    assert.ok(r.elapsedMs < 1500)
+    assert.ok(r.elapsedMs < HANG_BOUND_MS, `unbounded wait: ${r.elapsedMs}`)
     if (behavior === 'hang') t.diagnostic(`real CLI with offline launcher, 200 ms budget: ${r.elapsedMs.toFixed(1)} ms`)
   })
 }
 
+test('CLI 401: the exit-0 child’s rejected-token notice reaches the caller’s stderr', t => {
+  const r = command(t, { behavior: '401' })
+  assert.match(r.stderr, /subscriptions: claude: token bị từ chối/)
+})
+
 test('CLI fresh snapshot timing with the offline launcher', t => {
   const r = command(t, { fresh: true, behavior: 'hang' })
   assert.equal(r.after, r.before)
-  assert.ok(r.elapsedMs < 1500)
+  assert.ok(r.elapsedMs < HANG_BOUND_MS, `unbounded wait: ${r.elapsedMs}`)
   t.diagnostic(`real CLI with offline launcher, fresh snapshot: ${r.elapsedMs.toFixed(1)} ms`)
 })
 

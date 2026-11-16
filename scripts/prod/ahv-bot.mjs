@@ -1978,7 +1978,12 @@ function spawnListModels() {
     let stdout = '', stderr = ''
     proc.stdout.on('data', b => stdout += b.toString('utf8'))
     proc.stderr.on('data', b => stderr += b.toString('utf8'))
-    proc.on('close', (code) => resolve({ code, stdout, stderr }))
+    proc.on('close', (code) => {
+      // A successful listing still reports provider problems (rejected token) on stderr;
+      // stdout stays exactly one JSON line, so relay the notice to the caller.
+      if (code === 0 && stderr) process.stderr.write(stderr)
+      resolve({ code, stdout, stderr })
+    })
     proc.on('error', (err) => resolve({ code: -1, stdout, stderr: err.message }))
     // Cold dsh + plugin fetch subscription models qua network có thể vượt
     // 60s (Codex Plus/Claude Pro/Grok Premium mỗi lần fetch model list mất
