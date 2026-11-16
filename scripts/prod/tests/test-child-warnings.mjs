@@ -22,10 +22,16 @@ check('masks bearer and long opaque strings', () => {
   assert.ok(!/abc\.def|abcdefgh12345|aaaaaaaa/.test(out[0]), out[0])
 })
 check('caps count and length, ignores empty and ANSI', () => {
-  const out = filterChildWarnings(Array.from({ length: 9 }, (_, i) => `\x1b[31m${'ww '.repeat(100)}${i}\x1b[0m`).join('\n\n'))
+  const out = filterChildWarnings(Array.from({ length: 9 }, (_, i) => `\x1b[31m${i} ${'ww '.repeat(100)}\x1b[0m`).join('\n\n'))
   assert.equal(out.length, 5)
   assert.ok(out.every(l => l.length === 200 && !l.includes('\x1b')))
   assert.deepEqual(filterChildWarnings(''), [])
+})
+check('quotes and backslashes become apostrophes', () => {
+  assert.deepEqual(filterChildWarnings('Unknown config key: "foo" \\n'), ["Unknown config key: 'foo' 'n"])
+})
+check('identical lines are reported once, in order', () => {
+  assert.deepEqual(filterChildWarnings('b\na\nb\na\nc'), ['b', 'a', 'c'])
 })
 console.log(`${passed} passed, ${failed} failed`)
 process.exit(failed ? 1 : 0)

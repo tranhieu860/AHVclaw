@@ -2000,7 +2000,7 @@ const MAX_WARNING_CHARS = 200
  * Reduce the stderr of a successful dsh child to notices safe to show a user.
  *
  * @param stderr - raw stderr text of the child.
- * @returns at most five trimmed lines; stack frames and lines naming absolute paths are
+ * @returns at most five distinct trimmed lines; stack frames and lines naming absolute paths are
  *   dropped, long opaque strings (token-like) are masked.
  */
 export function filterChildWarnings(stderr) {
@@ -2009,11 +2009,16 @@ export function filterChildWarnings(stderr) {
     const line = raw.replace(/\x1b\[[0-9;]*m/g, '').trim()
     if (!line) continue
     if (/^at\s/.test(line) || /(^|[\s(='"])\/[\w.@-]+\/|[A-Za-z]:\\|file:\/\//.test(line)) continue
+    // bot <= 0.0.483 runs redact_ahv_output over the raw JSON block; quotes and backslashes
+    // inside a string can end it early there, so they never reach the JSON.
     const masked = line
+      .replace(/["\\]/g, "'")
       .replace(/Bearer\s+\S+/gi, 'Bearer «đã che»')
       .replace(/\bsk-[A-Za-z0-9_-]{8,}/g, '«đã che»')
       .replace(/\b[A-Za-z0-9_-]{32,}\b/g, '«đã che»')
-    out.push(masked.slice(0, MAX_WARNING_CHARS))
+    const text = masked.slice(0, MAX_WARNING_CHARS)
+    if (out.includes(text)) continue
+    out.push(text)
     if (out.length >= MAX_WARNINGS) break
   }
   return out
