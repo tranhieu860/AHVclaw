@@ -26,6 +26,9 @@ const mutations = [
   ['bypass-liveness-reread', 'rechecks owner liveness under reclaim', source => replace(source, /if \(ownerBoot !== undefined && !authLockOwnerDead\(current\.owner, ownerBoot\)\) return/, 'void 0')],
   ['short-wait-200ms', 'live owner waits 1300ms', source => replace(source, /const deadline = Date\.now\(\) \+ (?:30_000|3e4)/, 'const deadline = Date.now() + 200')],
   ['null-start-is-dead', 'no-proc-live owner stays alive', source => replace(source, /return typeof owner\.start === ["']string["'] && start !== null && owner\.start !== start/, 'return start === null || typeof owner.start === "string" && owner.start !== start')],
+  ['keep-prepared-directory', 'losing the publication race', source => replace(source, /rmSync\(prepared, \{ recursive: true, force: true \}\)/, 'void 0')],
+  ['pid-zero-is-dead', 'pid-zero owner record is kept', source => replace(source, /if \(!Number\.isSafeInteger\(owner\?\.pid\) \|\| owner\.pid <= 0\) return null/, 'if (!Number.isSafeInteger(owner?.pid) || owner.pid <= 0) return { text, owner: { pid: 2147483646 } }')],
+  ['unreadable-owner-is-dead', 'not-json owner record is kept', source => replace(source, /(never evidence that a lock is dead\.\s*)return null/, '$1return { text: "", owner: { pid: 2147483646 } }')],
   ['parse-first-parenthesis', 'proc stat start survives', source => replace(source, /stat\.lastIndexOf\((["'])\)\1\)/, 'stat.indexOf(")")')],
 ]
 const run = (pluginPath, botPath, filter) => spawnSync(process.execPath, [join(here, 'test-auth-lock-recovery.mjs'), pluginPath], {
