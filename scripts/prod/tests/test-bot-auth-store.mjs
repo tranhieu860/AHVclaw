@@ -363,14 +363,73 @@ await check('bot: a stray default not older than the bare session keeps the defa
   assert.equal(flat.default, 'o@grok.test')
 })
 
-await check('bot: 122 levels of an account-less session are one account, the outermost token the default', async () => {
+await check('bot: 122 levels of an account-less session are one account plus the leaf, the outermost token the default', async () => {
   const at = i => ({ accessToken: `at-${i}`, refreshToken: `rt-${i}`, expiresAt: FRESH - i * 60_000 })
   let record = at(121)
   for (let i = 120; i >= 0; i--) record = { ...at(i), default: anon(at(i + 1).refreshToken), accounts: { [anon(at(i + 1).refreshToken)]: record } }
   const flat = flatten(record)
-  assert.deepEqual(Object.keys(flat.accounts).filter(key => key !== 'probe@x.test'), [anon('rt-0')])
+  assert.deepEqual(Object.keys(flat.accounts).filter(key => key !== 'probe@x.test').sort(), [anon('rt-0'), anon('rt-121')].sort())
   assert.equal(flat.default, anon('rt-0'))
   assert.equal(flat.accounts[anon('rt-0')].accessToken, 'at-0')
+  assert.equal(flat.accounts[anon('rt-121')].accessToken, 'at-121')
+})
+
+const anonRow = (n, expiresAt = FRESH) => ({ accessToken: `at-${n}`, refreshToken: `rt-${n}`, expiresAt })
+const others = flat => Object.keys(flat.accounts).filter(key => key !== 'probe@x.test').sort()
+
+await check('bot: an account-less bare session over a different account-less leaf keeps both accounts', async () => {
+  const flat = flatten({ ...anonRow(2), default: anon('rt-1'), accounts: { [anon('rt-1')]: anonRow(1, FRESH - 60_000) } })
+  assert.deepEqual(others(flat), [anon('rt-1'), anon('rt-2')].sort())
+  assert.equal(flat.accounts[anon('rt-1')].accessToken, 'at-1')
+  assert.equal(flat.accounts[anon('rt-2')].accessToken, 'at-2')
+  assert.equal(flat.default, anon('rt-2'))
+})
+
+await check('bot: an account-less bare session over a later account-less leaf keeps both and the default names the leaf', async () => {
+  const flat = flatten({ ...anonRow(2, FRESH - 60_000), default: anon('rt-1'), accounts: { [anon('rt-1')]: anonRow(1) } })
+  assert.deepEqual(others(flat), [anon('rt-1'), anon('rt-2')].sort())
+  assert.equal(flat.default, anon('rt-1'))
+})
+
+await check('bot: an account-less wrapper chain ending in a different account keeps that account', async () => {
+  const flat = flatten({ ...anonRow(1), default: anon('rt-2'), accounts: { [anon('rt-2')]: { ...anonRow(2, FRESH - 60_000), accounts: { [anon('rt-3')]: anonRow(3, FRESH - 120_000) } } } })
+  assert.deepEqual(others(flat), [anon('rt-1'), anon('rt-3')].sort())
+})
+
+await check('bot: a flat account-less entry is flattened to the same value twice', async () => {
+  const flat = { default: anon('rt-1'), accounts: { [anon('rt-1')]: anonRow(1), [anon('rt-2')]: anonRow(2, FRESH - 60_000) } }
+  const once = flatten(structuredClone(flat))
+  delete once.accounts['probe@x.test']
+  assert.deepEqual(once, flat)
+})
+
+await check('bot: a row with an empty refresh token does not beat the valid row of the same key one level in', async () => {
+  const flat = flatten({ default: GK, accounts: { [GK]: { ...grokRow(3, FRESH + 600_000), refreshToken: '', accounts: { [GK]: grokRow(4) } } } })
+  assert.equal(flat.accounts[GK].accessToken, 'at-4')
+})
+
+await check('bot: a row without expiresAt does not beat the valid row of the same key one level in', async () => {
+  const { expiresAt, ...noExpiry } = grokRow(3)
+  const flat = flatten({ default: GK, accounts: { [GK]: { ...noExpiry, accounts: { [GK]: grokRow(4) } } } })
+  assert.equal(flat.accounts[GK].accessToken, 'at-4')
+})
+
+await check('bot: a null row named by the outer default beside a bare session leaves the bare session the default', async () => {
+  const flat = flatten({ ...grokRow(7), default: 'gone@grok.test', accounts: { 'gone@grok.test': null } })
+  assert.equal(flat.default, GK)
+  assert.equal(flat.accounts[GK].accessToken, 'at-7')
+  assert.equal(flat.accounts['gone@grok.test'], null)
+})
+
+await check('bot: an unusable object named by the outer default beside a bare session leaves the bare session the default', async () => {
+  const flat = flatten({ ...grokRow(7), default: 'gone@grok.test', accounts: { 'gone@grok.test': { accessToken: '', refreshToken: 'x', expiresAt: FRESH + 600_000 } } })
+  assert.equal(flat.default, GK)
+})
+
+await check('bot: a hybrid entry without an outer default prefers its bare session over a default found in a nested level', async () => {
+  const flat = flatten({ ...grokRow(7), accounts: { 'o@grok.test': { ...grokRow(5, FRESH, { account: 'o@grok.test' }), default: 'o@grok.test', accounts: { 'd@grok.test': grokRow(6, FRESH, { account: 'd@grok.test' }) } } } })
+  assert.equal(flat.default, GK)
+  assert.deepEqual(others(flat), [GK, 'd@grok.test', 'o@grok.test'].sort())
 })
 
 await check('bot: two usable copies of one account with the same expiry: the outer copy wins', async () => {

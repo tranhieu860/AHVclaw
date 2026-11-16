@@ -559,8 +559,8 @@ function readSubscriptionsAuthForWrite(path = SUBSCRIPTIONS_AUTH_FILE) {
  * order; an unusable row only fills a key nobody holds; between usable copies
  * the later expiresAt wins and the outer copy wins a tie. A bare session is
  * filed under the plugin's own key (`pluginAccountKey`). An account-less level
- * that is the only account of an account-less parent is that parent's older
- * copy and takes its key. The default is the outer `default`, unless the bare
+ * that is the only child of an account-less parent, and itself carries `accounts`, is that
+ * parent's older copy and takes its key; a child without `accounts` may be another account. The default is the outer `default`, unless the bare
  * session is strictly later than the account it names; nested defaults last.
  *
  * @param entry - the provider's entry from the store.
@@ -581,7 +581,7 @@ function storeAccounts(entry, provider) {
       if (index === 0) outerDefault = preferred
       else nestedDefaults.push(preferred)
     }
-    const valid = typeof session.accessToken === 'string' && session.accessToken !== ''
+    const valid = hasUsableToken(session)
     let name
     if (key !== undefined) name = parentAnonymous !== undefined && isAnonymousKey(key) ? parentAnonymous : key
     else if (valid) name = bareAccountKey(provider, session)
@@ -594,10 +594,11 @@ function storeAccounts(entry, provider) {
       placeAccount(accounts, name, session)
     }
     if (!isPlainObject(children)) continue
-    const anonymous = valid && name !== '' && isAnonymousKey(name) && Object.keys(children).length === 1 ? name : undefined
+    const only = Object.values(children)
+    const anonymous = valid && name !== '' && isAnonymousKey(name) && only.length === 1 && isPlainObject(only[0]) && isPlainObject(only[0].accounts) ? name : undefined
     for (const [childKey, child] of Object.entries(children)) {
       if (isPlainObject(child)) queue.push({ node: child, key: childKey, parentAnonymous: anonymous })
-      else placeAccount(accounts, anonymous !== undefined && isAnonymousKey(childKey) ? anonymous : childKey, child)
+      else placeAccount(accounts, childKey, child)
     }
   }
   const named = name => name !== undefined && Object.hasOwn(accounts, name)
@@ -610,9 +611,10 @@ function storeAccounts(entry, provider) {
   return { defaultKey: preferredKey ?? Object.keys(accounts)[0] ?? '', accounts }
 }
 
-/** Whether a stored row is a session with a non-empty access token. */
+/** Whether a stored row is a usable session: the plugin's `isValidSessionShape` (non-empty access and refresh tokens, finite `expiresAt`). */
 function hasUsableToken(row) {
-  return isPlainObject(row) && typeof row.accessToken === 'string' && row.accessToken !== ''
+  return isPlainObject(row) && typeof row.accessToken === 'string' && row.accessToken !== '' &&
+    typeof row.refreshToken === 'string' && row.refreshToken !== '' && Number.isFinite(row.expiresAt)
 }
 
 /** Keys the plugin derives from a refresh token for a session with no identity. */
@@ -642,8 +644,7 @@ function placeAccount(accounts, name, candidate) {
   }
   if (!hasUsableToken(candidate)) return
   const held = accounts[name]
-  const heldExpiry = typeof held?.expiresAt === 'number' ? held.expiresAt : -Infinity
-  if (!hasUsableToken(held) || (typeof candidate.expiresAt === 'number' && candidate.expiresAt > heldExpiry)) accounts[name] = candidate
+  if (!hasUsableToken(held) || candidate.expiresAt > held.expiresAt) accounts[name] = candidate
 }
 
 function isPlainObject(value) {

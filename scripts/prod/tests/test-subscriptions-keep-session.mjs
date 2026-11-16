@@ -946,7 +946,7 @@ await check('a stray default that is not older than the bare session keeps the d
   assert.equal(stored().grok.default, 'other@grok.test')
 })
 
-await check('122 levels of an account-less grok session are one account, the outermost token the default', async () => {
+await check('122 levels of an account-less grok session are one account plus the leaf, the outermost token the default', async () => {
   const levels = 122
   const at = i => ({ ...anonSession(i, FRESH - i * 60_000) })
   let record = at(levels - 1)
@@ -954,9 +954,76 @@ await check('122 levels of an account-less grok session are one account, the out
   seedGrok(record)
   await touch()
   const grok = stored().grok
-  assert.deepEqual(Object.keys(grok.accounts), [ANON(at(0).refreshToken)], `${Object.keys(grok.accounts).length} accounts`)
+  // Only a wrapper level folds into its parent; the innermost session has no `accounts`, so it is never assumed to be the same account.
+  assert.deepEqual(Object.keys(grok.accounts).sort(), [ANON(at(0).refreshToken), ANON(at(levels - 1).refreshToken)].sort(), `${Object.keys(grok.accounts).length} accounts`)
   assert.equal(grok.default, ANON(at(0).refreshToken))
   assert.equal(grok.accounts[grok.default].accessToken, 'fake-grok-at-0')
+  assert.equal(grok.accounts[ANON(at(levels - 1).refreshToken)].accessToken, `fake-grok-at-${levels - 1}`)
+})
+
+await check('an account-less bare session over a different account-less leaf keeps both accounts (older writer spread)', async () => {
+  seedGrok({ ...anonSession(2, FRESH), default: ANON('fake-grok-rt-1'), accounts: { [ANON('fake-grok-rt-1')]: anonSession(1, FRESH - 60_000) } })
+  await touch()
+  const grok = stored().grok
+  assert.deepEqual(Object.keys(grok.accounts).sort(), [ANON('fake-grok-rt-1'), ANON('fake-grok-rt-2')].sort())
+  assert.equal(grok.accounts[ANON('fake-grok-rt-1')].accessToken, 'fake-grok-at-1')
+  assert.equal(grok.accounts[ANON('fake-grok-rt-2')].accessToken, 'fake-grok-at-2')
+  assert.equal(grok.default, ANON('fake-grok-rt-2'), 'the bare session is later than the account the default names')
+})
+
+await check('an account-less bare session over a later account-less leaf keeps both and the default names the leaf', async () => {
+  seedGrok({ ...anonSession(2, FRESH - 60_000), default: ANON('fake-grok-rt-1'), accounts: { [ANON('fake-grok-rt-1')]: anonSession(1, FRESH) } })
+  await touch()
+  const grok = stored().grok
+  assert.deepEqual(Object.keys(grok.accounts).sort(), [ANON('fake-grok-rt-1'), ANON('fake-grok-rt-2')].sort())
+  assert.equal(grok.default, ANON('fake-grok-rt-1'))
+  assert.equal(grok.accounts[ANON('fake-grok-rt-1')].accessToken, 'fake-grok-at-1')
+})
+
+await check('an account-less wrapper chain ending in a different account keeps that account', async () => {
+  seedGrok({ ...anonSession(1, FRESH), default: ANON('fake-grok-rt-2'), accounts: { [ANON('fake-grok-rt-2')]: { ...anonSession(2, FRESH - 60_000), accounts: { [ANON('fake-grok-rt-3')]: anonSession(3, FRESH - 120_000) } } } })
+  await touch()
+  assert.deepEqual(Object.keys(stored().grok.accounts).sort(), [ANON('fake-grok-rt-1'), ANON('fake-grok-rt-3')].sort())
+})
+
+await check('a flat account-less entry is read and written twice without a byte changing', async () => {
+  seedGrok({ default: ANON('fake-grok-rt-1'), accounts: { [ANON('fake-grok-rt-1')]: anonSession(1, FRESH), [ANON('fake-grok-rt-2')]: anonSession(2, FRESH - 60_000) } })
+  await touch()
+  const first = readFileSync(store, 'utf8')
+  await touch()
+  assert.equal(readFileSync(store, 'utf8'), first)
+  assert.deepEqual(stored().grok, { default: ANON('fake-grok-rt-1'), accounts: { [ANON('fake-grok-rt-1')]: anonSession(1, FRESH), [ANON('fake-grok-rt-2')]: anonSession(2, FRESH - 60_000) } })
+})
+
+await check('a row with an empty refresh token does not beat the valid row of the same key one level in', async () => {
+  const half = { ...session('grok', 3, FRESH + 600_000), refreshToken: '' }
+  seedGrok({ default: KEY.grok, accounts: { [KEY.grok]: { ...half, accounts: { [KEY.grok]: session('grok', 4, FRESH) } } } })
+  await touch()
+  assert.equal(stored().grok.accounts[KEY.grok].accessToken, 'fake-grok-at-4')
+})
+
+await check('a null row named by the outer default beside a bare session leaves the bare session the default', async () => {
+  seedGrok({ ...session('grok', 7, FRESH), default: 'gone@grok.test', accounts: { 'gone@grok.test': null } })
+  await touch()
+  const grok = stored().grok
+  assert.equal(grok.default, KEY.grok)
+  assert.equal(grok.accounts[KEY.grok].accessToken, 'fake-grok-at-7')
+  assert.equal(grok.accounts['gone@grok.test'], null)
+})
+
+await check('an unusable object named by the outer default beside a bare session leaves the bare session the default', async () => {
+  seedGrok({ ...session('grok', 7, FRESH), default: 'gone@grok.test', accounts: { 'gone@grok.test': { accessToken: '', refreshToken: 'x', expiresAt: FRESH + 600_000 } } })
+  await touch()
+  assert.equal(stored().grok.default, KEY.grok)
+})
+
+await check('a hybrid entry without an outer default prefers its bare session over a default found in a nested level', async () => {
+  const other = { ...session('grok', 5, FRESH), account: 'other@grok.test' }
+  seedGrok({ ...session('grok', 7, FRESH), accounts: { 'other@grok.test': { ...other, default: 'other@grok.test', accounts: { 'deep@grok.test': { ...session('grok', 6, FRESH), account: 'deep@grok.test' } } } } })
+  await touch()
+  const grok = stored().grok
+  assert.equal(grok.default, KEY.grok)
+  assert.deepEqual(Object.keys(grok.accounts).sort(), [KEY.grok, 'deep@grok.test', 'other@grok.test'].sort())
 })
 
 await check('account-less sessions filed as siblings stay separate accounts', async () => {

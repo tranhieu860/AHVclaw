@@ -39,6 +39,10 @@ const mutants = [
   ['ignore-access-token-cas', 'same refresh token supersedes', text => change(text, 'previous.accessToken !== expected.accessToken || ', '')],
   ['drop-migration-lock', 'legacy migration cannot', text => change(text, '\t\tif (!locked) return serialize(path, () => loadStore(path, true));\n', '')],
   ['reuse-token-after-logout', 'stops stale access-token', text => change(text, '\t\t\tif (stored === void 0) throw new LlmError(`${this.options.displayName} was logged out during refresh`, "MISSING_CREDENTIAL", { cause: error });\n', '')],
+  ['fold-account-less-leaf', 'account-less', text => change(text, 'only.length === 1 && isAccountsMap(only[0]) && isAccountsMap(only[0].accounts) ? name : void 0', 'only.length === 1 ? name : void 0')],
+  ['usable-ignores-refresh-token', 'empty refresh token', text => change(text, 'typeof entry.refreshToken === "string" && entry.refreshToken.length > 0 && typeof entry.expiresAt === "number"', 'typeof entry.expiresAt === "number"')],
+  ['null-outer-default-beats-bare', 'named by the outer default', text => change(text, 'preferred = !isValidSessionShape(outer) || accounts[bareName]', 'preferred = accounts[bareName]')],
+  ['nested-default-beats-bare', 'prefers its bare session', text => change(text, '\t\touterDefault,\n\t\tbareName,\n\t\t...nestedDefaults\n', '\t\touterDefault,\n\t\t...nestedDefaults,\n\t\tbareName\n')],
 ]
 let killed = 0, survived = 0
 const run = (candidate, filter) => spawnSync(process.execPath, [

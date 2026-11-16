@@ -25,6 +25,11 @@ const mutations = [
   ['drop issuer refresh deadline', 'refresh lifetime changes', '? { refreshTokenExpiresAt: refreshDeadline } : {}', '? {} : {}'],
   ['accept overflowing deadline', 'refresh lifetime changes', ' && Number.isFinite(refreshDeadline)', ''],
   ['drop CLI refresh deadline', 'CLI import copies', '? { refreshTokenExpiresAt: raw.refreshTokenExpiresAt } : {}', '? {} : {}'],
+  ['fold account-less leaf', 'account-less', 'only.length === 1 && isPlainObject(only[0]) && isPlainObject(only[0].accounts) ? name', 'only.length === 1 ? name'],
+  ['usable ignores refresh token', 'empty refresh token', "typeof row.refreshToken === 'string' && row.refreshToken !== '' &&", 'true &&'],
+  ['usable ignores expiresAt', 'without expiresAt', 'Number.isFinite(row.expiresAt)', 'true'],
+  ['unusable outer default beats bare', 'named by the outer default', 'preferredKey = !hasUsableToken(accounts[outerDefault]) || accounts[bareName]', 'preferredKey = accounts[bareName]'],
+  ['nested default beats bare', 'prefers its bare session', '[outerDefault, bareName, ...nestedDefaults]', '[outerDefault, ...nestedDefaults, bareName]'],
 ]
 const root = mkdtempSync(join(tmpdir(), 'ahv-bot-auth-mutants-'))
 let killed = 0
