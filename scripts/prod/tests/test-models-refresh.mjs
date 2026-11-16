@@ -22,6 +22,9 @@ const providerModels = {
   copilot: { old: { id: 'copilot-old', name: 'Old Copilot' }, fresh: { id: 'copilot-new', name: 'New Copilot' } },
 }
 const vscodeReleasesUrl = 'https://update.code.visualstudio.com/api/releases/stable'
+// A hang that ignores abort would run until the 5 s fixture kill; anything below this proves the deadline ended it.
+// Not a latency budget: fork start-up on a starved core can take over a second.
+const HANG_BOUND_MS = 4000
 const rejectedNotice = provider => `subscriptions: ${provider}: token bị từ chối, danh sách chưa làm mới; sẽ tự mới khi đăng nhập được gia hạn.\n`
 
 if (process.env.AHV_MODELS_TEST_WORKER === '1') {
@@ -279,7 +282,7 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
       assert.equal(r.calls.length, 1)
       if (behavior === 'hang') {
         assert.deepEqual(r.aborted, r.calls)
-        assert.ok(r.elapsedMs < 1500, `unbounded wait: ${r.elapsedMs}`)
+        assert.ok(r.elapsedMs < HANG_BOUND_MS, `unbounded wait: ${r.elapsedMs}`)
         t.diagnostic(`200 ms budget, command worker ${r.elapsedMs.toFixed(1)} ms`)
       }
     })
@@ -310,7 +313,7 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
     assert.deepEqual(r.calls.sort(), ['Bearer fake-one@fixture.test', 'Bearer fake-two@fixture.test'])
     assert.equal(r.after, r.before)
     assert.equal(r.aborted.length, 2)
-    assert.ok(r.elapsedMs < 1500)
+    assert.ok(r.elapsedMs < HANG_BOUND_MS, `unbounded wait: ${r.elapsedMs}`)
   })
 
   test('two providers start in parallel and share the 200 ms deadline', async t => {
@@ -318,7 +321,7 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
     assert.deepEqual(r.calls.sort(), ['Bearer fake-codex', 'Bearer fake-one@fixture.test'])
     assert.equal(r.aborted.length, 2)
     assert.equal(r.after, r.before)
-    assert.ok(r.elapsedMs < 1500)
+    assert.ok(r.elapsedMs < HANG_BOUND_MS, `unbounded wait: ${r.elapsedMs}`)
   })
 
   for (const rejectStatus of [401, 403]) test(`B2 expired stored session rejected ${rejectStatus}: one probe, old catalog, one stderr notice`, async t => {
@@ -438,7 +441,7 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
     assert.equal(r.calls.length, 0)
     assert.equal(r.registryCalls.length, 1)
     assert.equal(r.after, r.before)
-    assert.ok(r.elapsedMs < 1500)
+    assert.ok(r.elapsedMs < HANG_BOUND_MS, `unbounded wait: ${r.elapsedMs}`)
   })
 
   for (const provider of ['grok', 'antigravity', 'copilot']) {
