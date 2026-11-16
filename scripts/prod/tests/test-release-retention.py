@@ -133,8 +133,7 @@ class ReleaseRetentionTests(unittest.TestCase):
                 self.assertNotIn('Traceback', result.stderr)
                 self.assertEqual({p.name: p.read_bytes() for p in self.channel.iterdir()}, before)
 
-    def test_stable_equal_canary_equal_newest_leaves_exactly_one_version(self):
-        # Name kept from the one-version rule: now the newest plus its fallback v0.2.8 remain.
+    def test_stable_equal_canary_equal_newest_keeps_newest_and_fallback(self):
         self.pointers = {'stable': 'v0.2.9', 'canary': 'v0.2.9'}
         self.channels()
         self.release('v0.2.7')
@@ -145,8 +144,7 @@ class ReleaseRetentionTests(unittest.TestCase):
         self.assertEqual(set(p.name for p in self.channel.iterdir()), kept)
         self.assertEqual({name: (self.channel / name).read_bytes() for name in kept}, before)
 
-    def test_canary_newer_than_stable_leaves_exactly_two_versions(self):
-        # Name kept from the old rule: the fallback v0.2.7 now makes three versions.
+    def test_canary_newer_than_stable_keeps_three_versions(self):
         self.pointers = {'stable': 'v0.2.8', 'canary': 'v0.2.10'}
         self.channels()
         self.release('v0.2.6')
