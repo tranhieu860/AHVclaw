@@ -15,7 +15,7 @@ assert.ok(plugin, 'set AHV_MODELS_TEST_PLUGIN to the patched 0.9.12 fixture')
 const HANG_BOUND_MS = 4000
 const bot = process.env.AHV_MODELS_TEST_BOT ?? join(root, 'scripts/prod/ahv-bot.mjs')
 
-function command(t, { fresh = false, behavior, waitMs = 200 } = {}) {
+function command(t, { fresh = false, behavior, waitMs = 200, merge = false } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'ahv-1280-cli-'))
   t.after(() => rmSync(home, { recursive: true, force: true }))
   const dshHome = join(home, '.dsh'), fork = join(home, 'fork')
@@ -35,7 +35,10 @@ function command(t, { fresh = false, behavior, waitMs = 200 } = {}) {
     await import(${JSON.stringify(pathToFileURL(join(here, 'test-models-refresh.mjs')).href)})
   `)
   const start = performance.now()
-  const result = spawnSync(process.execPath, [bot, 'models', 'list', '--json'], {
+  // merge reproduces bot.py run_ahv_json_command: stderr folded into stdout, then one json.loads.
+  const argv = [bot, 'models', 'list', '--json']
+  const [file, args] = merge ? ['sh', ['-c', 'exec "$0" "$@" 2>&1', process.execPath, ...argv]] : [process.execPath, argv]
+  const result = spawnSync(file, args, {
     env: { PATH: process.env.PATH, HOME: home, DSH_HOME: dshHome, AHV_FORK: fork,
       AHV_MODELS_TEST_PLUGIN: plugin, AHV_MODELS_TEST_CASE: JSON.stringify({ behavior }),
       ...(waitMs === null ? {} : { AHV_MODELS_REFRESH_WAIT_MS: String(waitMs) }) },
@@ -45,6 +48,7 @@ function command(t, { fresh = false, behavior, waitMs = 200 } = {}) {
   assert.equal(result.status, 0, `${result.error ?? ''} ${result.stderr}`)
   const payload = JSON.parse(result.stdout)
   assert.equal(result.stdout, JSON.stringify(payload) + '\n')
+  assert.equal(result.stderr, '', 'exit 0 must leave stderr empty: older bots merge it into the JSON')
   assert.equal(payload.source, 'harness', JSON.stringify(payload))
   return { payload, before, after: readFileSync(join(store, 'models.json'), 'utf8'), seededAt, elapsedMs, stderr: result.stderr }
 }
@@ -65,9 +69,17 @@ for (const behavior of ['hang', 'network', '401', 'abort']) {
   })
 }
 
-test('CLI 401: the exit-0 child’s rejected-token notice reaches the caller’s stderr', t => {
-  const r = command(t, { behavior: '401' })
-  assert.match(r.stderr, /subscriptions: claude: token bị từ chối/)
+test('CLI 401: the rejected-token notice is a JSON warning that survives stderr→stdout merging', t => {
+  const r = command(t, { behavior: '401', merge: true })
+  assert.ok(r.payload.models.some(m => m.id === 'claude-old'))
+  assert.equal(r.payload.warnings.length, 1, JSON.stringify(r.payload.warnings))
+  assert.match(r.payload.warnings[0], /subscriptions: claude: token bị từ chối/)
+  assert.doesNotMatch(r.payload.warnings.join('\n'), /fake-|\/tmp\/|\/home\//)
+})
+
+test('CLI without a provider problem: no warnings field', t => {
+  const r = command(t, { behavior: 'network' })
+  assert.equal(r.payload.warnings, undefined)
 })
 
 test('CLI fresh snapshot timing with the offline launcher', t => {
