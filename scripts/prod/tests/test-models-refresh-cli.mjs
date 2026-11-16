@@ -95,3 +95,19 @@ test('CLI default deadline is 8000 ms when the setting is absent', t => {
   assert.ok(r.elapsedMs >= 8_000 && r.elapsedMs < 10_000, `unexpected default wait ${r.elapsedMs}`)
   t.diagnostic(`real CLI with offline launcher, default budget: ${r.elapsedMs.toFixed(1)} ms`)
 })
+
+test('CLI models show survives a spawn error of the dsh child (exit 0, one JSON line, empty stderr)', t => {
+  const home = mkdtempSync(join(tmpdir(), 'ahv-1209-show-'))
+  t.after(() => rmSync(home, { recursive: true, force: true }))
+  const fork = join(home, 'fork')
+  mkdirSync(join(fork, 'packages/bundle/ahv'), { recursive: true })
+  mkdirSync(join(home, '.ahv'), { recursive: true })
+  writeFileSync(join(fork, 'packages/bundle/ahv/cordis.patch.yml'), readFileSync(join(root, 'packages/bundle/ahv/cordis.patch.yml')))
+  const result = spawnSync(process.execPath, ['--import', pathToFileURL(join(here, 'helpers/spawn-error-preload.mjs')).href, bot, 'models', 'show', 'AHV-Holding', '--json'], {
+    env: { PATH: process.env.PATH, HOME: home, AHV_FORK: fork }, encoding: 'utf8', timeout: 10_000,
+  })
+  assert.equal(result.status, 0, `${result.error ?? ''} ${result.stderr}`)
+  assert.equal(result.stderr, '')
+  assert.equal(result.stdout.trim().split('\n').length, 1)
+  assert.equal(JSON.parse(result.stdout).id, 'AHV-Holding')
+})

@@ -1984,7 +1984,7 @@ function spawnListModels() {
       // written to stderr on exit 0; the filtered notices travel as `warnings` in the JSON.
       resolve({ code, stdout, stderr, warnings: code === 0 ? filterChildWarnings(stderr) : [] })
     })
-    proc.on('error', (err) => resolve({ code: -1, stdout, stderr: err.message }))
+    proc.on('error', (err) => resolve({ code: -1, stdout, stderr: err.message, warnings: [] }))
     // Cold dsh + plugin fetch subscription models qua network có thể vượt
     // 60s (Codex Plus/Claude Pro/Grok Premium mỗi lần fetch model list mất
     // 5-20s + boot dsh tree ~20s). Bump 120s để tránh timeout kill khi bot
@@ -2250,7 +2250,7 @@ async function modelsList() {
         count: merged.length,
         source: 'harness',   // ctx.llm.listProviders() + listModels()
         ...(restored.length > 0 ? { restored_from_cache: restored } : {}),
-        ...(result.warnings.length > 0 ? { warnings: result.warnings } : {}),
+        ...(result.warnings?.length > 0 ? { warnings: result.warnings } : {}),
         models: merged,
       }, 0)
     } catch (e) {
@@ -2342,7 +2342,7 @@ async function modelsShow(modelId) {
     max_tokens: harness?.max_tokens ?? s?.maxTokens ?? null,
     pinned: Boolean(s),
     mounted_in_harness: Boolean(harness),
-    ...(result.warnings.length > 0 ? { warnings: result.warnings } : {}),
+    ...(result.warnings?.length > 0 ? { warnings: result.warnings } : {}),
   }, 0)
 }
 
