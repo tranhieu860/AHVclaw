@@ -192,7 +192,7 @@ for (const engine of ['bot', 'plugin']) {
     assert.equal(readFileSync(join(path, 'owner.json'), 'utf8'), bytes)
     assert.equal(existsSync(`${path}.reclaim`), false, 'no reclaim gate is opened for an unreadable owner')
     releasePlantedLock(path)
-    assert.equal((await result(w)).calls, 1)
+    assert.equal((await result(w, 3000)).calls, 1)
     noDebris()
   })
 
@@ -203,7 +203,7 @@ for (const engine of ['bot', 'plugin']) {
     await contender.start()
     await delay(400)
     owner.send({ release: 'endpoint' })
-    await result(owner); await result(contender)
+    await result(owner, 3000); await result(contender, 3000)
     assert.deepEqual(readdirSync(dirname(store)).filter(name => name.includes('.new-')), [])
   })
 
