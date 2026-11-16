@@ -325,7 +325,8 @@ class ReleaseRetentionTests(unittest.TestCase):
         for pointer in ['stable', 'canary']:
             for defect in ['missing-manifest', 'missing-archive', 'version-mismatch',
                            'manifest-symlink', 'manifest-directory', 'archive-symlink',
-                           'archive-directory', 'invalid-json', 'unreadable-manifest']:
+                           'archive-directory', 'invalid-json', 'unreadable-manifest',
+                           'archive-parent-path', 'archive-absolute-path', 'archive-subdirectory']:
                 with self.subTest(pointer=pointer, defect=defect):
                     shutil.rmtree(self.channel)
                     self.channel.mkdir()
@@ -356,6 +357,17 @@ class ReleaseRetentionTests(unittest.TestCase):
                         target.mkdir()
                     elif defect == 'invalid-json':
                         manifest.write_text('{')
+                    elif defect in ['archive-parent-path', 'archive-absolute-path', 'archive-subdirectory']:
+                        # The named file exists, so only the plain-file-name rule can refuse it.
+                        (self.root / 'outside.tar.zst').write_text('outside')
+                        (self.channel / 'sub').mkdir()
+                        (self.channel / 'sub' / 'inside.tar.zst').write_text('inside')
+                        escaped = {'archive-parent-path': '../outside.tar.zst',
+                                   'archive-absolute-path': str(self.root / 'outside.tar.zst'),
+                                   'archive-subdirectory': 'sub/inside.tar.zst'}[defect]
+                        data = json.loads(manifest.read_text())
+                        data['packages']['linux-arm64']['file'] = escaped
+                        manifest.write_text(json.dumps(data))
                     else:
                         unreadable_bytes = manifest.read_bytes()
                         manifest.chmod(0)
@@ -368,6 +380,28 @@ class ReleaseRetentionTests(unittest.TestCase):
                     if defect == 'unreadable-manifest':
                         manifest.chmod(0o644)
                         self.assertEqual(manifest.read_bytes(), unreadable_bytes)
+
+    def test_expired_manifest_is_removed_before_its_archives(self):
+        # An interrupted cleanup must never leave <tag>.json naming archives already gone:
+        # the CMS would treat that tag as a rollback target.
+        spec = importlib.util.spec_from_file_location('prune_releases', SCRIPTS / 'prune-releases.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.pointers = {'stable': 'v0.2.10', 'canary': 'v0.2.10', 'store_floor': 'v0.2.8'}
+        self.channels()
+        for tag in ['v0.2.1', 'v0.2.2', 'v0.2.3', 'v0.2.8', 'v0.2.9', 'v0.2.10']:
+            self.release(tag)
+        unlink = module.Path.unlink
+        order = []
+        def recording_unlink(path, *args, **kwargs):
+            order.append(path.name)
+            return unlink(path, *args, **kwargs)
+        with patch.object(module.Path, 'unlink', recording_unlink):
+            module.prune(self.channel)
+        for tag in ['v0.2.1', 'v0.2.2', 'v0.2.3', 'v0.2.8']:
+            removed = [name for name in order if tag + '.' in name or f'-{tag}-' in name]
+            self.assertEqual(len(removed), 4, removed)
+            self.assertEqual(removed[0], f'{tag}.json', removed)
 
     def test_promote_warns_when_cleanup_fails_after_stable_moves(self):
         self.pointers = {'stable': 'v0.2.56', 'canary': 'invalid-tag', 'store_floor': 'v0.2.57'}
