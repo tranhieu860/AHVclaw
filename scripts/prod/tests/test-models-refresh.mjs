@@ -138,8 +138,11 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
     for (const dispose of disposers.reverse()) dispose()
     const finish = () => {
       process.exitCode = code
-      if (typeof process.send === 'function') process.send({ calls, aborted, abortAfterMs, registryCalls, versionCalls, httpCalls, catalogCalls,
-        credentialsReads, diskAtRefreshReturn, printedAtRefreshReturn, refreshProvided: services.has('subscriptionsCatalogRefresh'), hourlyRegistered }, () => process.disconnect())
+      const diagnostic = { calls, aborted, abortAfterMs, registryCalls, versionCalls, httpCalls, catalogCalls,
+        credentialsReads, diskAtRefreshReturn, printedAtRefreshReturn, refreshProvided: services.has('subscriptionsCatalogRefresh'), hourlyRegistered }
+      if (typeof process.send === 'function') process.send(diagnostic, () => process.disconnect())
+      // The CLI test spawns bin.ts without an IPC channel; it reads the same fields from this file.
+      else if (process.env.AHV_MODELS_TEST_DIAGNOSTIC_FILE) writeFileSync(process.env.AHV_MODELS_TEST_DIAGNOSTIC_FILE, JSON.stringify(diagnostic))
     }
     if (fixture.lateResult) setTimeout(finish, 450)
     else finish()

@@ -4,11 +4,22 @@
 import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
-const { importCliCredentials, decodeJwtExpiry } = await import(
-  join(process.env.HOME, '.ahv', 'bin', 'ahv-bot.mjs')
-)
+// ahv-bot.mjs reads ~/.ahv/env, DSH_HOME and CLAUDE_CONFIG_DIR when imported or called. Resolve the bot first (installed
+// as ~/.ahv/bin/ahv-bot.mjs next to ~/.ahv/tests, or in the repo next to tests/), then point every one of them at an
+// empty scratch home so a machine's real logins are never read.
+const here = dirname(fileURLToPath(import.meta.url))
+const botPath = [join(here, '..', 'ahv-bot.mjs'), join(here, '..', 'bin', 'ahv-bot.mjs')].find(existsSync)
+assert.ok(botPath, 'ahv-bot.mjs not found next to the tests')
+process.env.HOME = mkdtempSync(join(tmpdir(), 'ahv-cred-home-'))
+for (const name of ['CLAUDE_CONFIG_DIR', 'DSH_HOME', 'AHV_FORK']) delete process.env[name]
+
+const { importCliCredentials: importWithRealFetch, decodeJwtExpiry } = await import(pathToFileURL(botPath).href)
+// The Claude import asks api.anthropic.com for the account address; tests never reach the network.
+const offline = async () => { throw new TypeError('network disabled in tests') }
+const importCliCredentials = (options) => importWithRealFetch({ fetchFn: offline, ...options })
 
 let passed = 0
 let failed = 0

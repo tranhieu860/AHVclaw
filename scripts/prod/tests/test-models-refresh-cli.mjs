@@ -34,6 +34,7 @@ function command(t, { fresh = false, behavior, waitMs = 200, merge = false } = {
     process.env.AHV_MODELS_TEST_CASE = JSON.stringify({ ...JSON.parse(process.env.AHV_MODELS_TEST_CASE), legacy: process.env.AHV_MODELS_LIST_ONESHOT !== '1' })
     await import(${JSON.stringify(pathToFileURL(join(here, 'test-models-refresh.mjs')).href)})
   `)
+  const diagnosticFile = join(home, 'diagnostic.json')
   const start = performance.now()
   // merge reproduces bot.py run_ahv_json_command: stderr folded into stdout, then one json.loads.
   const argv = [bot, 'models', 'list', '--json']
@@ -41,8 +42,9 @@ function command(t, { fresh = false, behavior, waitMs = 200, merge = false } = {
   const result = spawnSync(file, args, {
     env: { PATH: process.env.PATH, HOME: home, DSH_HOME: dshHome, AHV_FORK: fork,
       AHV_MODELS_TEST_PLUGIN: plugin, AHV_MODELS_TEST_CASE: JSON.stringify({ behavior }),
+      AHV_MODELS_TEST_DIAGNOSTIC_FILE: diagnosticFile,
       ...(waitMs === null ? {} : { AHV_MODELS_REFRESH_WAIT_MS: String(waitMs) }) },
-    encoding: 'utf8', timeout: waitMs === null ? 14_000 : 5000,
+    encoding: 'utf8', timeout: waitMs === null ? 60_000 : 5000,
   })
   const elapsedMs = performance.now() - start
   assert.equal(result.status, 0, `${result.error ?? ''} ${result.stderr}`)
@@ -50,7 +52,7 @@ function command(t, { fresh = false, behavior, waitMs = 200, merge = false } = {
   assert.equal(result.stdout, JSON.stringify(payload) + '\n')
   assert.equal(result.stderr, '', 'exit 0 must leave stderr empty: older bots merge it into the JSON')
   assert.equal(payload.source, 'harness', JSON.stringify(payload))
-  return { payload, before, after: readFileSync(join(store, 'models.json'), 'utf8'), seededAt, elapsedMs, stderr: result.stderr }
+  return { payload, before, after: readFileSync(join(store, 'models.json'), 'utf8'), seededAt, elapsedMs, stderr: result.stderr, diagnosticFile }
 }
 
 test('CLI stale snapshot: spawn opts into bounded refresh and prints the new model', t => {
@@ -92,8 +94,13 @@ test('CLI fresh snapshot timing with the offline launcher', t => {
 test('CLI default deadline is 8000 ms when the setting is absent', t => {
   const r = command(t, { behavior: 'hang', waitMs: null })
   assert.equal(r.after, r.before)
-  assert.ok(r.elapsedMs >= 8_000 && r.elapsedMs < 10_000, `unexpected default wait ${r.elapsedMs}`)
-  t.diagnostic(`real CLI with offline launcher, default budget: ${r.elapsedMs.toFixed(1)} ms`)
+  // The deadline starts before the first fetch, so the abort comes at most 8000 ms (plus timer lateness) after it, whatever the
+  // load; the whole command can never finish before the deadline. Process start-up delay therefore counts only on the lower side.
+  const { abortAfterMs } = JSON.parse(readFileSync(r.diagnosticFile, 'utf8'))
+  assert.equal(abortAfterMs.length, 1, `abort times ${abortAfterMs}`)
+  assert.ok(abortAfterMs[0] < 8_600, `deadline longer than 8000 ms: abort ${abortAfterMs[0]} ms after the first fetch`)
+  assert.ok(r.elapsedMs >= 8_000, `deadline shorter than 8000 ms: command took ${r.elapsedMs}`)
+  t.diagnostic(`real CLI with offline launcher, default budget: abort ${abortAfterMs[0].toFixed(1)} ms after the first fetch, whole command ${r.elapsedMs.toFixed(1)} ms`)
 })
 
 test('CLI models show survives a spawn error of the dsh child (exit 0, one JSON line, empty stderr)', t => {
