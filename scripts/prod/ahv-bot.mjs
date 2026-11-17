@@ -1978,14 +1978,50 @@ function spawnListModels() {
     let stdout = '', stderr = ''
     proc.stdout.on('data', b => stdout += b.toString('utf8'))
     proc.stderr.on('data', b => stderr += b.toString('utf8'))
-    proc.on('close', (code) => resolve({ code, stdout, stderr }))
-    proc.on('error', (err) => resolve({ code: -1, stdout, stderr: err.message }))
+    proc.on('close', (code) => {
+      // A successful listing still reports provider problems (rejected token) on stderr.
+      // Callers (bot.py) merge our stderr into stdout before json.loads, so nothing may be
+      // written to stderr on exit 0; the filtered notices travel as `warnings` in the JSON.
+      resolve({ code, stdout, stderr, warnings: code === 0 ? filterChildWarnings(stderr) : [] })
+    })
+    proc.on('error', (err) => resolve({ code: -1, stdout, stderr: err.message, warnings: [] }))
     // Cold dsh + plugin fetch subscription models qua network có thể vượt
     // 60s (Codex Plus/Claude Pro/Grok Premium mỗi lần fetch model list mất
     // 5-20s + boot dsh tree ~20s). Bump 120s để tránh timeout kill khi bot
     // gọi từ user Telegram lần đầu sau restart.
     setTimeout(() => { try { proc.kill('SIGKILL') } catch {} }, 120000)
   })
+}
+
+const MAX_WARNINGS = 5
+const MAX_WARNING_CHARS = 200
+
+/**
+ * Reduce the stderr of a successful dsh child to notices safe to show a user.
+ *
+ * @param stderr - raw stderr text of the child.
+ * @returns at most five distinct trimmed lines; stack frames and lines naming absolute paths are
+ *   dropped, long opaque strings (token-like) are masked.
+ */
+export function filterChildWarnings(stderr) {
+  const out = []
+  for (const raw of String(stderr ?? '').split('\n')) {
+    const line = raw.replace(/\x1b\[[0-9;]*m/g, '').trim()
+    if (!line) continue
+    if (/^at\s/.test(line) || /(^|[\s(='"])\/[\w.@-]+\/|[A-Za-z]:\\|file:\/\//.test(line)) continue
+    // bot <= 0.0.483 runs redact_ahv_output over the raw JSON block; quotes and backslashes
+    // inside a string can end it early there, so they never reach the JSON.
+    const masked = line
+      .replace(/["\\]/g, "'")
+      .replace(/Bearer\s+\S+/gi, 'Bearer «đã che»')
+      .replace(/\bsk-[A-Za-z0-9_-]{8,}/g, '«đã che»')
+      .replace(/\b[A-Za-z0-9_-]{32,}\b/g, '«đã che»')
+    const text = masked.slice(0, MAX_WARNING_CHARS)
+    if (out.includes(text)) continue
+    out.push(text)
+    if (out.length >= MAX_WARNINGS) break
+  }
+  return out
 }
 
 // Fallback đọc plugin cache khi spawn dsh fail — plugin đã lưu models
@@ -2219,6 +2255,7 @@ async function modelsList() {
         count: merged.length,
         source: 'harness',   // ctx.llm.listProviders() + listModels()
         ...(restored.length > 0 ? { restored_from_cache: restored } : {}),
+        ...(result.warnings?.length > 0 ? { warnings: result.warnings } : {}),
         models: merged,
       }, 0)
     } catch (e) {
@@ -2310,6 +2347,7 @@ async function modelsShow(modelId) {
     max_tokens: harness?.max_tokens ?? s?.maxTokens ?? null,
     pinned: Boolean(s),
     mounted_in_harness: Boolean(harness),
+    ...(result.warnings?.length > 0 ? { warnings: result.warnings } : {}),
   }, 0)
 }
 

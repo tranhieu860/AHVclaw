@@ -22,6 +22,15 @@ const providerModels = {
   copilot: { old: { id: 'copilot-old', name: 'Old Copilot' }, fresh: { id: 'copilot-new', name: 'New Copilot' } },
 }
 const vscodeReleasesUrl = 'https://update.code.visualstudio.com/api/releases/stable'
+// A hang that ignores abort would run until the 5 s fixture kill; anything below this proves the deadline ended it.
+// Not a latency budget: fork start-up on a starved core can take over a second.
+const HANG_BOUND_MS = 4000
+// Measured inside the worker from the first fetch to the abort signal, so process start-up and
+// machine load do not count; a 200 ms deadline aborts well below this; deadlines of 1 s or more cannot.
+const ABORT_BOUND_MS = 600
+function assertDeadlineAbort(r) {
+  assert.ok(r.abortAfterMs.length > 0 && r.abortAfterMs.every(ms => ms < ABORT_BOUND_MS), `abort took ${r.abortAfterMs}`)
+}
 const rejectedNotice = provider => `subscriptions: ${provider}: token bị từ chối, danh sách chưa làm mới; sẽ tự mới khi đăng nhập được gia hạn.\n`
 
 if (process.env.AHV_MODELS_TEST_WORKER === '1') {
@@ -49,9 +58,11 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
     return '2.1.100 (Claude Code)'
   }
   syncBuiltinESMExports()
-  const calls = [], aborted = [], registryCalls = [], versionCalls = [], httpCalls = [], catalogCalls = []
+  const calls = [], aborted = [], abortAfterMs = [], registryCalls = [], versionCalls = [], httpCalls = [], catalogCalls = []
+  let firstFetchAt
   globalThis.fetch = async (url, init = {}) => {
     const requestUrl = String(url)
+    firstFetchAt ??= performance.now()
     httpCalls.push(requestUrl)
     if (requestUrl.startsWith('https://registry.npmjs.org/')) {
       registryCalls.push(requestUrl)
@@ -75,7 +86,10 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
     ].includes(requestUrl)
     const copilot = requestUrl === 'https://api.githubcopilot.com/models'
     assert.ok(codex || grok || grokCli || antigravity || copilot || requestUrl === 'https://api.anthropic.com/v1/models?beta=true', `unexpected fixture HTTP: ${requestUrl}`)
-    init.signal?.addEventListener('abort', () => aborted.push(account), { once: true })
+    init.signal?.addEventListener('abort', () => {
+      aborted.push(account)
+      abortAfterMs.push(performance.now() - firstFetchAt)
+    }, { once: true })
     if ((fixture.sourceCase || fixture.expired) && account !== 'Bearer cc-fresh'
       || fixture.fleet && account === 'Bearer fake-three@fixture.test') {
       return Response.json({ error: { message: 'fixture rejected old token' } }, { status: fixture.rejectStatus ?? 401 })
@@ -124,7 +138,7 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
     for (const dispose of disposers.reverse()) dispose()
     const finish = () => {
       process.exitCode = code
-      if (typeof process.send === 'function') process.send({ calls, aborted, registryCalls, versionCalls, httpCalls, catalogCalls,
+      if (typeof process.send === 'function') process.send({ calls, aborted, abortAfterMs, registryCalls, versionCalls, httpCalls, catalogCalls,
         credentialsReads, diskAtRefreshReturn, printedAtRefreshReturn, refreshProvided: services.has('subscriptionsCatalogRefresh'), hourlyRegistered }, () => process.disconnect())
     }
     if (fixture.lateResult) setTimeout(finish, 450)
@@ -279,7 +293,8 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
       assert.equal(r.calls.length, 1)
       if (behavior === 'hang') {
         assert.deepEqual(r.aborted, r.calls)
-        assert.ok(r.elapsedMs < 1500, `unbounded wait: ${r.elapsedMs}`)
+        assertDeadlineAbort(r)
+        assert.ok(r.elapsedMs < HANG_BOUND_MS, `unbounded wait: ${r.elapsedMs}`)
         t.diagnostic(`200 ms budget, command worker ${r.elapsedMs.toFixed(1)} ms`)
       }
     })
@@ -310,7 +325,8 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
     assert.deepEqual(r.calls.sort(), ['Bearer fake-one@fixture.test', 'Bearer fake-two@fixture.test'])
     assert.equal(r.after, r.before)
     assert.equal(r.aborted.length, 2)
-    assert.ok(r.elapsedMs < 1500)
+    assertDeadlineAbort(r)
+    assert.ok(r.elapsedMs < HANG_BOUND_MS, `unbounded wait: ${r.elapsedMs}`)
   })
 
   test('two providers start in parallel and share the 200 ms deadline', async t => {
@@ -318,7 +334,7 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
     assert.deepEqual(r.calls.sort(), ['Bearer fake-codex', 'Bearer fake-one@fixture.test'])
     assert.equal(r.aborted.length, 2)
     assert.equal(r.after, r.before)
-    assert.ok(r.elapsedMs < 1500)
+    assert.ok(r.elapsedMs < HANG_BOUND_MS, `unbounded wait: ${r.elapsedMs}`)
   })
 
   for (const rejectStatus of [401, 403]) test(`B2 expired stored session rejected ${rejectStatus}: one probe, old catalog, one stderr notice`, async t => {
@@ -438,7 +454,7 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
     assert.equal(r.calls.length, 0)
     assert.equal(r.registryCalls.length, 1)
     assert.equal(r.after, r.before)
-    assert.ok(r.elapsedMs < 1500)
+    assert.ok(r.elapsedMs < HANG_BOUND_MS, `unbounded wait: ${r.elapsedMs}`)
   })
 
   for (const provider of ['grok', 'antigravity', 'copilot']) {

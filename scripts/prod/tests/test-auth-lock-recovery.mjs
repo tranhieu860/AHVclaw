@@ -2,7 +2,7 @@
 // Abandoned auth locks recover through the actual bot and published plugin operations.
 import assert from 'node:assert/strict'
 import { fork } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -178,6 +178,33 @@ for (const engine of ['bot', 'plugin']) {
     releasePlantedLock(path)
     assert.equal((await result(w)).calls, 1)
     noDebris()
+  })
+
+  for (const scenario of ['not-json', 'pid-zero']) await check(`${engine}: ${scenario} owner record is kept, never reclaimed`, async () => {
+    const path = `${store}.refresh-claude.lock`
+    mkdirSync(path, { recursive: true, mode: 0o700 })
+    const bytes = scenario === 'not-json' ? '{"pid":' : JSON.stringify({ pid: 0, start: null, boot: null })
+    writeFileSync(join(path, 'owner.json'), bytes, { mode: 0o600 })
+    const w = worker(engine)
+    await w.start(); await delay(1300)
+    assert.equal(w.messages.some(message => ['done', 'endpoint'].includes(message.type)), false, 'an unreadable owner is no evidence of death')
+    assert.equal(existsSync(path), true)
+    assert.equal(readFileSync(join(path, 'owner.json'), 'utf8'), bytes)
+    assert.equal(existsSync(`${path}.reclaim`), false, 'no reclaim gate is opened for an unreadable owner')
+    releasePlantedLock(path)
+    assert.equal((await result(w, 3000)).calls, 1)
+    noDebris()
+  })
+
+  await check(`${engine}: losing the publication race leaves no .new-* directory`, async () => {
+    const owner = worker(engine, { endpoint: 'hold' })
+    await owner.start(); assert.equal((await owner.wait(['endpoint'])).type, 'endpoint')
+    const contender = worker(engine)
+    await contender.start()
+    await delay(400)
+    owner.send({ release: 'endpoint' })
+    await result(owner, 3000); await result(contender, 3000)
+    assert.deepEqual(readdirSync(dirname(store)).filter(name => name.includes('.new-')), [])
   })
 
   await check(`${engine}: atomic owner publication`, async () => {

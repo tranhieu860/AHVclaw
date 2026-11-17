@@ -107,7 +107,8 @@ def prune_locked(directory):
             continue
         keep.add(tag)
         break
-    for name, tag, original in artifacts:
+    # <tag>.json first: if cleanup stops midway, the CMS must not see a manifest whose archives are gone.
+    for name, tag, original in sorted(artifacts, key=lambda artifact: MANIFEST.fullmatch(artifact[0]) is None):
         if tag in keep:
             continue
         # Also detect changes by external writers that do not follow the lock protocol.

@@ -34,6 +34,7 @@ MUTANTS = [
     ('forget-canary', 'prune-releases.py', 'keep.add(value)', "keep.add(value) if key != 'canary' else None", 'test_canary_outside_newest_is_preserved_and_floor_is_not'),
     ('readd-floor-to-keep', 'prune-releases.py', "if key != 'store_floor':", 'if True:', 'test_canary_outside_newest_is_preserved_and_floor_is_not'),
     ('skip-floor-tag-shape-check', 'prune-releases.py', 'if not isinstance(value, str) or re.fullmatch(TAG, value) is None:', "if key != 'store_floor' and (not isinstance(value, str) or re.fullmatch(TAG, value) is None):", 'test_malformed_floor_refuses_all_deletion'),
+    ('archives-before-manifest', 'prune-releases.py', 'sorted(artifacts, key=lambda artifact: MANIFEST.fullmatch(artifact[0]) is None)', 'artifacts', 'test_expired_manifest_is_removed_before_its_archives'),
     ('leave-archives', 'prune-releases.py', ' or ARCHIVE.fullmatch(entry.name)', '', TIMER),
     ('leave-glibc-variants', 'prune-releases.py', r'(?:-glibc[0-9]+(?:\.[0-9]+)+)?', '', TIMER),
     ('broad-archive-suffix', 'prune-releases.py', r"\.tar\.zst')", r"\.tar\.zst.*')", SAFETY),
