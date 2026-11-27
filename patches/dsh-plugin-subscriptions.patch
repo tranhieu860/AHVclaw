@@ -1002,7 +1002,7 @@ diff --git a/lib/providers/antigravity-cli.js b/lib/providers/antigravity-cli.js
 new file mode 100644
 --- /dev/null
 +++ b/lib/providers/antigravity-cli.js
-@@ -0,0 +1,81 @@
+@@ -0,0 +1,73 @@
 +import { execFile } from 'node:child_process';
 +import { promisify } from 'node:util';
 +
@@ -1026,16 +1026,8 @@ new file mode 100644
 +        ({ stdout } = await run('agy', ['--version'], options));
 +    }
 +    catch (error) {
-+        // Use the bot account's binary only when PATH cannot launch agy.
-+        if (process.platform !== 'linux' || !['ENOENT', 'EACCES'].includes(error.code))
-+            return undefined;
-+        try {
-+            ({ stdout } = await run('/home/agyproxy/.local/bin/agy', ['--version'], options));
-+        }
-+        catch (error) {
-+            // An unavailable or failed version probe uses the pinned CLI version.
-+            return undefined;
-+        }
++        // A missing, failing or slow agy on PATH uses the pinned CLI version.
++        return undefined;
 +    }
 +    return /(?:^|[\s(])v?(\d+\.\d+\.\d+)(?=$|[\s)])/u.exec(stdout)?.[1];
 +}

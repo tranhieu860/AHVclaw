@@ -1,7 +1,7 @@
 // Exercise the patched npm provider and standalone quota command with offline HTTP fixtures.
 import assert from 'node:assert/strict'
 import childProcess, { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createRequire, register, syncBuiltinESMExports } from 'node:module'
 import { Socket } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -90,8 +90,8 @@ async function exerciseEndpoints(runtime, onModelsRequest) {
 }
 
 if (process.argv.includes('--probe')) {
-  // A developer machine may have an agyproxy account. Hermetic PATH fixtures
-  // simulate the result of probing its executable without accessing that home.
+  // A probe of another account's agy would run as this user; the alternate
+  // fixture stands in for that executable and must stay unused.
   const probe = promisify(childProcess.execFile)
   childProcess.execFile = Object.assign(() => { throw new Error('unexpected callback-based executable probe') }, {
     [promisify.custom]: (file, ...args) => {
@@ -155,10 +155,10 @@ if (process.argv.includes('--probe')) {
     }
   })
 
-  test('agy is tried under the bot account when PATH has no executable', t => {
+  test('agy outside PATH is never executed', t => {
     const { requests, marker } = probe(t, '1.6.2\n', { alternate: true })
-    assert.equal(readFileSync(marker, 'utf8'), '--version\n')
-    assert.equal(requests[0].ua, ua('1.6.2'))
+    assert.equal(existsSync(marker), false)
+    assert.equal(requests[0].ua, ua('1.5.18'))
   })
 
   for (const [name, output, flags] of [
