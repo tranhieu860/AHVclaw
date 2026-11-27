@@ -1,0 +1,239 @@
+{
+  "old": {
+    "agentModelSorts": [
+      {
+        "displayName": "Recommended",
+        "groups": [
+          {
+            "modelIds": [
+              "claude-opus-5-5-low",
+              "claude-opus-5-5-medium",
+              "claude-opus-5-5-high",
+              "claude-sonnet-5-5-low",
+              "claude-sonnet-5-5-medium",
+              "claude-sonnet-5-5-high",
+              "gpt-oss-120b-medium"
+            ]
+          }
+        ]
+      }
+    ],
+    "imageGenerationModelIds": [
+      "gemini-3.1-flash-image"
+    ],
+    "audioTranscriptionModelIds": [
+      "models/proactive-observer-v10"
+    ],
+    "models": {
+      "gemini-3.1-flash-lite": {
+        "displayName": "Gemini 3.1 Flash Lite"
+      },
+      "gemini-4-hydrogen-sonar": {},
+      "gemini-3.1-flash-image": {
+        "displayName": "Gemini 3.1 Flash Image"
+      },
+      "tab_jump_flash_lite_preview": {},
+      "claude-sonnet-5-5-low": {
+        "displayName": "Claude Sonnet 5.5 (Low)"
+      },
+      "claude-sonnet-5-5-high": {
+        "displayName": "Claude Sonnet 5.5 (High)"
+      },
+      "claude-opus-5-5-low": {
+        "displayName": "Claude Opus 5.5 (Low)"
+      },
+      "tab_flash_lite_preview": {},
+      "claude-opus-5-5-medium": {
+        "displayName": "Claude Opus 5.5 (Medium)"
+      },
+      "gemini-2.5-flash-thinking": {
+        "displayName": "Gemini 3.5 Flash Lite"
+      },
+      "gemini-3-flash": {
+        "displayName": "Gemini 3 Flash"
+      },
+      "gemini-2.5-flash": {
+        "displayName": "Gemini 3.5 Flash Lite"
+      },
+      "claude-sonnet-5-5-medium": {
+        "displayName": "Claude Sonnet 5.5 (Medium)"
+      },
+      "gpt-oss-120b-medium": {
+        "displayName": "GPT-OSS 120B (Medium)"
+      },
+      "gemini-2.5-flash-lite": {
+        "displayName": "Gemini 3.5 Flash Lite"
+      },
+      "claude-opus-5-5-high": {
+        "displayName": "Claude Opus 5.5 (High)"
+      },
+      "gemini-3.5-flash-lite": {
+        "displayName": "Gemini 3.5 Flash Lite"
+      },
+      "gemini-3.8-flash-tiered": {}
+    }
+  },
+  "new": {
+    "agentModelSorts": [
+      {
+        "displayName": "Recommended",
+        "groups": [
+          {
+            "modelIds": [
+              "gemini-4-neon-high",
+              "gemini-4-neon-xhigh",
+              "gemini-4-neon-medium",
+              "gemini-4-neon-low",
+              "gemini-4-carbon-medium",
+              "gemini-4-carbon-high",
+              "gemini-4-carbon-low",
+              "gemini-4-argon-medium",
+              "gemini-4-argon-high",
+              "gemini-4-argon-low",
+              "gemini-4-hydrogen-high",
+              "gemini-4-hydrogen-xhigh",
+              "gemini-4-hydrogen-medium",
+              "gemini-4-hydrogen-low",
+              "gemini-pro-orchestrator-neon",
+              "gemini-pro-orchestrator",
+              "gemini-pro-orchestrator-argon",
+              "gemini-3.8-flash-high",
+              "gemini-3.8-flash-medium",
+              "gemini-3.8-flash-low",
+              "claude-opus-5-5-low",
+              "claude-opus-5-5-medium",
+              "claude-opus-5-5-high",
+              "claude-sonnet-5-5-low",
+              "claude-sonnet-5-5-medium",
+              "claude-sonnet-5-5-high",
+              "gpt-oss-120b-medium"
+            ]
+          }
+        ]
+      }
+    ],
+    "imageGenerationModelIds": [
+      "gemini-3.1-flash-image"
+    ],
+    "audioTranscriptionModelIds": [
+      "models/proactive-observer-v10"
+    ],
+    "models": {
+      "gemini-pro-orchestrator": {
+        "displayName": "Orchestrator (Carbon)"
+      },
+      "gemini-4-hydrogen-tiered-high": {
+        "displayName": "Gemini 4 Hydrogen (High)"
+      },
+      "claude-opus-5-5-low": {
+        "displayName": "Claude Opus 5.5 (Low)"
+      },
+      "gemini-4-argon-low": {
+        "displayName": "Gemini 4 Argon (Low)"
+      },
+      "gemini-pro-orchestrator-argon": {
+        "displayName": "Orchestrator (Argon)"
+      },
+      "gemini-flash-worker-agy": {
+        "displayName": "Gemini 4 Hydrogen (Orchestrator)"
+      },
+      "gemini-3.1-flash-lite": {
+        "displayName": "Gemini 3.1 Flash Lite"
+      },
+      "gemini-3.8-flash-medium": {
+        "displayName": "Gemini 3.8 Flash (Medium)"
+      },
+      "gemini-4-argon-medium": {
+        "displayName": "Gemini 4 Argon (Medium)"
+      },
+      "tab_flash_lite_preview": {},
+      "gemini-4-neon-high": {
+        "displayName": "Gemini 4 Neon (High)"
+      },
+      "gemini-4-hydrogen-low": {
+        "displayName": "Gemini 4 Hydrogen (Low)"
+      },
+      "gemini-4-hydrogen-medium": {
+        "displayName": "Gemini 4 Hydrogen (Medium)"
+      },
+      "claude-sonnet-5-5-low": {
+        "displayName": "Claude Sonnet 5.5 (Low)"
+      },
+      "gemini-4-argon-high": {
+        "displayName": "Gemini 4 Argon (High)"
+      },
+      "gemini-4-neon-low": {
+        "displayName": "Gemini 4 Neon (Low)"
+      },
+      "gemini-4-hydrogen-high": {
+        "displayName": "Gemini 4 Hydrogen (High)"
+      },
+      "gemini-4-carbon-low": {
+        "displayName": "Gemini 4 Carbon (Low)"
+      },
+      "gemini-4-hydrogen-sonar": {},
+      "claude-sonnet-5-5-high": {
+        "displayName": "Claude Sonnet 5.5 (High)"
+      },
+      "gemini-2.5-flash-lite": {
+        "displayName": "Gemini 3.5 Flash Lite"
+      },
+      "gemini-3-flash": {
+        "displayName": "Gemini 3 Flash"
+      },
+      "gemini-3.8-flash-high": {
+        "displayName": "Gemini 3.8 Flash (High)"
+      },
+      "gemini-3.8-flash-tiered": {},
+      "gemini-4-carbon-medium": {
+        "displayName": "Gemini 4 Carbon (Medium)"
+      },
+      "gemini-4-hydrogen-tiered-xhigh": {
+        "displayName": "Gemini 4 Hydrogen (XHigh)"
+      },
+      "gemini-2.5-flash-thinking": {
+        "displayName": "Gemini 3.5 Flash Lite"
+      },
+      "gemini-3.5-flash-lite": {
+        "displayName": "Gemini 3.5 Flash Lite"
+      },
+      "claude-sonnet-5-5-medium": {
+        "displayName": "Claude Sonnet 5.5 (Medium)"
+      },
+      "gemini-4-neon-xhigh": {
+        "displayName": "Gemini 4 Neon (XHigh)"
+      },
+      "gemini-pro-orchestrator-neon": {
+        "displayName": "Orchestrator (Neon)"
+      },
+      "gemini-3.8-flash-low": {
+        "displayName": "Gemini 3.8 Flash (Low)"
+      },
+      "gemini-4-carbon-high": {
+        "displayName": "Gemini 4 Carbon (High)"
+      },
+      "tab_jump_flash_lite_preview": {},
+      "gemini-4-hydrogen-xhigh": {
+        "displayName": "Gemini 4 Hydrogen (XHigh)"
+      },
+      "gemini-3.1-flash-image": {
+        "displayName": "Gemini 3.1 Flash Image"
+      },
+      "gemini-2.5-flash": {
+        "displayName": "Gemini 3.5 Flash Lite"
+      },
+      "claude-opus-5-5-medium": {
+        "displayName": "Claude Opus 5.5 (Medium)"
+      },
+      "gpt-oss-120b-medium": {
+        "displayName": "GPT-OSS 120B (Medium)"
+      },
+      "claude-opus-5-5-high": {
+        "displayName": "Claude Opus 5.5 (High)"
+      },
+      "gemini-4-neon-medium": {
+        "displayName": "Gemini 4 Neon (Medium)"
+      }
+    }
+  }
+}

@@ -77,7 +77,13 @@ diff --git a/lib/index.d.ts b/lib/index.d.ts
 diff --git a/lib/index.js b/lib/index.js
 --- a/lib/index.js
 +++ b/lib/index.js
-@@ -9,7 +9,7 @@ import { getDefaultAutoSelectFamilyAttemptTimeout, setDefaultAutoSelectFamilyAtt
+@@ -1,4 +1,5 @@
+ import z from "@deepseek-ai/schemastery";
++import { antigravityCatalogEntries, antigravityCliUserAgent, antigravityFixedEffort } from "./providers/antigravity-cli.js";
+ import * as llm from "@deepseek-ai/dsh-llm";
+ import { CONTEXT_WINDOW_EXCEEDED_CODE, EMPTY_RESPONSE_CODE, LlmAdapter, LlmError, QUOTA_EXCEEDED_CODE, ReasoningEffortId, attributionHeaders, errorChain, isContextWindowExceededError, isQuotaExceededError, resolveRetryPolicy } from "@deepseek-ai/dsh-llm";
+ import { createServer } from "node:http";
+@@ -9,7 +10,7 @@ import { getDefaultAutoSelectFamilyAttemptTimeout, setDefaultAutoSelectFamilyAtt
  import { basename, dirname, join } from "node:path";
  import { dshHomePath } from "@deepseek-ai/dsh-home-paths";
  import { execFileSync } from "node:child_process";
@@ -86,7 +92,7 @@ diff --git a/lib/index.js b/lib/index.js
  import { homedir } from "node:os";
  import { AttachmentId } from "@deepseek-ai/dsh-attachment";
  import { WebError } from "@deepseek-ai/dsh-web";
-@@ -788,6 +788,7 @@ function toSession(data) {
+@@ -788,6 +789,7 @@ function toSession(data) {
  		accessToken: data.accessToken,
  		refreshToken: data.refreshToken,
  		expiresAt: Math.trunc(data.expiresAt),
@@ -94,7 +100,7 @@ diff --git a/lib/index.js b/lib/index.js
  		scopes,
  		...typeof data.emailAddress === "string" ? { emailAddress: data.emailAddress } : {},
  		...typeof data.subscriptionType === "string" ? { subscriptionType: data.subscriptionType } : {}
-@@ -877,6 +878,7 @@ function mergeIntoBlob(existingRaw, next) {
+@@ -877,6 +879,7 @@ function mergeIntoBlob(existingRaw, next) {
  	target.accessToken = next.accessToken;
  	target.refreshToken = next.refreshToken;
  	target.expiresAt = next.expiresAt;
@@ -102,7 +108,7 @@ diff --git a/lib/index.js b/lib/index.js
  	return JSON.stringify(parsed);
  }
  /**
-@@ -1212,13 +1214,14 @@ function assertSessionShape(provider, account, value) {
+@@ -1212,13 +1215,14 @@ function assertSessionShape(provider, account, value) {
  * @param path - store file path; defaults to {@link authFilePath}.
  * @returns the parsed session map.
  */
@@ -118,7 +124,7 @@ diff --git a/lib/index.js b/lib/index.js
  		try {
  			text = await readFile(legacyAuthFilePath(), "utf8");
  		} catch (legacyError) {
-@@ -1258,13 +1261,13 @@ function parseStore(text, path) {
+@@ -1258,13 +1262,13 @@ function parseStore(text, path) {
  			console.warn(`subscriptions auth store: entry "${provider}" is not an object; skipped`);
  			continue;
  		}
@@ -135,7 +141,7 @@ diff --git a/lib/index.js b/lib/index.js
  			const key = provider === "codex" ? session.accountId : accountKeyOf(provider, session);
  			store[provider] = {
  				default: key,
-@@ -1272,6 +1275,7 @@ function parseStore(text, path) {
+@@ -1272,6 +1276,7 @@ function parseStore(text, path) {
  			};
  			continue;
  		}
@@ -143,7 +149,7 @@ diff --git a/lib/index.js b/lib/index.js
  		const accounts = record$1.accounts;
  		if (typeof accounts !== "object" || accounts === null || Array.isArray(accounts)) {
  			console.warn(`subscriptions auth store: entry "${provider}" has no accounts map; skipped`);
-@@ -1295,14 +1299,167 @@ function parseStore(text, path) {
+@@ -1295,14 +1300,167 @@ function parseStore(text, path) {
  	if (store.codex !== void 0) migrateCodex(store.codex);
  	return store;
  }
@@ -311,7 +317,7 @@ diff --git a/lib/index.js b/lib/index.js
  	await mkdir(dirname(path), { recursive: true });
  	const tmp = `${path}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`;
  	try {
-@@ -1314,6 +1471,111 @@ async function writeStore(store, path) {
+@@ -1314,6 +1472,111 @@ async function writeStore(store, path) {
  		throw error;
  	}
  }
@@ -423,7 +429,7 @@ diff --git a/lib/index.js b/lib/index.js
  /**
  * One write chain per store path. Every mutation is a read-modify-write of a
  * single JSON file, and the plugin has several independent writers — a login,
-@@ -1333,7 +1595,8 @@ const writeChains = /* @__PURE__ */ new Map();
+@@ -1333,7 +1596,8 @@ const writeChains = /* @__PURE__ */ new Map();
  * @returns whatever `action` returns.
  */
  async function serialize(path, action) {
@@ -433,7 +439,7 @@ diff --git a/lib/index.js b/lib/index.js
  	const tail = next.then(() => void 0, () => void 0);
  	writeChains.set(path, tail);
  	try {
-@@ -1383,17 +1646,19 @@ async function getAccountSession(provider, account, path = authFilePath()) {
+@@ -1383,17 +1647,19 @@ async function getAccountSession(provider, account, path = authFilePath()) {
  * @param account - the account key (see {@link accountKeyOf}).
  * @param session - the fresh session from a login or refresh.
  * @param path - store file path; defaults to {@link authFilePath}.
@@ -459,7 +465,7 @@ diff --git a/lib/index.js b/lib/index.js
  		store[provider] = {
  			...entry,
  			default: entry?.default ?? account,
-@@ -1403,6 +1668,7 @@ async function saveAccountSession(provider, account, session, path = authFilePat
+@@ -1403,6 +1669,7 @@ async function saveAccountSession(provider, account, session, path = authFilePat
  			}
  		};
  		await writeStore(store, path);
@@ -467,7 +473,7 @@ diff --git a/lib/index.js b/lib/index.js
  	});
  }
  /**
-@@ -1414,7 +1680,7 @@ async function saveAccountSession(provider, account, session, path = authFilePat
+@@ -1414,7 +1681,7 @@ async function saveAccountSession(provider, account, session, path = authFilePat
  */
  async function deleteAccountSession(provider, account, path = authFilePath()) {
  	return serialize(path, async () => {
@@ -476,7 +482,7 @@ diff --git a/lib/index.js b/lib/index.js
  		const entry = store[provider];
  		if (entry === void 0) return;
  		account = resolveAccount(entry, account);
-@@ -1438,7 +1704,7 @@ async function deleteAccountSession(provider, account, path = authFilePath()) {
+@@ -1438,7 +1705,7 @@ async function deleteAccountSession(provider, account, path = authFilePath()) {
  */
  async function setDefaultAccount(provider, account, path = authFilePath()) {
  	return serialize(path, async () => {
@@ -485,7 +491,7 @@ diff --git a/lib/index.js b/lib/index.js
  		const entry = store[provider];
  		if (entry !== void 0) account = resolveAccount(entry, account);
  		if (entry === void 0 || !Object.hasOwn(entry.accounts, account)) throw new Error(`no ${provider} account "${account}" is logged in`);
-@@ -2491,6 +2757,15 @@ async function oauthEndpointError(response, label) {
+@@ -2491,6 +2758,15 @@ async function oauthEndpointError(response, label) {
  * coalesces concurrent refreshes behind one in-flight promise. Permanent
  * refresh failures delete the stored session and surface INVALID_CREDENTIAL
  * with a re-login hint; transient failures fall back to a still-valid token.
@@ -501,7 +507,7 @@ diff --git a/lib/index.js b/lib/index.js
  */
  var TokenManager = class {
  	inflight;
-@@ -2525,6 +2800,16 @@ var TokenManager = class {
+@@ -2525,6 +2801,16 @@ var TokenManager = class {
  	async session(forceRefresh = false) {
  		const session = await this.options.load();
  		if (session === void 0) throw new LlmError(`dsh-plugin-subscriptions: not logged in to ${this.options.displayName}; log in via Settings → Subscriptions in the dsh web app`, "MISSING_CREDENTIAL");
@@ -518,7 +524,7 @@ diff --git a/lib/index.js b/lib/index.js
  		if (!forceRefresh && session.expiresAt - Date.now() > this.options.preemptMs) return session;
  		this.inflight ??= this.doRefresh(session).finally(() => {
  			this.inflight = void 0;
-@@ -2532,26 +2817,39 @@ var TokenManager = class {
+@@ -2532,26 +2818,39 @@ var TokenManager = class {
  		try {
  			return await this.inflight;
  		} catch (error) {
@@ -566,7 +572,7 @@ diff --git a/lib/index.js b/lib/index.js
  	}
  };
  /** Bound on one account catalog fetch or usage poll — a hang must not block the picker. */
-@@ -2743,6 +3041,8 @@ var ModelCatalogCache = class {
+@@ -2743,6 +3042,8 @@ var ModelCatalogCache = class {
  		const fresh = this.cached();
  		if (fresh !== void 0) return fresh;
  		if (preferCached && this.entry !== void 0) return this.entry.models;
@@ -575,7 +581,7 @@ diff --git a/lib/index.js b/lib/index.js
  		return this.refresh(fetcher);
  	}
  	/**
-@@ -2760,6 +3060,7 @@ var ModelCatalogCache = class {
+@@ -2760,6 +3061,7 @@ var ModelCatalogCache = class {
  		if (fresh !== void 0) return fresh;
  		const known = this.entry?.models;
  		if (known !== void 0) return known;
@@ -583,7 +589,7 @@ diff --git a/lib/index.js b/lib/index.js
  		try {
  			return await this.refresh(fetcher);
  		} catch {
-@@ -2906,7 +3207,7 @@ var AccountTokenManager = class {
+@@ -2906,7 +3208,7 @@ var AccountTokenManager = class {
  		this.io = options.io ?? {
  			list: () => listAccounts(provider),
  			get: (account) => getAccountSession(provider, account),
@@ -592,7 +598,7 @@ diff --git a/lib/index.js b/lib/index.js
  			remove: (account) => deleteAccountSession(provider, account),
  			resolve: (account) => resolveAccountKey(provider, account)
  		};
-@@ -2954,15 +3255,18 @@ var AccountTokenManager = class {
+@@ -2954,15 +3256,18 @@ var AccountTokenManager = class {
  			manager = new TokenManager({
  				displayName: this.options.displayName,
  				...this.options.makeOptions(account),
@@ -613,7 +619,7 @@ diff --git a/lib/index.js b/lib/index.js
  				},
  				remove: () => io.remove(boundAccount),
  				onRemoved: () => {
-@@ -4199,6 +4503,13 @@ async function fetchClaudeProfile(accessToken) {
+@@ -4199,6 +4504,13 @@ async function fetchClaudeProfile(accessToken) {
  		return {};
  	}
  }
@@ -627,7 +633,7 @@ diff --git a/lib/index.js b/lib/index.js
  /** Build a session from a token response. */
  async function claudeSession(tokens, fallbackRefreshToken, withProfile) {
  	if (typeof tokens.access_token !== "string" || tokens.access_token.length === 0) throw new Error("claude token endpoint returned no access token");
-@@ -4209,6 +4520,7 @@ async function claudeSession(tokens, fallbackRefreshToken, withProfile) {
+@@ -4209,6 +4521,7 @@ async function claudeSession(tokens, fallbackRefreshToken, withProfile) {
  	return {
  		accessToken: tokens.access_token,
  		refreshToken,
@@ -635,7 +641,7 @@ diff --git a/lib/index.js b/lib/index.js
  		expiresAt: Date.now() + tokens.expires_in * 1e3,
  		scopes: tokens.scope ?? CLAUDE_SCOPE,
  		...profile
-@@ -5141,6 +5453,7 @@ const PERMANENT_REFRESH_CODES = new Set([
+@@ -5141,6 +5454,7 @@ const PERMANENT_REFRESH_CODES = new Set([
  	"refresh_token_expired",
  	"refresh_token_reused",
  	"refresh_token_invalidated",
@@ -643,7 +649,7 @@ diff --git a/lib/index.js b/lib/index.js
  	"invalid_grant"
  ]);
  const CODEX_EFFORTS = [
-@@ -5248,6 +5561,7 @@ function codexSession(tokens, fallback) {
+@@ -5248,6 +5562,7 @@ function codexSession(tokens, fallback) {
  	return {
  		accessToken: tokens.access_token,
  		refreshToken,
@@ -651,7 +657,63 @@ diff --git a/lib/index.js b/lib/index.js
  		expiresAt,
  		accountId: tokens.id_token === void 0 && fallback !== void 0 ? fallback.accountId : accountIdOf(tokens.id_token),
  		...idToken === void 0 ? {} : { idToken },
-@@ -7379,6 +7693,7 @@ function grokSession(tokens, tokenEndpoint, fallbackRefreshToken) {
+@@ -6800,12 +7115,14 @@ var AccountPreferencesAdapter = class extends LlmAdapter {
+ 		if (models !== void 0) return models;
+ 		return await withAbortSignal(async () => this.options.adapter.lastKnownOwnModels?.(this.options.provider, account), signal) ?? [];
+ 	}
+-	async requireAccount(account, model, independent, signal) {
+-		if (!(await withAbortSignal(this.options.accounts, signal)).some((entry) => entry.key === account) || (independent ? this.preference(account)?.independentEntry !== true : !accountAllowsPool(this.preference(account), model)) || !(await this.models(account, signal)).some((entry) => entry.id === model)) throw new LlmError(`Account route unavailable: ${this.options.provider}/${account}/${model}`, "NO_ADAPTER");
++	async requireAccount(account, model, independent, signal, allowUnlisted = false) {
++		if (!(await withAbortSignal(this.options.accounts, signal)).some((entry) => entry.key === account) || (independent ? this.preference(account)?.independentEntry !== true : !accountAllowsPool(this.preference(account), model)) || !allowUnlisted && !(await this.models(account, signal)).some((entry) => entry.id === model)) throw new LlmError(`Account route unavailable: ${this.options.provider}/${account}/${model}`, "NO_ADAPTER");
+ 	}
+ 	async fallback(model, signal) {
++		let eligibleAccount;
+ 		for (const { key } of await withAbortSignal(this.options.accounts, signal)) {
+ 			if (!accountAllowsPool(this.preference(key), model)) continue;
++			eligibleAccount ??= key;
+ 			try {
+ 				await this.requireAccount(key, model, false, signal);
+ 				return key;
+@@ -6813,6 +7130,11 @@ var AccountPreferencesAdapter = class extends LlmAdapter {
+ 				signal?.throwIfAborted();
+ 			}
+ 		}
++		// Explicit Antigravity models can be callable even when absent from its menu.
++		if (this.options.allowUnlistedModels && eligibleAccount !== void 0) {
++			await this.requireAccount(eligibleAccount, model, false, signal, true);
++			return eligibleAccount;
++		}
+ 		throw new LlmError(`No eligible account for ${this.options.provider}/${model}`, "NO_ADAPTER");
+ 	}
+ 	/** Pool-only facade: explicit families/tiers must obey the same policy as auto pools. */
+@@ -6891,7 +7213,7 @@ var AccountPreferencesAdapter = class extends LlmAdapter {
+ 		}
+ 		const account = independent?.account ?? await this.fallback(id, signal);
+ 		const model = independent?.model ?? id;
+-		if (independent) await this.requireAccount(account, model, true, signal);
++		if (independent) await this.requireAccount(account, model, true, signal, this.options.allowUnlistedModels);
+ 		const info = await withAbortSignal(() => this.options.adapter.resolveOwnModel(provider, model, account), signal);
+ 		const label = independent ? (await withAbortSignal(this.options.accounts, signal)).find((entry) => entry.key === account)?.label ?? account : void 0;
+ 		const owner = this;
+@@ -6903,7 +7225,7 @@ var AccountPreferencesAdapter = class extends LlmAdapter {
+ 				name: `${this.preference(account)?.alias || label} · ${named.name}`
+ 			} : named,
+ 			async *stream(options) {
+-				await owner.requireAccount(account, model, independent !== void 0, options.signal);
++				await owner.requireAccount(account, model, independent !== void 0, options.signal, owner.options.allowUnlistedModels);
+ 				options.signal?.throwIfAborted();
+ 				yield* streamAccountWithReplay(owner.options.adapter, options, account, model);
+ 			}
+@@ -6919,7 +7241,7 @@ var AccountPreferencesAdapter = class extends LlmAdapter {
+ 	async *stream(options) {
+ 		const independent = parseAccountModelId(options.model);
+ 		if (independent) {
+-			await this.requireAccount(independent.account, independent.model, true, options.signal);
++			await this.requireAccount(independent.account, independent.model, true, options.signal, this.options.allowUnlistedModels);
+ 			options.signal?.throwIfAborted();
+ 			yield* streamAccountWithReplay(this.options.adapter, options, independent.account, independent.model);
+ 			return;
+@@ -7379,6 +7701,7 @@ function grokSession(tokens, tokenEndpoint, fallbackRefreshToken) {
  	return {
  		accessToken: tokens.access_token,
  		refreshToken,
@@ -659,7 +721,62 @@ diff --git a/lib/index.js b/lib/index.js
  		expiresAt: Date.now() + tokens.expires_in * 1e3,
  		tokenEndpoint,
  		...typeof tokens.scope === "string" ? { scopes: tokens.scope } : {},
-@@ -9736,6 +10051,7 @@ function sessionFromTokens(tokens, account, fallback) {
+@@ -9000,13 +9323,12 @@ var CopilotAdapter = class CopilotAdapter extends LlmAdapter {
+ //#region src/translate/antigravity-thinking.ts
+ /** Efforts supported by the known Antigravity runtime families. Unknown models keep upstream defaults. */
+ function antigravityReasoning(model) {
+-	const ids = model.startsWith("claude-") ? ["high"] : model.startsWith("gpt-oss-") ? ["medium"] : model.startsWith("gemini-3.1-pro") || model === "gemini-pro-agent" ? ["low", "high"] : /^gemini-(?:2\.5|3)/.test(model) ? [
++	const fixedEffort = antigravityFixedEffort(model);
++	const efforts = fixedEffort !== void 0 ? [fixedEffort] : model.startsWith("claude-") ? ["high"] : model.startsWith("gpt-oss-") ? ["medium"] : model.startsWith("gemini-3.1-pro") || model === "gemini-pro-agent" ? ["low", "high"] : /^gemini-(?:2\.5|3)/.test(model) ? [
+ 		"low",
+ 		"medium",
+ 		"high"
+ 	] : [];
+-	const fixedEffort = /^gemini-.*-(low|medium|high)$/.exec(model)?.[1];
+-	const efforts = fixedEffort !== void 0 && ids.includes(fixedEffort) ? [fixedEffort] : ids;
+ 	return efforts.length === 0 ? void 0 : { efforts: efforts.map((id) => ({
+ 		id: ReasoningEffortId(id),
+ 		name: id[0].toUpperCase() + id.slice(1)
+@@ -9014,6 +9336,8 @@ function antigravityReasoning(model) {
+ }
+ /** Build the v1internal thinking config; do not forward arbitrary DSH effort strings. */
+ function antigravityThinking(model, effort, maxTokens) {
++	const fixedEffort = antigravityFixedEffort(model);
++	if (fixedEffort !== void 0) return { includeThoughts: true, thinkingLevel: fixedEffort.toUpperCase() };
+ 	if (effort === void 0) return void 0;
+ 	const supported = antigravityReasoning(model);
+ 	if (supported === void 0 || effort !== "off" && !supported.efforts.some((entry) => entry.id === effort)) throw new LlmError(`Antigravity model ${model} does not support reasoning effort ${effort}`, "UNSUPPORTED_REASONING_EFFORT");
+@@ -9571,7 +9895,6 @@ const ANTIGRAVITY_TOKEN_URL = "https://oauth2.googleapis.com/token";
+ const ANTIGRAVITY_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo";
+ const ANTIGRAVITY_DEFAULT_BASE_URL = "https://daily-cloudcode-pa.googleapis.com";
+ const ANTIGRAVITY_PROD_BASE_URL = "https://cloudcode-pa.googleapis.com";
+-const ANTIGRAVITY_DEFAULT_USER_AGENT = "antigravity/1.104.0 dsh-plugin-subscriptions";
+ const ANTIGRAVITY_PREEMPT_MS = 5 * 6e4;
+ const ANTIGRAVITY_CALLBACK_PATH = "/oauth-callback";
+ const ANTIGRAVITY_CONTEXT_WINDOW = 1024e3;
+@@ -9661,18 +9984,18 @@ function antigravityFlow(oauth) {
+ 	};
+ }
+ /** Shared Antigravity API headers. */
+-function antigravityHeaders(accessToken, userAgent = ANTIGRAVITY_DEFAULT_USER_AGENT) {
++async function antigravityHeaders(accessToken, userAgent) {
+ 	return {
+ 		"authorization": `Bearer ${accessToken}`,
+ 		"content-type": "application/json",
+-		"user-agent": userAgent
++		"user-agent": userAgent ?? await antigravityCliUserAgent()
+ 	};
+ }
+ /** POST a v1internal JSON method and classify non-2xx responses. */
+ async function callInternal(method, body, accessToken, runtime, fetchFn, signal) {
+ 	const response = await fetchAntigravity(method, {
+ 		method: "POST",
+-		headers: antigravityHeaders(accessToken, runtime.userAgent),
++		headers: await antigravityHeaders(accessToken, runtime.userAgent),
+ 		body: JSON.stringify(body),
+ 		...signal === void 0 ? {} : { signal }
+ 	}, runtime, fetchFn);
+@@ -9736,6 +10059,7 @@ function sessionFromTokens(tokens, account, fallback) {
  	return {
  		accessToken: tokens.access_token,
  		refreshToken,
@@ -667,7 +784,42 @@ diff --git a/lib/index.js b/lib/index.js
  		expiresAt: Date.now() + tokens.expires_in * 1e3,
  		projectId: account.projectId,
  		...tokens.scope === void 0 ? {} : { scopes: tokens.scope },
-@@ -12076,7 +12392,69 @@ function apply(ctx, config) {
+@@ -9791,7 +10115,7 @@ function isAntigravityPermanentRefreshError(error) {
+ async function fetchAntigravityModels(session, runtime = {}, fetchFn = proxiedFetch, signal) {
+ 	const payload = await callInternal("fetchAvailableModels", { project: session.projectId }, session.accessToken, runtime, fetchFn, signal);
+ 	if (typeof payload.models !== "object" || payload.models === null) throw new Error("Antigravity models endpoint returned no models object");
+-	const models = Object.entries(payload.models).map(([id, model]) => ({
++	const models = antigravityCatalogEntries(payload).map(([id, model]) => ({
+ 		id,
+ 		name: model.displayName ?? id.split("-").map((word) => word.length === 0 ? word : word[0].toUpperCase() + word.slice(1)).join(" "),
+ 		...model.description === void 0 ? {} : { description: model.description },
+@@ -9799,7 +10123,7 @@ async function fetchAntigravityModels(session, runtime = {}, fetchFn = proxiedFe
+ 		...typeof model.maxOutputTokens === "number" && Number.isSafeInteger(model.maxOutputTokens) && model.maxOutputTokens > 0 ? { maxOutputTokens: model.maxOutputTokens } : {},
+ 		inputModalities: ["text", "image"]
+ 	}));
+-	if (models.length === 0) throw new Error("Antigravity models endpoint returned an empty catalog");
++	if (models.length === 0 && !Array.isArray(payload.agentModelSorts)) throw new Error("Antigravity models endpoint returned an empty catalog");
+ 	return models;
+ }
+ function resetTime(value) {
+@@ -9846,7 +10170,7 @@ async function requestAntigravityContent(session, payload, stream, runtime = {},
+ 	return fetchAntigravity(stream ? "streamGenerateContent?alt=sse" : "generateContent", {
+ 		method: "POST",
+ 		headers: {
+-			...antigravityHeaders(session.accessToken, runtime.userAgent),
++			...await antigravityHeaders(session.accessToken, runtime.userAgent),
+ 			accept: stream ? "text/event-stream" : "application/json"
+ 		},
+ 		body: JSON.stringify(payload),
+@@ -11612,6 +11936,7 @@ function apply(ctx, config) {
+ 	const register = (provider, adapter) => {
+ 		const route = new AccountPreferencesAdapter({
+ 			provider,
++			allowUnlistedModels: provider === "antigravity" && !overridden.has(provider),
+ 			adapter,
+ 			settings: preferences,
+ 			pool: () => poolAdapter,
+@@ -12076,7 +12401,69 @@ function apply(ctx, config) {
  			for (const [route, handle] of handles) handle.replace([route]);
  		}
  	});
@@ -738,6 +890,82 @@ diff --git a/lib/index.js b/lib/index.js
  		await Promise.all([...adapters].map(async ([provider, adapter]) => {
  			if (signal.aborted || overridden.has(provider)) return;
  			await adapter.listOwnModels(provider, void 0, signal);
+diff --git a/lib/providers/account-preferences.d.ts b/lib/providers/account-preferences.d.ts
+--- a/lib/providers/account-preferences.d.ts
++++ b/lib/providers/account-preferences.d.ts
+@@ -21,6 +21,8 @@ interface Options {
+         label: string;
+     }[]>;
+     pool: () => PoolAdapter | undefined;
++    /** Permit direct calls to upstream models omitted from this provider's advertised catalog. */
++    allowUnlistedModels?: boolean;
+     /** Per-account discovery bound (defaults to {@link DISCOVERY_TIMEOUT_MS}; tests shorten it). */
+     discoveryTimeoutMs?: number;
+ }
+diff --git a/lib/providers/account-preferences.js b/lib/providers/account-preferences.js
+--- a/lib/providers/account-preferences.js
++++ b/lib/providers/account-preferences.js
+@@ -51,17 +51,19 @@ export class AccountPreferencesAdapter extends LlmAdapter {
+         // "no models", which would fail the turn with "No eligible account".
+         return await withAbortSignal(async () => this.options.adapter.lastKnownOwnModels?.(this.options.provider, account), signal) ?? [];
+     }
+-    async requireAccount(account, model, independent, signal) {
++    async requireAccount(account, model, independent, signal, allowUnlisted = false) {
+         if (!(await withAbortSignal(this.options.accounts, signal)).some(entry => entry.key === account)
+             || (independent ? this.preference(account)?.independentEntry !== true : !accountAllowsPool(this.preference(account), model))
+-            || !(await this.models(account, signal)).some(entry => entry.id === model)) {
++            || (!allowUnlisted && !(await this.models(account, signal)).some(entry => entry.id === model))) {
+             throw new LlmError(`Account route unavailable: ${this.options.provider}/${account}/${model}`, 'NO_ADAPTER');
+         }
+     }
+     async fallback(model, signal) {
++        let eligibleAccount;
+         for (const { key } of await withAbortSignal(this.options.accounts, signal)) {
+             if (!accountAllowsPool(this.preference(key), model))
+                 continue;
++            eligibleAccount ??= key;
+             try {
+                 await this.requireAccount(key, model, false, signal);
+                 return key;
+@@ -70,6 +72,11 @@ export class AccountPreferencesAdapter extends LlmAdapter {
+                 signal?.throwIfAborted();
+             }
+         }
++        // Explicit Antigravity models can be callable even when absent from its menu.
++        if (this.options.allowUnlistedModels && eligibleAccount !== undefined) {
++            await this.requireAccount(eligibleAccount, model, false, signal, true);
++            return eligibleAccount;
++        }
+         throw new LlmError(`No eligible account for ${this.options.provider}/${model}`, 'NO_ADAPTER');
+     }
+     /** Pool-only facade: explicit families/tiers must obey the same policy as auto pools. */
+@@ -149,7 +156,7 @@ export class AccountPreferencesAdapter extends LlmAdapter {
+         const account = independent?.account ?? await this.fallback(id, signal);
+         const model = independent?.model ?? id;
+         if (independent)
+-            await this.requireAccount(account, model, true, signal);
++            await this.requireAccount(account, model, true, signal, this.options.allowUnlistedModels);
+         const info = await withAbortSignal(() => this.options.adapter.resolveOwnModel(provider, model, account), signal);
+         const label = independent ? (await withAbortSignal(this.options.accounts, signal)).find(entry => entry.key === account)?.label ?? account : undefined;
+         const owner = this;
+@@ -158,7 +165,7 @@ export class AccountPreferencesAdapter extends LlmAdapter {
+             model: independent ? { ...named, id, name: `${this.preference(account)?.alias || label} · ${named.name}` } : named,
+             async *stream(options) {
+                 // Keep the capability-bearing account; revoked permission must fail instead of rerouting.
+-                await owner.requireAccount(account, model, independent !== undefined, options.signal);
++                await owner.requireAccount(account, model, independent !== undefined, options.signal, owner.options.allowUnlistedModels);
+                 options.signal?.throwIfAborted();
+                 yield* streamAccountWithReplay(owner.options.adapter, options, account, model);
+             },
+@@ -171,7 +178,7 @@ export class AccountPreferencesAdapter extends LlmAdapter {
+     async *stream(options) {
+         const independent = parseAccountModelId(options.model);
+         if (independent) {
+-            await this.requireAccount(independent.account, independent.model, true, options.signal);
++            await this.requireAccount(independent.account, independent.model, true, options.signal, this.options.allowUnlistedModels);
+             options.signal?.throwIfAborted();
+             yield* streamAccountWithReplay(this.options.adapter, options, independent.account, independent.model);
+             return;
 diff --git a/lib/providers/accounts.d.ts b/lib/providers/accounts.d.ts
 --- a/lib/providers/accounts.d.ts
 +++ b/lib/providers/accounts.d.ts
@@ -770,6 +998,180 @@ diff --git a/lib/providers/accounts.d.ts b/lib/providers/accounts.d.ts
      onAccountRemoved?: (account: string) => void;
      /** Store backend; defaults to the durable auth store. */
      io?: AccountStoreIo<S>;
+diff --git a/lib/providers/antigravity-cli.js b/lib/providers/antigravity-cli.js
+new file mode 100644
+--- /dev/null
++++ b/lib/providers/antigravity-cli.js
+@@ -0,0 +1,81 @@
++import { execFile } from 'node:child_process';
++import { promisify } from 'node:util';
++
++const PINNED_VERSION = '1.5.18';
++// Changelist captured from the agy 1.5.18 request headers.
++const PINNED_CL = '1030252320';
++const OS = { linux: 'linux', darwin: 'darwin', win32: 'windows' };
++const ARCH = { x64: 'amd64', arm64: 'arm64' };
++let cachedUserAgent;
++
++async function agyVersion() {
++    const run = promisify(execFile);
++    const options = {
++        timeout: 2000,
++        killSignal: 'SIGKILL',
++        encoding: 'utf8',
++        windowsHide: true,
++    };
++    let stdout;
++    try {
++        ({ stdout } = await run('agy', ['--version'], options));
++    }
++    catch (error) {
++        // Use the bot account's binary only when PATH cannot launch agy.
++        if (process.platform !== 'linux' || !['ENOENT', 'EACCES'].includes(error.code))
++            return undefined;
++        try {
++            ({ stdout } = await run('/home/agyproxy/.local/bin/agy', ['--version'], options));
++        }
++        catch (error) {
++            // An unavailable or failed version probe uses the pinned CLI version.
++            return undefined;
++        }
++    }
++    return /(?:^|[\s(])v?(\d+\.\d+\.\d+)(?=$|[\s)])/u.exec(stdout)?.[1];
++}
++
++/** Default User-Agent for Antigravity v1internal requests, detected once on first use. */
++export function antigravityCliUserAgent() {
++    cachedUserAgent ??= agyVersion().then(detected => {
++        const version = detected ?? PINNED_VERSION;
++        const os = OS[process.platform] ?? process.platform;
++        const arch = ARCH[process.arch] ?? process.arch;
++        return `antigravity/cli/${version} (aidev_client; os_type=${os}; arch=${arch}; cl=${PINNED_CL}; auth_method=consumer)`;
++    });
++    return cachedUserAgent;
++}
++
++/** Model IDs with a fixed thinking effort carry that effort as a final suffix. */
++export function antigravityFixedEffort(model) {
++    return /-(low|medium|high|xhigh)$/.exec(model)?.[1];
++}
++
++function isMediaOnly(modalities) {
++    return Array.isArray(modalities) && !modalities.includes('text')
++        && modalities.some(modality => modality === 'image' || modality === 'audio');
++}
++
++/** Resolve the server's agent model order, or filter catalogs from older servers. */
++export function antigravityCatalogEntries(payload) {
++    const { models, agentModelSorts } = payload;
++    if (Array.isArray(agentModelSorts)) {
++        const ids = new Set();
++        for (const sort of agentModelSorts) {
++            for (const group of Array.isArray(sort?.groups) ? sort.groups : []) {
++                for (const id of Array.isArray(group?.modelIds) ? group.modelIds : []) {
++                    if (typeof id === 'string' && Object.hasOwn(models, id) && models[id] != null)
++                        ids.add(id);
++                }
++            }
++        }
++        return [...ids].map(id => [id, models[id]]);
++    }
++    const mediaIds = new Set([
++        ...(Array.isArray(payload.imageGenerationModelIds) ? payload.imageGenerationModelIds : []),
++        ...(Array.isArray(payload.audioTranscriptionModelIds) ? payload.audioTranscriptionModelIds : []),
++    ]);
++    return Object.entries(models).filter(([id, model]) => model != null
++        && !/^(tab|chat)_/.test(id) && !model.isInternal && !mediaIds.has(id)
++        && !isMediaOnly(model.inputModalities) && !isMediaOnly(model.outputModalities));
++}
+diff --git a/lib/providers/antigravity.d.ts b/lib/providers/antigravity.d.ts
+--- a/lib/providers/antigravity.d.ts
++++ b/lib/providers/antigravity.d.ts
+@@ -18,7 +18,6 @@ export declare const ANTIGRAVITY_TOKEN_URL = "https://oauth2.googleapis.com/toke
+ export declare const ANTIGRAVITY_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo";
+ export declare const ANTIGRAVITY_DEFAULT_BASE_URL = "https://daily-cloudcode-pa.googleapis.com";
+ export declare const ANTIGRAVITY_PROD_BASE_URL = "https://cloudcode-pa.googleapis.com";
+-export declare const ANTIGRAVITY_DEFAULT_USER_AGENT = "antigravity/1.104.0 dsh-plugin-subscriptions";
+ export declare const ANTIGRAVITY_PREEMPT_MS: number;
+ /** Antigravity, not Gemini CLI, OAuth scopes from the local reference clients. */
+ export declare const ANTIGRAVITY_SCOPES: readonly ["openid", "https://www.googleapis.com/auth/cloud-platform", "https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile", "https://www.googleapis.com/auth/cclog", "https://www.googleapis.com/auth/experimentsandconfigs"];
+@@ -47,7 +46,7 @@ interface AntigravityAccountInfo {
+     plan?: string;
+ }
+ /** Shared Antigravity API headers. */
+-export declare function antigravityHeaders(accessToken: string, userAgent?: string): Record<string, string>;
++export declare function antigravityHeaders(accessToken: string, userAgent?: string): Promise<Record<string, string>>;
+ /** Read (and, when enabled, initialize) the Antigravity project/account. */
+ export declare function discoverAntigravityAccount(accessToken: string, runtime?: AntigravityRuntimeConfig, fetchFn?: FetchFn): Promise<AntigravityAccountInfo>;
+ /** Exchange a Google OAuth authorization code and discover the Antigravity project. */
+diff --git a/lib/providers/antigravity.js b/lib/providers/antigravity.js
+--- a/lib/providers/antigravity.js
++++ b/lib/providers/antigravity.js
+@@ -5,6 +5,7 @@
+  */
+ import { errorChain, EMPTY_RESPONSE_CODE, LlmAdapter, LlmError } from '@deepseek-ai/dsh-llm';
+ import { resolveImages } from '../translate/resolved.js';
++import { antigravityCatalogEntries, antigravityCliUserAgent } from './antigravity-cli.js';
+ import { antigravityReasoning } from '../translate/antigravity-thinking.js';
+ import { parseAntigravityResponse, streamAntigravity, toAntigravityRequest, } from '../translate/antigravity.js';
+ import { httpLlmError, idleWatchdog, mapFetchFailure, mergeReasoning, ModelCatalogCache, discoverOrRetryAuth, isMissingOrInvalidCredential, oauthEndpointError, OAuthEndpointError, discoverAcrossAccounts, isDiscoveryAborted, } from './common.js';
+@@ -17,7 +18,6 @@ export const ANTIGRAVITY_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+ export const ANTIGRAVITY_USERINFO_URL = 'https://www.googleapis.com/oauth2/v2/userinfo';
+ export const ANTIGRAVITY_DEFAULT_BASE_URL = 'https://daily-cloudcode-pa.googleapis.com';
+ export const ANTIGRAVITY_PROD_BASE_URL = 'https://cloudcode-pa.googleapis.com';
+-export const ANTIGRAVITY_DEFAULT_USER_AGENT = 'antigravity/1.104.0 dsh-plugin-subscriptions';
+ export const ANTIGRAVITY_PREEMPT_MS = 5 * 60_000;
+ const ANTIGRAVITY_CALLBACK_PATH = '/oauth-callback';
+ const ANTIGRAVITY_CONTEXT_WINDOW = 1_024_000;
+@@ -109,18 +109,18 @@ export function antigravityFlow(oauth) {
+     };
+ }
+ /** Shared Antigravity API headers. */
+-export function antigravityHeaders(accessToken, userAgent = ANTIGRAVITY_DEFAULT_USER_AGENT) {
++export async function antigravityHeaders(accessToken, userAgent) {
+     return {
+         'authorization': `Bearer ${accessToken}`,
+         'content-type': 'application/json',
+-        'user-agent': userAgent,
++        'user-agent': userAgent ?? await antigravityCliUserAgent(),
+     };
+ }
+ /** POST a v1internal JSON method and classify non-2xx responses. */
+ async function callInternal(method, body, accessToken, runtime, fetchFn, signal) {
+     const response = await fetchAntigravity(method, {
+         method: 'POST',
+-        headers: antigravityHeaders(accessToken, runtime.userAgent),
++        headers: await antigravityHeaders(accessToken, runtime.userAgent),
+         body: JSON.stringify(body),
+         ...signal === undefined ? {} : { signal },
+     }, runtime, fetchFn);
+@@ -256,7 +256,7 @@ export async function fetchAntigravityModels(session, runtime = {}, fetchFn = pr
+     if (typeof payload.models !== 'object' || payload.models === null) {
+         throw new Error('Antigravity models endpoint returned no models object');
+     }
+-    const models = Object.entries(payload.models).map(([id, model]) => ({
++    const models = antigravityCatalogEntries(payload).map(([id, model]) => ({
+         id,
+         name: model.displayName ?? id.split('-').map(word => word.length === 0 ? word : word[0].toUpperCase() + word.slice(1)).join(' '),
+         ...model.description === undefined ? {} : { description: model.description },
+@@ -265,7 +265,7 @@ export async function fetchAntigravityModels(session, runtime = {}, fetchFn = pr
+             ? { maxOutputTokens: model.maxOutputTokens } : {},
+         inputModalities: ['text', 'image'],
+     }));
+-    if (models.length === 0)
++    if (models.length === 0 && !Array.isArray(payload.agentModelSorts))
+         throw new Error('Antigravity models endpoint returned an empty catalog');
+     return models;
+ }
+@@ -322,7 +322,7 @@ export async function requestAntigravityContent(session, payload, stream, runtim
+     return fetchAntigravity(stream ? 'streamGenerateContent?alt=sse' : 'generateContent', {
+         method: 'POST',
+         headers: {
+-            ...antigravityHeaders(session.accessToken, runtime.userAgent),
++            ...await antigravityHeaders(session.accessToken, runtime.userAgent),
+             accept: stream ? 'text/event-stream' : 'application/json',
+         },
+         body: JSON.stringify(payload),
 diff --git a/lib/providers/common.d.ts b/lib/providers/common.d.ts
 --- a/lib/providers/common.d.ts
 +++ b/lib/providers/common.d.ts
@@ -808,3 +1210,33 @@ diff --git a/lib/providers/common.d.ts b/lib/providers/common.d.ts
  }
  /** Fetch signature adapters accept for discovery calls (injectable for tests). */
  export type FetchFn = typeof fetch;
+diff --git a/lib/translate/antigravity-thinking.js b/lib/translate/antigravity-thinking.js
+--- a/lib/translate/antigravity-thinking.js
++++ b/lib/translate/antigravity-thinking.js
+@@ -1,19 +1,23 @@
+ /** Cloud Code Assist thinking budgets, matched to the runtime model family. */
+ import { LlmError, ReasoningEffortId } from '@deepseek-ai/dsh-llm';
++import { antigravityFixedEffort } from '../providers/antigravity-cli.js';
+ /** Efforts supported by the known Antigravity runtime families. Unknown models keep upstream defaults. */
+ export function antigravityReasoning(model) {
+-    const ids = model.startsWith('claude-') ? ['high']
++    const fixedEffort = antigravityFixedEffort(model);
++    const efforts = fixedEffort !== undefined ? [fixedEffort]
++        : model.startsWith('claude-') ? ['high']
+         : model.startsWith('gpt-oss-') ? ['medium']
+             : model.startsWith('gemini-3.1-pro') || model === 'gemini-pro-agent' ? ['low', 'high']
+                 : /^gemini-(?:2\.5|3)/.test(model) ? ['low', 'medium', 'high'] : [];
+-    const fixedEffort = /^gemini-.*-(low|medium|high)$/.exec(model)?.[1];
+-    const efforts = fixedEffort !== undefined && ids.includes(fixedEffort) ? [fixedEffort] : ids;
+     return efforts.length === 0 ? undefined : {
+         efforts: efforts.map(id => ({ id: ReasoningEffortId(id), name: id[0].toUpperCase() + id.slice(1) })),
+     };
+ }
+ /** Build the v1internal thinking config; do not forward arbitrary DSH effort strings. */
+ export function antigravityThinking(model, effort, maxTokens) {
++    const fixedEffort = antigravityFixedEffort(model);
++    if (fixedEffort !== undefined)
++        return { includeThoughts: true, thinkingLevel: fixedEffort.toUpperCase() };
+     if (effort === undefined)
+         return undefined;
+     const supported = antigravityReasoning(model);

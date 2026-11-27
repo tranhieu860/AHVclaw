@@ -870,7 +870,7 @@ async function completeAuthWork(tasks) {
 // provider module also loads harness dependencies absent from standalone CLI.
 const CLAUDE_CLI_FALLBACK_VERSION = '2.1.283'
 const SUBSCRIPTIONS_USER_AGENT = `deepseek-harness/${harnessPackageVersion()} (+https://github.com/deepseek-ai/deepseek-harness)`
-const ANTIGRAVITY_USER_AGENT = 'antigravity/1.104.0 dsh-plugin-subscriptions'
+let antigravityUserAgent
 let localClaudeCliVersion
 
 /** Read dsh-llm metadata without loading the harness; standalone copies keep the pinned version. */
@@ -908,6 +908,22 @@ function claudeCliUserAgent() {
   return `claude-cli/${localClaudeCliVersion} (external, cli)`
 }
 
+/** Reuse the plugin's v1internal identity without loading the harness or provider peers. */
+function antigravityQuotaUserAgent() {
+  if (antigravityUserAgent === undefined) {
+    const file = join(FORK, 'packages/bundle/ahv/node_modules/dsh-plugin-subscriptions/lib/providers/antigravity-cli.js')
+    if (existsSync(file)) {
+      antigravityUserAgent = createRequire(import.meta.url)(realpathSync(file)).antigravityCliUserAgent()
+    } else {
+      // A standalone copy can report quota without the plugin installed.
+      const os = process.platform === 'win32' ? 'windows' : process.platform
+      const arch = process.arch === 'x64' ? 'amd64' : process.arch
+      antigravityUserAgent = `antigravity/cli/1.5.18 (aidev_client; os_type=${os}; arch=${arch}; cl=1030252320; auth_method=consumer)`
+    }
+  }
+  return antigravityUserAgent
+}
+
 /**
  * Where each provider reports the quota left on the logged-in account.
  *
@@ -943,10 +959,10 @@ export const USAGE_ENDPOINTS = {
     url: 'https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary',
     method: 'POST',
     body: (s) => JSON.stringify(s.projectId ? { project: s.projectId } : {}),
-    headers: (s) => ({
+    headers: async (s) => ({
       authorization: `Bearer ${s.accessToken}`,
       'content-type': 'application/json',
-      'user-agent': ANTIGRAVITY_USER_AGENT,
+      'user-agent': await antigravityQuotaUserAgent(),
     }),
   },
   grok: {
@@ -1276,7 +1292,7 @@ async function readProviderUsage(kind, session, fetchFn) {
   try {
     const response = await fetchFn(endpoint.url, {
       ...(endpoint.method ? { method: endpoint.method } : {}),
-      headers: endpoint.headers(session),
+      headers: await endpoint.headers(session),
       ...(endpoint.body ? { body: endpoint.body(session) } : {}),
     })
     if (!response.ok) {

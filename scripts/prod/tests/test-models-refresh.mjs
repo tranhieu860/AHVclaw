@@ -59,6 +59,7 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
   }
   syncBuiltinESMExports()
   const calls = [], aborted = [], abortAfterMs = [], registryCalls = [], versionCalls = [], httpCalls = [], catalogCalls = []
+  const generationRequests = []
   let firstFetchAt
   globalThis.fetch = async (url, init = {}) => {
     const requestUrl = String(url)
@@ -72,6 +73,11 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
     if (requestUrl === vscodeReleasesUrl) {
       versionCalls.push(requestUrl)
       return Response.json(['1.107.0'])
+    }
+    if (fixture.probeGeneration && requestUrl.startsWith('https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse')) {
+      generationRequests.push({ body: JSON.parse(init.body), userAgent: new Headers(init.headers).get('user-agent') })
+      const response = { response: { candidates: [{ content: { parts: [{ text: 'fixture reply' }] }, finishReason: 'STOP' }] } }
+      return new Response(`data: ${JSON.stringify(response)}\n\n`)
     }
     const account = new Headers(init.headers).get('authorization')
     calls.push(account)
@@ -111,6 +117,21 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
     }
     if (codex) return Response.json({ models: [{ slug: 'gpt-new', display_name: 'New GPT' }] })
     if (grok || grokCli) return Response.json({ data: [{ id: providerModels.grok.fresh.id, name: providerModels.grok.fresh.name }] })
+    if (antigravity && fixture.probeGeneration) return Response.json({
+      models: {
+        'gemini-4-carbon-low': { displayName: 'Gemini 4 Carbon (Low)' },
+        'gemini-4-hydrogen-sonar': { displayName: 'Gemini 4 Hydrogen Sonar' },
+      },
+      agentModelSorts: [{ groups: [{ modelIds: ['gemini-4-carbon-low'] }] }],
+    })
+    if (antigravity && fixture.agyCapture) {
+      const captured = JSON.parse(readFileSync(fixture.agyCapture, 'utf8'))
+      const os = process.platform === 'win32' ? 'windows' : process.platform
+      const arch = process.arch === 'x64' ? 'amd64' : process.arch
+      const cliUa = captured.new.ua ?? `antigravity/cli/1.5.18 (aidev_client; os_type=${os}; arch=${arch}; cl=1030252320; auth_method=consumer)`
+      const sample = new Headers(init.headers).get('user-agent') === cliUa ? captured.new : captured.old
+      return Response.json(sample.resp ?? sample)
+    }
     if (antigravity) return Response.json({ models: { [providerModels.antigravity.fresh.id]: { displayName: providerModels.antigravity.fresh.name } } })
     if (copilot) return Response.json({ data: [{ ...providerModels.copilot.fresh, model_picker_enabled: true, supported_endpoints: ['/chat/completions'] }] })
     if (fixture.goodDelayMs) await new Promise(resolve => setTimeout(resolve, fixture.goodDelayMs))
@@ -138,7 +159,7 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
     for (const dispose of disposers.reverse()) dispose()
     const finish = () => {
       process.exitCode = code
-      const diagnostic = { calls, aborted, abortAfterMs, registryCalls, versionCalls, httpCalls, catalogCalls,
+      const diagnostic = { calls, aborted, abortAfterMs, registryCalls, versionCalls, httpCalls, catalogCalls, generationRequests,
         credentialsReads, diskAtRefreshReturn, printedAtRefreshReturn, refreshProvided: services.has('subscriptionsCatalogRefresh'), hourlyRegistered }
       if (typeof process.send === 'function') process.send(diagnostic, () => process.disconnect())
       // The CLI test spawns bin.ts without an IPC channel; it reads the same fields from this file.
@@ -167,7 +188,21 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
     logger: { warn() {}, info() {}, debug() {}, error() {} },
   }
   const plugin = await import(pathToFileURL(join(process.env.AHV_MODELS_TEST_PLUGIN, 'lib/index.js')))
-  plugin.apply(ctx, { providers: fixture.twoProviders ? ['claude', 'codex'] : [fixture.provider ?? 'claude'], pool: { enabled: false } })
+  plugin.apply(ctx, { providers: fixture.twoProviders ? ['claude', 'codex'] : [fixture.provider ?? 'claude'], pool: { enabled: false },
+    ...(fixture.probeGeneration ? { antigravity: { userAgent: 'fixture/override' } } : {}),
+  })
+  if (fixture.probeGeneration) {
+    const signal = new AbortController().signal
+    await services.get('subscriptionsCatalogRefresh')(signal)
+    const route = adapters.get('antigravity')
+    assert.deepEqual((await route.listModels('antigravity')).map(model => model.id), ['gemini-4-carbon-low'])
+    for (const model of ['gemini-4-carbon-low', 'gemini-4-hydrogen-sonar']) {
+      const prepared = await route.prepareCall('antigravity', model, signal)
+      const options = { provider: 'antigravity', model, signal,
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }] }
+      for await (const _part of prepared.stream(options)) { /* drain the SSE stream */ }
+    }
+  }
   if (fixture.daemonMode) {
     // Observe startup's first HTTP request before disposing, without invoking the one-shot entry.
     await new Promise((resolve, reject) => {
@@ -511,5 +546,14 @@ if (process.env.AHV_MODELS_TEST_WORKER === '1') {
     assert.equal(command.status, 0, command.stderr)
     JSON.parse(command.stdout)
     t.diagnostic(`legacy fresh worker ${r.elapsedMs.toFixed(1)} ms; real CLI ${(performance.now() - start).toFixed(1)} ms: ${command.stdout.trim()}`)
+  })
+  test('the bundled Antigravity route streams listed and explicitly requested hidden models', async t => {
+    const { generationRequests } = await listing(t, { provider: 'antigravity', probeGeneration: true })
+    assert.deepEqual(generationRequests.map(({ body, userAgent }) => ({
+      model: body.model, userAgent, thinking: body.request.generationConfig?.thinkingConfig,
+    })), [
+      { model: 'gemini-4-carbon-low', userAgent: 'fixture/override', thinking: { includeThoughts: true, thinkingLevel: 'LOW' } },
+      { model: 'gemini-4-hydrogen-sonar', userAgent: 'fixture/override', thinking: undefined },
+    ])
   })
 }

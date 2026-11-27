@@ -1,4 +1,4 @@
-// Provider HTTP headers match subscriptions 0.9.6 without loading the harness.
+// Provider HTTP headers match the subscriptions protocol without loading the harness.
 // All requests use fake tokens and an injected fetch; Claude version probes use
 // executable fixtures on PATH, never an installed CLI or a provider network.
 import assert from 'node:assert/strict'
@@ -84,14 +84,14 @@ function pluginProviderSource(provider, anchors = [join(REPO, 'packages/bundle/a
 }
 
 const claudeSource = pluginProviderSource('claude')
-const antigravitySource = pluginProviderSource('antigravity')
 const pluginFloor = /export const CLAUDE_CLI_FALLBACK_VERSION = '([^']+)'/.exec(claudeSource)?.[1]
 assert.ok(pluginFloor, 'plugin fallback version must remain readable by the drift gate')
 const pluginUserAgentTemplate = /export function claudeCliUserAgent\(version\)\s*{\s*return `([^`]+)`;?\s*}/.exec(claudeSource)?.[1]
 assert.ok(pluginUserAgentTemplate, 'plugin Claude UA form must remain readable by the drift gate')
 const pluginClaudeUserAgent = pluginUserAgentTemplate.replace('${version}', pluginFloor)
-const pluginAntigravityUserAgent = /export const ANTIGRAVITY_DEFAULT_USER_AGENT = '([^']+)'/.exec(antigravitySource)?.[1]
-assert.ok(pluginAntigravityUserAgent, 'plugin Antigravity UA must remain readable by the drift gate')
+const agyOS = process.platform === 'win32' ? 'windows' : process.platform
+const agyArch = process.arch === 'x64' ? 'amd64' : process.arch
+const pinnedAntigravityUserAgent = `antigravity/cli/1.5.18 (aidev_client; os_type=${agyOS}; arch=${agyArch}; cl=1030252320; auth_method=consumer)`
 const copiedFloor = /const CLAUDE_CLI_FALLBACK_VERSION = '([^']+)'/.exec(readFileSync(BIN, 'utf8'))?.[1]
 
 const harnessVersion = JSON.parse(readFileSync(join(REPO, 'packages/llm/llm/package.json'), 'utf8')).version
@@ -175,12 +175,13 @@ for (const layout of ['source', 'installed']) {
   })
 }
 await check('Antigravity usage sends exactly the plugin internal API headers', () => {
-  const call = getCall(missing, 'antigravity usage')
+  const standalone = scenario('standalone-antigravity', '', { missing: true, fork: temp })
+  const call = getCall(standalone, 'antigravity usage')
   assert.equal(call.url, 'https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary')
   assert.equal(call.method, 'POST')
   assert.equal(call.body, '{"project":"fake-project"}')
   assert.deepEqual(call.headers, {
-    authorization: 'Bearer fake-access', 'content-type': 'application/json', 'user-agent': pluginAntigravityUserAgent,
+    authorization: 'Bearer fake-access', 'content-type': 'application/json', 'user-agent': pinnedAntigravityUserAgent,
   })
 })
 await check('Claude refresh keeps exactly the plugin JSON token header', () => {
@@ -233,21 +234,19 @@ await check('a hung Claude version probe falls back within a short timeout and i
   assert.equal(getCall(result, 'claude usage').headers['user-agent'], pluginClaudeUserAgent)
 })
 
-function assertPluginGate(claude, antigravity) {
+function assertPluginGate(claude) {
   const floor = /export const CLAUDE_CLI_FALLBACK_VERSION = '([^']+)'/.exec(claude)?.[1]
   assert.equal(copiedFloor, floor, 'copied Claude fallback differs from plugin')
   const template = /export function claudeCliUserAgent\(version\)\s*{\s*return `([^`]+)`;?\s*}/.exec(claude)?.[1]
   assert.equal(getCall(missing, 'claude usage').headers['user-agent'], template?.replace('${version}', floor), 'Claude UA form differs from plugin')
-  const antigravityUa = /export const ANTIGRAVITY_DEFAULT_USER_AGENT = '([^']+)'/.exec(antigravity)?.[1]
-  assert.equal(getCall(missing, 'antigravity usage').headers['user-agent'], antigravityUa, 'Antigravity UA differs from plugin')
 }
-await check('copied Claude floor and both UA forms match resolved plugin sources', () => {
-  assertPluginGate(claudeSource, antigravitySource)
+await check('copied Claude floor and UA form match the resolved plugin source', () => {
+  assertPluginGate(claudeSource)
 })
 await check('without an installed plugin the gate reads repository fixtures', () => {
-  assertPluginGate(pluginProviderSource('claude', []), pluginProviderSource('antigravity', []))
+  assertPluginGate(pluginProviderSource('claude', []))
 })
-await check('installed plugin resolution governs the gate and catches all three source drifts', () => {
+await check('installed plugin resolution governs the gate and catches both Claude source drifts', () => {
   const fixture = join(temp, 'installed-gate')
   const packageDir = join(fixture, 'node_modules/dsh-plugin-subscriptions')
   const providers = join(packageDir, 'lib/providers')
@@ -256,20 +255,14 @@ await check('installed plugin resolution governs the gate and catches all three 
   writeFileSync(join(packageDir, 'package.json'), '{"name":"dsh-plugin-subscriptions","version":"0.9.6","main":"index.js"}')
   writeFileSync(join(packageDir, 'index.js'), '// resolution fixture only\n')
   const claudeFile = join(providers, 'claude.js')
-  const antigravityFile = join(providers, 'antigravity.js')
   const anchors = [join(fixture, 'package.json')]
   writeFileSync(claudeFile, claudeSource)
-  writeFileSync(antigravityFile, antigravitySource)
   const installedClaude = () => pluginProviderSource('claude', anchors)
-  const installedAntigravity = () => pluginProviderSource('antigravity', anchors)
-  assertPluginGate(installedClaude(), installedAntigravity())
+  assertPluginGate(installedClaude())
   writeFileSync(claudeFile, claudeSource.replace(`CLAUDE_CLI_FALLBACK_VERSION = '${pluginFloor}'`, "CLAUDE_CLI_FALLBACK_VERSION = '99.0.0'"))
-  assert.throws(() => assertPluginGate(installedClaude(), installedAntigravity()), /copied Claude fallback differs/)
+  assert.throws(() => assertPluginGate(installedClaude()), /copied Claude fallback differs/)
   writeFileSync(claudeFile, claudeSource.replace('claude-cli/${version} (external, cli)', 'changed-cli/${version} (external, cli)'))
-  assert.throws(() => assertPluginGate(installedClaude(), installedAntigravity()), /Claude UA form differs/)
-  writeFileSync(claudeFile, claudeSource)
-  writeFileSync(antigravityFile, antigravitySource.replace(pluginAntigravityUserAgent, 'antigravity/99.0.0 changed-plugin'))
-  assert.throws(() => assertPluginGate(installedClaude(), installedAntigravity()), /Antigravity UA differs/)
+  assert.throws(() => assertPluginGate(installedClaude()), /Claude UA form differs/)
 })
 await check('an installed plugin with unsupported root exports fails the gate instead of using fallback', () => {
   const fixture = join(temp, 'installed-import-only')

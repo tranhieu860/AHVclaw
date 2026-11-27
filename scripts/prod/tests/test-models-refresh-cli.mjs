@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { delimiter, dirname, join, resolve } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -15,17 +15,20 @@ assert.ok(plugin, 'set AHV_MODELS_TEST_PLUGIN to the patched 0.9.12 fixture')
 const HANG_BOUND_MS = 4000
 const bot = process.env.AHV_MODELS_TEST_BOT ?? join(root, 'scripts/prod/ahv-bot.mjs')
 
-function command(t, { fresh = false, behavior, waitMs = 200, merge = false } = {}) {
+function command(t, { fresh = false, behavior, waitMs = 200, merge = false, agyCapture } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'ahv-1280-cli-'))
   t.after(() => rmSync(home, { recursive: true, force: true }))
   const dshHome = join(home, '.dsh'), fork = join(home, 'fork')
   const store = join(dshHome, 'plugins/subscriptions')
   for (const path of [store, join(fork, 'node_modules/tsx'), join(fork, 'apps/cli/src')]) mkdirSync(path, { recursive: true })
-  writeFileSync(join(store, 'auth.json'), JSON.stringify({ claude: { default: 'one@fixture.test', accounts: {
-    'one@fixture.test': { accessToken: 'fake-one@fixture.test', refreshToken: 'fake-refresh', expiresAt: Date.now() + 86_400_000, emailAddress: 'one@fixture.test' },
+  const provider = agyCapture ? 'antigravity' : 'claude'
+  writeFileSync(join(store, 'auth.json'), JSON.stringify({ [provider]: { default: 'one@fixture.test', accounts: {
+    'one@fixture.test': { accessToken: 'fake-one@fixture.test', refreshToken: 'fake-refresh', expiresAt: Date.now() + 86_400_000, emailAddress: 'one@fixture.test',
+      ...(agyCapture ? { account: 'one@fixture.test', projectId: '<PROJECT>' } : {}) },
   } } }), { mode: 0o600 })
   const seededAt = Date.now() - (fresh ? 600_000 : 7_200_000)
-  const before = JSON.stringify({ claude: { at: seededAt, models: [{ id: 'claude-old', name: 'Old Claude' }] } }, null, 3) + '\n'
+  const oldModel = agyCapture ? { id: 'gemini-old', name: 'Old Gemini' } : { id: 'claude-old', name: 'Old Claude' }
+  const before = JSON.stringify({ [provider]: { at: seededAt, models: [oldModel] } }, null, 3) + '\n'
   writeFileSync(join(store, 'models.json'), before)
   writeFileSync(join(fork, 'node_modules/tsx/package.json'), JSON.stringify({ type: 'module', exports: { './esm': './index.mjs' } }))
   writeFileSync(join(fork, 'node_modules/tsx/index.mjs'), `import ${JSON.stringify(pathToFileURL(join(here, 'helpers/subscriptions-register.mjs')).href)}\n`)
@@ -37,11 +40,24 @@ function command(t, { fresh = false, behavior, waitMs = 200, merge = false } = {
   const diagnosticFile = join(home, 'diagnostic.json')
   const start = performance.now()
   // merge reproduces bot.py run_ahv_json_command: stderr folded into stdout, then one json.loads.
-  const argv = [bot, 'models', 'list', '--json']
-  const [file, args] = merge ? ['sh', ['-c', 'exec "$0" "$@" 2>&1', process.execPath, ...argv]] : [process.execPath, argv]
+  const modelsArgs = ['models', 'list', '--json']
+  let argv = [process.execPath, bot, ...modelsArgs]
+  let path = process.env.PATH
+  if (agyCapture) {
+    const wrapper = join(home, 'ahv')
+    const bin = join(home, 'bin')
+    mkdirSync(bin)
+    writeFileSync(join(bin, 'agy'), `#!${process.execPath}\nprocess.stdout.write('1.5.18\\n')\n`, { mode: 0o700 })
+    path = [bin, path].filter(Boolean).join(delimiter)
+    writeFileSync(wrapper, readFileSync(join(root, 'scripts/prod/ahv-wrapper.sh'), 'utf8').replace('__AHV_SRC__', fork), { mode: 0o700 })
+    writeFileSync(join(home, 'ahv-bot.mjs'), readFileSync(bot))
+    argv = [wrapper, ...modelsArgs]
+  }
+  if (merge) argv = ['sh', '-c', 'exec "$0" "$@" 2>&1', ...argv]
+  const [file, ...args] = argv
   const result = spawnSync(file, args, {
-    env: { PATH: process.env.PATH, HOME: home, DSH_HOME: dshHome, AHV_FORK: fork,
-      AHV_MODELS_TEST_PLUGIN: plugin, AHV_MODELS_TEST_CASE: JSON.stringify({ behavior }),
+    env: { PATH: path, HOME: home, DSH_HOME: dshHome, AHV_FORK: fork,
+      AHV_MODELS_TEST_PLUGIN: plugin, AHV_MODELS_TEST_CASE: JSON.stringify({ behavior, provider, agyCapture }),
       AHV_MODELS_TEST_DIAGNOSTIC_FILE: diagnosticFile,
       ...(waitMs === null ? {} : { AHV_MODELS_REFRESH_WAIT_MS: String(waitMs) }) },
     encoding: 'utf8', timeout: waitMs === null ? 60_000 : 5000,
@@ -117,4 +133,18 @@ test('CLI models show survives a spawn error of the dsh child (exit 0, one JSON 
   assert.equal(result.stderr, '')
   assert.equal(result.stdout.trim().split('\n').length, 1)
   assert.equal(JSON.parse(result.stdout).id, 'AHV-Holding')
+})
+
+test('ahv models list --json prints the captured 27 Antigravity ids and names in agy order', t => {
+  const { payload, after } = command(t, {
+    waitMs: 3000,
+    agyCapture: process.env.AHV_AGY_CAPTURE ?? join(here, 'fixtures/antigravity-models.json'),
+  })
+  const expected = readFileSync(join(here, 'fixtures/agy-models-1.5.18.tsv'), 'utf8').trimEnd()
+    .split('\n').map(line => line.split('\t'))
+  const models = payload.models.filter(model => model.provider === 'antigravity')
+  assert.equal(models.length, 27)
+  assert.deepEqual(models.map(({ id, name }) => [id, name]), expected)
+  assert.equal(JSON.parse(after).antigravity.models.length, 27)
+  t.diagnostic('ahv models list --json: antigravity=27, source=harness, exit=0')
 })

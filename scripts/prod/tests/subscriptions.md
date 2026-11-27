@@ -10,7 +10,10 @@ node scripts/prod/tests/test-subscriptions-mutations.mjs <plugin-dir>
 node scripts/prod/tests/test-bot-auth-store.mjs
 node scripts/prod/tests/test-bot-auth-store-mutations.mjs
 node scripts/prod/tests/test-subscriptions-bot-interop.mjs <plugin-dir>
+AHV_MODELS_TEST_PLUGIN=<plugin-dir> node --test scripts/prod/tests/test-antigravity.mjs scripts/prod/tests/test-models-refresh-cli.mjs
 ```
+
+The Antigravity cases use local HTTP responses and compare the CLI's JSON catalog with the ordered agy 1.5.18 model IDs and names. The committed fixtures retain the relevant fields from both captures. Set `AHV_AGY_CAPTURE` to an unabridged, redacted capture with `old` and `new` samples to replay it.
 
 `refreshTokenExpiresAt` uses epoch milliseconds. OAuth token responses supply it through a finite, nonnegative `refresh_token_expires_in`; an unusable or absent lifetime leaves it unknown. Refresh preserves an existing deadline when the issuer supplies no replacement. Claude credential imports and bound writeback preserve supplied deadlines. No provider-wide refresh lifetime is assumed; Copilot's short access-token expiry does not imply a GitHub OAuth-token expiry.
 
